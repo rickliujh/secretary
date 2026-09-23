@@ -130,7 +130,7 @@ JSON columns are typed with zod at the service boundary.
 | `actions_log` | Audit of every outward write | `id`, `proposal_id`, `action`, `target`, `request` json (secrets stripped), `response` json, `ok`, `at` |
 | `memories` | Learning store | `id`, `kind` (rule/fact/preference/example), `subject_type`, `subject_id`, `content`, `example_input`, `example_before` json, `example_after` json, `source` (user/inferred), `source_inbox_item_id`, `confirmed`, `weight`, `created_at`, `last_used_at`, `use_count` |
 | `communications` | Drafts | `id`, `kind` (teams/email), `intent`, `recipient_person_id`, `recipient_team_id`, `issue_keys` json, `dependency_id`, `subject`, `body_md`, `variant`, `status` (draft/copied/sent), `created_at`, `sent_at` |
-| `llm_calls` | Usage accounting | `id`, `task`, `tier`, `provider_id`, `model`, `escalated`, `repair`, `validation_ok`, `input_tokens`, `output_tokens`, `duration_ms`, `ok`, `error_kind`, `at` |
+| `llm_calls` | Usage accounting | `id`, `task`, `tier` (null for provider tests), `provider_id`, `model`, `escalated`, `repair`, `validation_ok`, `input_tokens`, `output_tokens`, `duration_ms`, `ok`, `error_kind`, `at` |
 | `sync_state` | Watermarks | `key` PK, `value` |
 
 Full-text search: an FTS5 virtual table over `jira_issues(summary, description)` and

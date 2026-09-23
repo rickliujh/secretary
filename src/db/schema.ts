@@ -328,7 +328,8 @@ export const llmCalls = sqliteTable(
   {
     id: text("id").primaryKey(),
     task: text("task").notNull(),
-    tier: text("tier", { enum: ["fast", "standard", "strong"] }).notNull(),
+    /** Null for provider tests that bypass tier routing. */
+    tier: text("tier", { enum: ["fast", "standard", "strong"] }),
     providerId: text("provider_id").notNull(),
     model: text("model").notNull(),
     escalated: bool("escalated").notNull().default(false),

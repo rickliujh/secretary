@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "48ef490e-6c21-48bb-85c8-e21b2fc80e2e",
+  "id": "134ddeab-3be1-4879-911b-fb7f7908b419",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "actions_log": {
@@ -1050,7 +1050,7 @@
           "name": "tier",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "provider_id": {

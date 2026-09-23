@@ -152,7 +152,7 @@ CREATE INDEX `jira_issues_assignee_idx` ON `jira_issues` (`assignee`);--> statem
 CREATE TABLE `llm_calls` (
 	`id` text PRIMARY KEY NOT NULL,
 	`task` text NOT NULL,
-	`tier` text NOT NULL,
+	`tier` text,
 	`provider_id` text NOT NULL,
 	`model` text NOT NULL,
 	`escalated` integer DEFAULT false NOT NULL,
