@@ -39,3 +39,27 @@ pub fn secret_delete(name: String) -> Result<(), String> {
         Err(e) => Err(format!("keychain delete failed: {e}")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Needs a running OS keychain (Secret Service on Linux):
+    /// `cargo test -- --ignored keychain_round_trip`
+    #[test]
+    #[ignore]
+    fn keychain_round_trip() {
+        let name = "test.round-trip".to_string();
+        secret_delete(name.clone()).unwrap();
+        assert_eq!(secret_get(name.clone()).unwrap(), None);
+        secret_set(name.clone(), "value-123".into()).unwrap();
+        assert_eq!(secret_get(name.clone()).unwrap().as_deref(), Some("value-123"));
+        secret_delete(name.clone()).unwrap();
+        assert_eq!(secret_get(name).unwrap(), None);
+    }
+
+    #[test]
+    fn rejects_empty_names() {
+        assert!(secret_get(String::new()).is_err());
+    }
+}

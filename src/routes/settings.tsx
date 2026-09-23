@@ -1,0 +1,68 @@
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { z } from "zod";
+import { SETTINGS_TABS, type SettingsTab } from "@/app/settings-tabs";
+import { PageHeader } from "@/components/page";
+import { AtlassianSection } from "@/components/settings/atlassian-section";
+import { DataSection } from "@/components/settings/data-section";
+import { GeneralSection } from "@/components/settings/general-section";
+import { ModelsSection } from "@/components/settings/models-section";
+import { ProvidersSection } from "@/components/settings/providers-section";
+import { UsageSection } from "@/components/settings/usage-section";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+const Search = z.object({
+  tab: z
+    .enum(SETTINGS_TABS.map((t) => t.value) as [SettingsTab, ...SettingsTab[]])
+    .catch("general"),
+});
+
+export const Route = createFileRoute("/settings")({
+  validateSearch: Search,
+  component: SettingsPage,
+});
+
+function SettingsPage() {
+  const { tab } = Route.useSearch();
+  const navigate = useNavigate({ from: "/settings" });
+  return (
+    <div className="mx-auto max-w-4xl">
+      <PageHeader
+        title="Settings"
+        description="Model providers, Jira and Confluence connections, and local data. Keys and tokens are kept in the OS keychain."
+      />
+      <Tabs
+        value={tab}
+        onValueChange={(value) => navigate({ search: { tab: value as SettingsTab } })}
+      >
+        <TabsList className="mb-4">
+          {SETTINGS_TABS.map((t) => (
+            <TabsTrigger key={t.value} value={t.value}>
+              {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <TabsContent value="general">
+          <GeneralSection />
+        </TabsContent>
+        <TabsContent value="providers">
+          <ProvidersSection />
+        </TabsContent>
+        <TabsContent value="models">
+          <ModelsSection />
+        </TabsContent>
+        <TabsContent value="jira">
+          <AtlassianSection product="jira" />
+        </TabsContent>
+        <TabsContent value="confluence">
+          <AtlassianSection product="confluence" />
+        </TabsContent>
+        <TabsContent value="usage">
+          <UsageSection />
+        </TabsContent>
+        <TabsContent value="data">
+          <DataSection />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

@@ -1,0 +1,39 @@
+/**
+ * The single Effect runtime for the webview (design.md section 3).
+ * React calls `run` inside TanStack Query functions.
+ */
+import { Cause, type Effect, Exit, Layer, ManagedRuntime } from "effect";
+import { ConfluenceClientLive } from "@/services/confluence/live";
+import { DbLive } from "@/services/db/live";
+import { FetcherLive } from "@/services/http";
+import { JiraClientLive } from "@/services/jira/live";
+import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
+import { SecretsLive } from "@/services/secrets/live";
+import { SettingsLive } from "@/services/settings/live";
+
+const Base = Layer.mergeAll(SettingsLive, SecretsLive, DbLive, FetcherLive);
+
+export const AppLayer = Layer.mergeAll(LlmLive, JiraClientLive, ConfluenceClientLive).pipe(
+  Layer.provideMerge(ModelFactoryLive),
+  Layer.provideMerge(Base),
+);
+
+export const runtime = ManagedRuntime.make(AppLayer);
+
+export type AppServices = ManagedRuntime.ManagedRuntime.Context<typeof runtime>;
+
+/**
+ * Runs a program and rejects with its typed error (not a FiberFailure), so
+ * query error handlers can inspect `_tag`. Aborting `signal` interrupts it.
+ */
+export async function run<A, E>(
+  program: Effect.Effect<A, E, AppServices>,
+  signal?: AbortSignal,
+): Promise<A> {
+  const exit = await runtime.runPromiseExit(program, { signal });
+  if (Exit.isSuccess(exit)) return exit.value;
+  throw Cause.squash(exit.cause);
+}
+
+/** Started once per app launch; used for the session token total. */
+export const SESSION_STARTED_AT = new Date().toISOString();
