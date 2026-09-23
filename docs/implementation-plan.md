@@ -53,10 +53,9 @@ Checklist
 ## Phase 1: Jira sync and ticket browser (FR-1)
 
 Tasks
-1. `JiraClient` service: jira.js `createServerClient` with bearer auth and custom
-   fetch. Verify against the instance; if incompatible, implement the thin client
-   listed in design.md section 5 with zod-validated responses. Contract tests with
-   recorded fixtures.
+1. `JiraClient` service: thin typed client on `ky` with the plugin-http fetch and
+   bearer auth (design.md D11), covering the endpoints in design.md section 5 with
+   zod-validated responses. Contract tests with recorded fixtures.
 2. Field discovery for Epic Link, Epic Name, Sprint; override in settings.
 3. `Sync` service: scope JQL + tracked epics, incremental with watermark, paging,
    upsert issues and comments, weekly full resync, stale marking, status indicator,

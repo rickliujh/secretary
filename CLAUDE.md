@@ -11,7 +11,7 @@ messages and emails. Read `docs/requirements.md` (what), `docs/design.md` (how) 
 Tauri 2 shell, React 19 + TypeScript in the webview, shadcn/ui on Tailwind v4,
 TanStack Router/Query/Table, react-hook-form + zod v4, Effect 3 for services,
 drizzle-orm (sqlite-proxy) over `@tauri-apps/plugin-sql`, Vercel AI SDK with
-`@ai-sdk/anthropic` and `@ai-sdk/openai-compatible`, jira.js v6 `createServerClient`,
+`@ai-sdk/anthropic` and `@ai-sdk/openai-compatible`, a thin Jira DC client on `ky`,
 Bun as package manager, script runner and test runner. Rust side: plugins plus a
 keychain command using the `keyring` crate. No sidecar.
 

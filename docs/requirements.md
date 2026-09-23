@@ -249,8 +249,8 @@ scope; "Should" is v1 if time permits; "Could" is later.
 
 ## 7. Assumptions to confirm with the user during Phase 0
 
-- Jira DC version is 8.14 or newer (PAT support). If 10.x, jira.js
-  `createServerClient` applies; otherwise use the thin client fallback in `design.md`.
+- Jira DC version is 8.14 or newer (PAT support). The thin REST v2 client
+  (`design.md` D11) works on all such versions.
 - Epic-to-story relation uses the "Epic Link" custom field (classic) rather than
   `parent`. The sync handles both.
 - Confluence DC 7.9 or newer (PAT support).
