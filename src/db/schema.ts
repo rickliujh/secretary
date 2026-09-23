@@ -7,6 +7,8 @@
  * Constraint of the plugin-sql proxy: rows come back as objects keyed by column
  * name, so a query must not select two columns with the same name (for example
  * `id` from both sides of a join). Use relational queries or `sql` aliases.
+ * Raw `db.all(sql...)` returns positional arrays through the proxy; prefer a
+ * typed `select` (for FTS: `rowid IN (SELECT rowid FROM ..._fts WHERE ... MATCH ?)`).
  */
 import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
