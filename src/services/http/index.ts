@@ -16,7 +16,10 @@ export const FetcherLive = Layer.sync(Fetcher, () => {
     };
   const tauriFetch: FetchFn = async (input, init) => {
     const { fetch: pluginFetch } = await import("@tauri-apps/plugin-http");
-    return pluginFetch(input, init);
+    // plugin-http only wires cancellation from `init.signal`; ky passes a Request
+    // whose own signal carries timeouts and aborts, so forward it.
+    const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    return pluginFetch(input, { ...init, signal });
   };
   return { fetch: tauriFetch };
 });
