@@ -227,11 +227,9 @@ const make = Effect.gen(function* () {
 
       // Tracked-epic flags follow settings even for issues not updated in this run.
       yield* query((d) =>
-        d
-          .update(jiraIssues)
-          .set({
-            isTrackedEpic: tracked.size > 0 ? inArray(jiraIssues.key, [...tracked]) : sql`0`,
-          }),
+        d.update(jiraIssues).set({
+          isTrackedEpic: tracked.size > 0 ? inArray(jiraIssues.key, [...tracked]) : sql`0`,
+        }),
       ).pipe(withDb);
 
       let staleMarked = 0;
