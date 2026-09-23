@@ -47,3 +47,48 @@ Known limits
   with the same name (noted in `src/db/schema.ts`).
 - The main bundle is about 1.3 MB minified; code splitting is left to Phase 8.
 - The production CSP has not been exercised in a release build yet (Phase 8).
+
+## Phase 1: Jira sync and ticket browser (2026-09-24)
+
+Built
+- `JiraClient` for the design.md section 5 endpoints (thin `ky` + zod client, D11), with
+  Jira's `{errorMessages, errors}` surfaced in error messages.
+- Field discovery for Epic Link, Epic Name and Sprint, with overrides in settings.
+- `Sync`: scope JQL plus tracked epics, incremental from a watermark formatted in the
+  Jira user's time zone, paging, bulk upserts, comments (embedded, with the rest
+  fetched), a sub-task pass for stories under tracked epics, weekly full resync with
+  stale marking, live status, and a timer while the app runs.
+- FTS5 index over issues with triggers (migration `0002_jira_fts`).
+- `Executor` as the only write path: comment, transition, edit fields, assign, set epic.
+  Payloads are built in `executor/jira-mapping.ts`. Every write is recorded in
+  `actions_log` with secrets redacted and followed by a re-fetch of the issue.
+- Markdown <-> wiki markup (`src/lib/wiki.ts`, jira2md with a pre-pass for dash lists
+  and GFM tables) and sanitised display of Jira's rendered HTML (`src/lib/html.ts`).
+- Tickets page: virtualised Epic -> Story -> Sub-task tree (TanStack Table v9 + Virtual),
+  search, filters by status category, assignee (including "Me"), project and stale;
+  detail sheet with fields, description, comments, links and attachments, and actions.
+- Header sync indicator, Jira sync settings (scope, custom fields, sync now, full
+  resync), ticket search in the Ctrl+K palette.
+- `bun run mock:jira`: a fake Jira DC with generated data for UI work without an
+  instance, also used by an end-to-end test of client, sync and executor.
+
+Decisions and defaults
+- D14: display Jira's server-rendered HTML; jira2md only for conversions. Description
+  edits are in raw wiki markup to avoid lossy round trips; comments are written in
+  Markdown and converted.
+- D15: tests use `bun:sqlite` (FTS5) instead of sql.js.
+- Search uses `validateQuery: "warn"` so one bad tracked-epic key does not fail a sync.
+- Page size 100; sub-task pass in chunks of 100 parent keys; watermark overlap 5 minutes.
+- Jira timestamps are stored as UTC ISO strings (Jira's `+0100` offsets are normalised
+  first, because WebKit's Date parser rejects them).
+- `jira_issues` stores usernames (`assignee`, `reporter`) for contact matching in
+  Phase 2 and display names alongside.
+- Images in rendered HTML become links: they need the Jira session and the CSP blocks
+  remote images.
+- The Jira username is stored at sync time so the "Me" filter works offline.
+
+Not verified yet
+- Nothing has run against a real Jira DC instance. The client, sync and executor run
+  end to end against the mock server and recorded-style fixtures only.
+- The ticket UI has not been exercised in the running app; it typechecks, lints and
+  builds.
