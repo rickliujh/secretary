@@ -274,7 +274,26 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const refreshIssue = (key: string) =>
+    Effect.gen(function* () {
+      const settings = yield* settingsSvc.get.pipe(Effect.orElseSucceed(() => undefined));
+      const { effective: fieldIds } = yield* withDb(fieldInfo);
+      const raw = yield* jira.getIssue(key, {
+        fields: issueFields(fieldIds),
+        expand: ["renderedFields"],
+      });
+      const m = mapIssue(raw, {
+        fieldIds,
+        trackedEpics: new Set(settings?.jira.trackedEpics ?? []),
+        syncedAt: nowIso(),
+      });
+      const comments = m.commentsComplete ? m.comments : yield* allComments(key);
+      yield* withDb(upsertIssues([m.issue]));
+      yield* withDb(replaceComments([key], comments));
+    });
+
   return Sync.of({
+    refreshIssue,
     run: (opts = {}) =>
       lock
         .withPermitsIfAvailable(1)(runOnce(opts))

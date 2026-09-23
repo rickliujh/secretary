@@ -40,6 +40,8 @@ export interface SyncShape {
   readonly discoverFields: Effect.Effect<FieldInfo, JiraError | DbError>;
   /** Last discovered and effective field ids without calling Jira. */
   readonly fieldInfo: Effect.Effect<FieldInfo, DbError>;
+  /** Re-fetches one issue (with comments) and stores Jira's version. Used after writes. */
+  readonly refreshIssue: (key: string) => Effect.Effect<void, JiraError | DbError>;
 }
 
 export class Sync extends Context.Tag("Sync")<Sync, SyncShape>() {}

@@ -45,14 +45,40 @@ export function makeBearerClient(opts: {
 const HTML_HINT =
   "The server answered with HTML instead of JSON. Check the base URL (include any context path such as /jira) and that personal access tokens are enabled.";
 
+/** Jira and Confluence report errors as `{ errorMessages: [], errors: { field: msg } }` or `{ message }`. */
+export function atlassianErrorText(data: unknown): string | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const d = data as { errorMessages?: unknown; errors?: unknown; message?: unknown };
+  const parts: string[] = [];
+  if (Array.isArray(d.errorMessages))
+    parts.push(...d.errorMessages.filter((m): m is string => typeof m === "string"));
+  if (d.errors && typeof d.errors === "object") {
+    for (const [field, msg] of Object.entries(d.errors))
+      if (typeof msg === "string") parts.push(`${field}: ${msg}`);
+  }
+  if (typeof d.message === "string") parts.push(d.message);
+  return parts.length > 0 ? parts.join("; ") : undefined;
+}
+
 async function describeHttpError(error: HTTPError): Promise<HttpFailure> {
   const status = error.response.status;
-  let detail = "";
-  try {
-    detail = (await error.response.clone().text()).slice(0, 300);
-  } catch {
-    // body unavailable
+  // ky has usually consumed the body into `data` already.
+  let detail = typeof error.data === "string" ? error.data : (atlassianErrorText(error.data) ?? "");
+  if (!detail && error.data === undefined) {
+    try {
+      detail = await error.response.clone().text();
+    } catch {
+      // body unavailable
+    }
   }
+  const parsed = (() => {
+    try {
+      return atlassianErrorText(JSON.parse(detail));
+    } catch {
+      return undefined;
+    }
+  })();
+  detail = (parsed ?? detail).slice(0, 500);
   if (status === 401 || status === 403) {
     return new HttpFailure(
       "auth",
