@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page";
 import { AtlassianSection } from "@/components/settings/atlassian-section";
 import { DataSection } from "@/components/settings/data-section";
 import { GeneralSection } from "@/components/settings/general-section";
+import { JiraSyncSection } from "@/components/settings/jira-sync-section";
 import { ModelsSection } from "@/components/settings/models-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { UsageSection } from "@/components/settings/usage-section";
@@ -50,8 +51,9 @@ function SettingsPage() {
         <TabsContent value="models">
           <ModelsSection />
         </TabsContent>
-        <TabsContent value="jira">
+        <TabsContent value="jira" className="flex flex-col gap-4">
           <AtlassianSection product="jira" />
+          <JiraSyncSection />
         </TabsContent>
         <TabsContent value="confluence">
           <AtlassianSection product="confluence" />

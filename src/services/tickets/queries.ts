@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { issueMeta, jiraComments, jiraIssues } from "@/db/schema";
 import { nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
+import { getState, SYNC_KEYS } from "@/services/sync/state";
 import { ftsQuery, type TicketRow } from "./tree";
 
 const listColumns = {
@@ -96,3 +97,6 @@ export const epicsInProject = (projectKey: string) =>
       .orderBy(asc(jiraIssues.key))
       .all(),
   );
+
+/** Jira username of the signed-in user, recorded by sync; null before the first sync. */
+export const currentJiraUsername = Effect.map(getState(SYNC_KEYS.username), (v) => v ?? null);

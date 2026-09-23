@@ -10,6 +10,7 @@ export const SYNC_KEYS = {
   lastFullSyncAt: "jira.lastFullSyncAt",
   fields: "jira.fields",
   timeZone: "jira.timeZone",
+  username: "jira.username",
 } as const;
 
 export const getState = (key: string) =>

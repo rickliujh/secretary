@@ -2,9 +2,11 @@ import { createRootRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { Search } from "lucide-react";
 import { useState } from "react";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
+import { useSyncScheduler } from "@/app/sync";
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
 import { StartupGate } from "@/components/startup-gate";
+import { SyncIndicator } from "@/components/sync-indicator";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -15,12 +17,19 @@ export const Route = createRootRoute({ component: RootLayout });
 
 const ALL_NAV = [...WORK_NAV, ...CONTEXT_NAV, SETTINGS_NAV];
 
+/** Hooks that need the database, so they run inside the startup gate. */
+function Background() {
+  useSyncScheduler();
+  return null;
+}
+
 function RootLayout() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const title = ALL_NAV.find((n) => n.to === pathname)?.label ?? "Secretary";
   return (
     <StartupGate>
+      <Background />
       <SidebarProvider>
         <AppSidebar />
         <SidebarInset>
@@ -39,6 +48,7 @@ function RootLayout() {
                 Search
                 <kbd className="ml-2 rounded border px-1 font-mono text-[10px]">Ctrl K</kbd>
               </Button>
+              <SyncIndicator />
               <UsageIndicator />
               <ThemeToggle />
             </div>

@@ -5,15 +5,19 @@
 import { Cause, type Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { ConfluenceClientLive } from "@/services/confluence/live";
 import { DbLive } from "@/services/db/live";
+import { ExecutorLive } from "@/services/executor/live";
 import { FetcherLive } from "@/services/http";
 import { JiraClientLive } from "@/services/jira/live";
 import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
 import { SecretsLive } from "@/services/secrets/live";
 import { SettingsLive } from "@/services/settings/live";
+import { SyncLive } from "@/services/sync/live";
 
 const Base = Layer.mergeAll(SettingsLive, SecretsLive, DbLive, FetcherLive);
 
-export const AppLayer = Layer.mergeAll(LlmLive, JiraClientLive, ConfluenceClientLive).pipe(
+export const AppLayer = ExecutorLive.pipe(
+  Layer.provideMerge(SyncLive),
+  Layer.provideMerge(Layer.mergeAll(LlmLive, JiraClientLive, ConfluenceClientLive)),
   Layer.provideMerge(ModelFactoryLive),
   Layer.provideMerge(Base),
 );
