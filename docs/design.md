@@ -47,7 +47,7 @@ service boundary lets a sidecar replace individual services without UI changes.
 | Concern | Choice | Notes |
 |---|---|---|
 | Shell | Tauri 2 | `bun create tauri-app` template: React + TypeScript + Vite |
-| Package manager / scripts / tests | Bun | `bun install`, `bun run`, `bun test` (or vitest if jsdom needed) |
+| Package manager / scripts / tests | Bun | `bun install`, `bun run`, `bun test` (or vitest if jsdom needed). Service tests use `bun:sqlite` in memory behind the same drizzle proxy (D15) |
 | UI kit | shadcn/ui on Tailwind v4 | Add components via CLI only; never copy-edit component internals beyond theming |
 | Routing | TanStack Router | File-based routes |
 | Server state | TanStack Query | Wraps Effect programs; handles caching, refetch, loading states |
@@ -55,7 +55,7 @@ service boundary lets a sidecar replace individual services without UI changes.
 | Tables / trees | TanStack Table | Expandable rows for Epic -> Story -> Sub-task |
 | Command palette | cmdk (shadcn Command) | Quick jump to ticket/contact/intake |
 | Markdown | react-markdown + remark-gfm | Rendering notes, drafts, briefs |
-| Jira wiki markup | `jira2md` for display, `md-to-jira`-style conversion for writes; verify a maintained package at Phase 1, fallback: send plain text | DC uses wiki markup, not ADF |
+| Jira wiki markup | Display: Jira's server-rendered HTML (`expand=renderedFields`) sanitised with DOMPurify. Conversions: `jira2md` (Markdown -> wiki for writes, wiki -> Markdown for prompts) behind `src/lib/wiki.ts` | DC uses wiki markup, not ADF (D14) |
 | Confluence storage format -> Markdown | turndown | Imports pages as Markdown notes |
 | Effects / DI / errors | Effect 3.x | Services as `Context.Tag`; `Layer` for live vs test; typed errors |
 | Schemas | zod v4 | One schema library for forms, API responses and LLM structured outputs |
@@ -116,8 +116,8 @@ JSON columns are typed with zod at the service boundary.
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `jira_issues` | Cache of synced issues | `key` PK, `id`, `project_key`, `issue_type`, `summary`, `description`, `status`, `status_category`, `priority`, `assignee`, `reporter`, `parent_key`, `epic_key`, `labels` json, `components` json, `sprint`, `due_date`, `created`, `updated`, `resolved`, `raw` json, `synced_at`, `is_tracked_epic` |
-| `jira_comments` | Cache of comments for synced issues | `id` PK, `issue_key`, `author`, `body`, `created`, `updated` |
+| `jira_issues` | Cache of synced issues | `key` PK, `id`, `project_key`, `issue_type`, `is_subtask`, `summary`, `description` (wiki), `description_html` (server-rendered), `status`, `status_category`, `priority`, `assignee` (username), `assignee_display`, `reporter` (username), `reporter_display`, `parent_key`, `epic_key`, `epic_name`, `labels` json, `components` json, `sprint`, `due_date`, `created`, `updated`, `resolved`, `raw` json (fields without comments and rendered fields), `synced_at`, `is_tracked_epic`, `stale` |
+| `jira_comments` | Cache of comments for synced issues | `id` PK, `issue_key`, `author` (username), `author_display`, `body` (wiki), `body_html`, `created`, `updated` |
 | `issue_meta` | Secretary-only per-issue state | `issue_key` PK, `priority_override`, `pinned`, `snoozed_until`, `last_viewed_at`, `health` |
 | `issue_notes` | Private notes and imported context on an issue | `id`, `issue_key`, `body_md`, `source_url`, `created_at` |
 | `teams` | Org context | `id`, `name`, `function`, `contact_for`, `channel`, `escalation_path`, `confluence_urls` json, `notes_md` |
@@ -133,10 +133,11 @@ JSON columns are typed with zod at the service boundary.
 | `llm_calls` | Usage accounting | `id`, `task`, `tier` (null for provider tests), `provider_id`, `model`, `escalated`, `repair`, `validation_ok`, `input_tokens`, `output_tokens`, `duration_ms`, `ok`, `error_kind`, `at` |
 | `sync_state` | Watermarks | `key` PK, `value` |
 
-Full-text search: an FTS5 virtual table over `jira_issues(summary, description)` and
-`context_notes(title, body_md)` if the bundled SQLite in plugin-sql has FTS5 (check
-with `PRAGMA compile_options` at Phase 1). Fallback: `LIKE` on tokens plus a
-fast-model rerank.
+Full-text search: FTS5 is available (plugin-sql bundles SQLite through sqlx with
+`SQLITE_ENABLE_FTS5`; `bun:sqlite` has it too). `jira_issues_fts` is an
+external-content FTS5 table over `jira_issues(key, summary, description)` kept in
+sync by triggers; `context_notes` gets the same treatment in Phase 2. User text is
+turned into a prefix query of quoted tokens by a pure function.
 
 ## 5. Jira Data Center integration
 
@@ -169,9 +170,31 @@ Sync algorithm:
    `yyyy/MM/dd HH:mm`), page through, upsert. Watermark = max `updated` seen.
 3. Full resync weekly or on demand to catch deletions and scope changes: mark
    issues not returned as `stale` rather than deleting.
-4. Comments fetched for issues updated in this run only.
+4. Comments come embedded in the search response (`comment` field); when an issue
+   has more comments than were embedded, the rest are fetched from
+   `/issue/{key}/comment`. Only issues returned in this run are touched.
 5. Epic relation: read both `parent` and the discovered Epic Link field; write using
-   whichever the create metadata for that project/issue type accepts.
+   whichever the edit or create metadata for that project/issue type accepts.
+6. Sub-tasks of stories under tracked epics have no Epic Link, so a second pass
+   queries `parent in (...)` for those stories in chunks of 100 keys.
+7. JQL date literals are interpreted in the Jira user's time zone, so the
+   watermark is formatted in `myself.timeZone`. Searches order by `updated ASC`
+   and request `expand=renderedFields`; field ids for Epic Link, Epic Name and
+   Sprint come from `/field` (schema.custom `gh-epic-link`, `gh-epic-label`,
+   `gh-sprint`) unless overridden in settings.
+8. Writes are bulk upserts per page (one multi-row statement for issues, one for
+   comments) to keep IPC round trips low. Sync is idempotent, so a crash mid-run
+   only means the next run repeats work. State lives in `sync_state`:
+   `jira.watermark`, `jira.lastSyncAt`, `jira.lastFullSyncAt`, `jira.fields`,
+   `jira.timeZone`.
+
+Manual actions from the ticket view (comment, transition, edit fields, assign,
+set epic) are user-initiated writes. They go through `Executor.run(action)`, the
+same path approved proposals use in Phase 3: payload building in
+`services/executor/jira-mapping.ts`, the request, an `actions_log` row, then a
+re-fetch and upsert of the issue. Description edits are made in wiki markup, not
+Markdown, because a wiki -> Markdown -> wiki round trip is lossy for panels,
+macros and tables.
 
 Write mapping (proposal -> request) lives in `services/executor/jira-mapping.ts` and
 is unit-tested with fixtures. Description and comment bodies are converted from
@@ -405,6 +428,8 @@ No silent fallbacks between providers; the user chooses the model.
 | D11 | Jira DC client is a thin typed client on `ky` + zod, not jira.js | 2026-09-23: jira.js v6.2 has no `createServerClient`; its README states it is Cloud-only and reads return ADF. `ky` accepts the plugin-http `fetch`, gives timeouts, retries and typed `HTTPError` |
 | D12 | Provider extra headers are stored in the keychain with the API key | Custom headers often carry credentials (proxy auth); the settings store keeps header names only |
 | D13 | Unconfigured tier resolution looks stronger first, then weaker | FR-9.2 says fall back to the next stronger tier; searching weaker tiers after that makes any single configured tier work for every task |
+| D14 | Show Jira's server-rendered HTML (sanitised) instead of converting wiki markup client-side; `jira2md` only for Markdown <-> wiki | Exact rendering of macros, panels and tables without a parser; jira2md (2023, regex based) is adequate for the simpler text the app writes, with a tested pre-pass for dash lists and GFM tables |
+| D15 | Service tests use `bun:sqlite` instead of sql.js | sql.js is built without FTS5; bun:sqlite has it, matching the app's bundled SQLite |
 
 ## 13. References
 
