@@ -30,9 +30,11 @@ function RootLayout() {
   return (
     <StartupGate>
       <Background />
-      <SidebarProvider>
+      {/* Fixed viewport height so pages scroll inside the content area; the
+          ticket table relies on a bounded scroll container for virtualisation. */}
+      <SidebarProvider className="h-svh">
         <AppSidebar />
-        <SidebarInset>
+        <SidebarInset className="min-h-0 overflow-hidden">
           <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
             <SidebarTrigger />
             <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-4" />
@@ -53,9 +55,9 @@ function RootLayout() {
               <ThemeToggle />
             </div>
           </header>
-          <main className="flex-1 overflow-auto p-6">
+          <div className="min-h-0 flex-1 overflow-auto p-6">
             <Outlet />
-          </main>
+          </div>
         </SidebarInset>
         <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       </SidebarProvider>
