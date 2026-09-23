@@ -1,0 +1,51 @@
+{
+  "fields": {
+    "summary": {
+      "required": true,
+      "schema": { "type": "string", "system": "summary" },
+      "name": "Summary",
+      "fieldId": "summary",
+      "operations": ["set"]
+    },
+    "description": {
+      "required": false,
+      "schema": { "type": "string", "system": "description" },
+      "name": "Description",
+      "fieldId": "description",
+      "operations": ["set"]
+    },
+    "priority": {
+      "required": false,
+      "schema": { "type": "priority", "system": "priority" },
+      "name": "Priority",
+      "fieldId": "priority",
+      "operations": ["set"],
+      "allowedValues": [{ "name": "High", "id": "2" }]
+    },
+    "duedate": {
+      "required": false,
+      "schema": { "type": "date", "system": "duedate" },
+      "name": "Due Date",
+      "fieldId": "duedate",
+      "operations": ["set"]
+    },
+    "assignee": {
+      "required": false,
+      "schema": { "type": "user", "system": "assignee" },
+      "name": "Assignee",
+      "fieldId": "assignee",
+      "operations": ["set"]
+    },
+    "customfield_10100": {
+      "required": false,
+      "schema": {
+        "type": "any",
+        "custom": "com.pyxis.greenhopper.jira:gh-epic-link",
+        "customId": 10100
+      },
+      "name": "Epic Link",
+      "fieldId": "customfield_10100",
+      "operations": ["set"]
+    }
+  }
+}

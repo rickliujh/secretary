@@ -23,15 +23,23 @@ export const jiraIssues = sqliteTable(
     id: text("id").notNull(),
     projectKey: text("project_key").notNull(),
     issueType: text("issue_type").notNull(),
+    isSubtask: bool("is_subtask").notNull().default(false),
     summary: text("summary").notNull(),
+    /** Wiki markup as stored in Jira. */
     description: text("description"),
+    /** Server-rendered HTML (`renderedFields`), sanitised at display time. */
+    descriptionHtml: text("description_html"),
     status: text("status").notNull(),
-    statusCategory: text("status_category").notNull(),
+    statusCategory: text("status_category", { enum: ["new", "indeterminate", "done"] }).notNull(),
     priority: text("priority"),
+    /** Jira username, used to match contacts. */
     assignee: text("assignee"),
+    assigneeDisplay: text("assignee_display"),
     reporter: text("reporter"),
+    reporterDisplay: text("reporter_display"),
     parentKey: text("parent_key"),
     epicKey: text("epic_key"),
+    epicName: text("epic_name"),
     labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
     components: text("components", { mode: "json" }).$type<string[]>().notNull().default([]),
     sprint: text("sprint"),
@@ -58,8 +66,11 @@ export const jiraComments = sqliteTable(
   {
     id: text("id").primaryKey(),
     issueKey: text("issue_key").notNull(),
+    /** Jira username. */
     author: text("author"),
+    authorDisplay: text("author_display"),
     body: text("body").notNull(),
+    bodyHtml: text("body_html"),
     created: text("created").notNull(),
     updated: text("updated").notNull(),
   },

@@ -1,9 +1,9 @@
-/** In-memory database for tests: sql.js behind the same proxy and migrations. */
+/** In-memory database for tests: bun:sqlite behind the same proxy and migrations (D15). */
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { Effect, Layer } from "effect";
-import initSqlJs from "sql.js";
 import { type Journal, MIGRATIONS_TABLE, migrate, parseMigrations } from "@/db/migrator";
 import * as schema from "@/db/schema";
 import { Db, DbError } from ".";
@@ -23,30 +23,19 @@ export function loadMigrationsFromDisk() {
   return parseMigrations(journal, files);
 }
 
-type SqlValue = number | string | Uint8Array | null;
-
-const toSqlParams = (params: unknown[]): SqlValue[] =>
-  params.map((p) => (typeof p === "boolean" ? Number(p) : (p as SqlValue)));
+const toParams = (params: unknown[]) =>
+  params.map((p) => (typeof p === "boolean" ? Number(p) : p)) as SQLQueryBindings[];
 
 export async function makeTestDatabase() {
-  const SQL = await initSqlJs();
-  const sqlite = new SQL.Database();
+  const sqlite = new Database(":memory:");
   sqlite.run("PRAGMA foreign_keys = ON;");
-  const select = (sql: string, params: unknown[] = []) => {
-    const stmt = sqlite.prepare(sql);
-    try {
-      stmt.bind(toSqlParams(params));
-      const rows: Record<string, unknown>[] = [];
-      while (stmt.step()) rows.push(stmt.getAsObject());
-      return rows;
-    } finally {
-      stmt.free();
-    }
-  };
+  // Row objects, like plugin-sql, so tests exercise the same proxy mapping.
+  const select = (sql: string, params: unknown[] = []) =>
+    sqlite.query(sql).all(...toParams(params)) as Record<string, unknown>[];
   await migrate(
     {
       execScript: async (sql) => {
-        sqlite.exec(sql);
+        sqlite.run(sql);
       },
       appliedTags: async () =>
         select(`SELECT tag FROM ${MIGRATIONS_TABLE}`).map((r) => String(r.tag)),
@@ -55,7 +44,7 @@ export async function makeTestDatabase() {
   );
   const db = drizzle(
     proxyCallback({
-      execute: async (sql, params) => sqlite.run(sql, toSqlParams(params)),
+      execute: async (sql, params) => sqlite.query(sql).run(...toParams(params)),
       select: async (sql, params) => select(sql, params),
     }),
     { schema },

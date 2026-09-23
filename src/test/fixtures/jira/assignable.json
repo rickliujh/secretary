@@ -1,0 +1,11 @@
+[
+  {
+    "self": "https://jira.example.com/rest/api/2/user?username=ana.b",
+    "key": "JIRAUSER10200",
+    "name": "ana.b",
+    "emailAddress": "ana@example.com",
+    "displayName": "Ana Bell",
+    "active": true,
+    "timeZone": "Europe/London"
+  }
+]

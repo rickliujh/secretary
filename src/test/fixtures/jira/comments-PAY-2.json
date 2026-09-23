@@ -1,0 +1,31 @@
+{
+  "startAt": 0,
+  "maxResults": 100,
+  "total": 3,
+  "comments": [
+    {
+      "id": "50001",
+      "author": { "name": "ana.b", "displayName": "Ana Bell", "active": true },
+      "body": "Raised {{INC0012345}} with platform.",
+      "renderedBody": "<p>Raised <tt>INC0012345</tt> with platform.</p>",
+      "created": "2026-09-10T09:00:00.000+0100",
+      "updated": "2026-09-10T09:00:00.000+0100"
+    },
+    {
+      "id": "50002",
+      "author": { "name": "rliu", "displayName": "Rick Liu", "active": true },
+      "body": "Chased on Teams.",
+      "renderedBody": "<p>Chased on Teams.</p>",
+      "created": "2026-09-15T14:00:00.000+0100",
+      "updated": "2026-09-15T14:00:00.000+0100"
+    },
+    {
+      "id": "50003",
+      "author": { "name": "tom.k", "displayName": "Tom Kay", "active": true },
+      "body": "Firewall change is scheduled for Thursday.",
+      "renderedBody": "<p>Firewall change is scheduled for Thursday.</p>",
+      "created": "2026-09-21T16:40:12.000+0100",
+      "updated": "2026-09-21T16:40:12.000+0100"
+    }
+  ]
+}

@@ -52,7 +52,7 @@ describe("migrator", () => {
     }
     const target = {
       execScript: async (sql: string) => {
-        sqlite.exec(sql);
+        sqlite.run(sql);
       },
       appliedTags: async () =>
         select(`SELECT tag FROM ${MIGRATIONS_TABLE}`).map((r) => String(r.tag)),
@@ -64,7 +64,7 @@ describe("migrator", () => {
     const { sqlite, select } = await makeTestDatabase();
     const target = {
       execScript: async (sql: string) => {
-        sqlite.exec(sql);
+        sqlite.run(sql);
       },
       appliedTags: async () =>
         select(`SELECT tag FROM ${MIGRATIONS_TABLE}`).map((r) => String(r.tag)),

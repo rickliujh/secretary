@@ -1,0 +1,74 @@
+{
+  "expand": "schema,names",
+  "startAt": 3,
+  "maxResults": 3,
+  "total": 5,
+  "issues": [
+    {
+      "id": "20010",
+      "key": "OPS-7",
+      "fields": {
+        "summary": "Open firewall to ledger",
+        "issuetype": { "id": "10002", "name": "Task", "subtask": false },
+        "project": { "id": "10300", "key": "OPS", "name": "Operations" },
+        "status": {
+          "name": "To Do",
+          "id": "10000",
+          "statusCategory": { "id": 2, "key": "new", "name": "To Do" }
+        },
+        "priority": { "name": "Highest", "id": "1" },
+        "assignee": { "name": "tom.k", "displayName": "Tom Kay", "active": true },
+        "reporter": { "name": "rliu", "displayName": "Rick Liu" },
+        "description": "See [PAY-2|https://jira.example.com/browse/PAY-2].",
+        "labels": ["network", "firewall"],
+        "components": [{ "id": "10400", "name": "Network" }],
+        "duedate": "2026-09-25",
+        "created": "2026-09-01T09:00:00.000+0100",
+        "updated": "2026-09-22T12:00:00.000+0100",
+        "resolutiondate": null,
+        "customfield_10100": null,
+        "customfield_10102": null,
+        "customfield_10104": [{ "id": 43, "name": "Ops 9", "state": "active", "boardId": 12 }],
+        "issuelinks": [],
+        "attachment": [],
+        "comment": { "comments": [], "maxResults": 0, "total": 0, "startAt": 0 }
+      },
+      "renderedFields": {
+        "description": "<p>See <a href=\"https://jira.example.com/browse/PAY-2\" class=\"external-link\" rel=\"nofollow\">PAY-2</a>.</p>"
+      }
+    },
+    {
+      "id": "20004",
+      "key": "PAY-4",
+      "fields": {
+        "summary": "Refund totals off by one cent",
+        "issuetype": { "id": "10004", "name": "Bug", "subtask": false },
+        "project": { "id": "10200", "key": "PAY", "name": "Payments" },
+        "status": {
+          "name": "To Do",
+          "id": "10000",
+          "statusCategory": { "id": 2, "key": "new", "name": "To Do" }
+        },
+        "priority": { "name": "Low", "id": "4" },
+        "assignee": { "name": "rliu", "displayName": "Rick Liu" },
+        "reporter": { "name": "tom.k", "displayName": "Tom Kay" },
+        "description": "Steps:\r\n# refund 10.005\r\n# see 10.00",
+        "labels": [],
+        "components": [],
+        "duedate": null,
+        "created": "2026-09-05T09:00:00.000+0100",
+        "updated": "2026-09-23T09:30:00.000+0100",
+        "resolutiondate": null,
+        "customfield_10100": "PAY-1",
+        "customfield_10102": null,
+        "customfield_10104": null,
+        "issuelinks": [],
+        "attachment": [],
+        "comment": { "comments": [], "maxResults": 0, "total": 0, "startAt": 0 }
+      },
+      "renderedFields": {
+        "description": "<p>Steps:</p>\n<ol>\n\t<li>refund 10.005</li>\n\t<li>see 10.00</li>\n</ol>"
+      }
+    }
+  ]
+}

@@ -86,7 +86,8 @@ export async function requestJson<T>(
   const body = await response.text();
   let json: unknown;
   try {
-    json = JSON.parse(body);
+    // 204 and other empty bodies decode as null; the schema decides if that is valid.
+    json = body.trim() === "" ? null : JSON.parse(body);
   } catch {
     throw new HttpFailure("decode", /<html/i.test(body) ? HTML_HINT : "The response was not JSON.");
   }
