@@ -65,6 +65,19 @@ const ConfluenceSettingsSchema = z.object({
   baseUrl: optionalUrl.default(""),
 });
 
+/** Top-focus ranking weights (FR-5.2); each factor is scaled 0..1 before weighting. */
+export const ScoringWeightsSchema = z.object({
+  priority: z.number().min(0).max(20).default(3),
+  due: z.number().min(0).max(20).default(4),
+  blocked: z.number().min(0).max(20).default(2),
+  blocking: z.number().min(0).max(20).default(2),
+  stale: z.number().min(0).max(20).default(1),
+  dependency: z.number().min(0).max(20).default(3),
+  pinned: z.number().min(0).max(50).default(10),
+});
+export type ScoringWeights = z.infer<typeof ScoringWeightsSchema>;
+export const DEFAULT_WEIGHTS: ScoringWeights = ScoringWeightsSchema.parse({});
+
 export const SettingsSchema = z.object({
   version: z.literal(1).default(1),
   providers: z.array(ProviderSchema).default([]),
@@ -91,6 +104,7 @@ export const SettingsSchema = z.object({
       reminders: z.boolean().default(true),
     })
     .default({ followupDays: 3, reminders: true }),
+  scoring: ScoringWeightsSchema.default(DEFAULT_WEIGHTS),
 });
 
 export type AppSettings = z.infer<typeof SettingsSchema>;
