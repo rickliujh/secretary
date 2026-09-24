@@ -493,7 +493,8 @@ export function createHandler(issues: Map<string, Issue>) {
         });
       if (sub === "/remotelink" && req.method === "GET") return json(issue.remoteLinks ?? []);
       if (sub === "/remotelink" && req.method === "POST") {
-        const links = (issue.remoteLinks ??= []);
+        if (!issue.remoteLinks) issue.remoteLinks = [];
+        const links = issue.remoteLinks;
         const globalId = String(body?.globalId ?? "");
         const object = body?.object as NonNullable<Issue["remoteLinks"]>[number]["object"];
         if (!object?.url || !object.title) return error("url and title are required");
