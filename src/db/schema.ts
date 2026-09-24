@@ -257,9 +257,39 @@ export const inboxItems = sqliteTable(
     status: text("status", { enum: ["new", "triaged", "filed", "dismissed"] })
       .notNull()
       .default("new"),
+    /** One-line triage summary (FR-2.2). */
+    summary: text("summary"),
     triage: text("triage", { mode: "json" }).$type<unknown>(),
   },
   (t) => [index("inbox_items_received_idx").on(t.receivedAt)],
+);
+
+/**
+ * Atomic items an inbox item was split into, each classified separately
+ * (design.md 7.3). The retrieval snapshot makes evaluation replays compare
+ * models, not data drift.
+ */
+export const intakeItems = sqliteTable(
+  "intake_items",
+  {
+    id: text("id").primaryKey(),
+    inboxItemId: text("inbox_item_id")
+      .notNull()
+      .references(() => inboxItems.id, { onDelete: "cascade" }),
+    idx: integer("idx").notNull(),
+    quote: text("quote").notNull(),
+    summary: text("summary"),
+    snapshot: text("snapshot", { mode: "json" }).$type<unknown>().notNull(),
+    /** Validated model output, before mapping to proposals. */
+    output: text("output", { mode: "json" }).$type<unknown>(),
+    promptVersion: integer("prompt_version").notNull(),
+    tier: text("tier"),
+    model: text("model"),
+    escalated: bool("escalated").notNull().default(false),
+    lowConfidence: bool("low_confidence").notNull().default(false),
+    error: text("error"),
+  },
+  (t) => [index("intake_items_inbox_idx").on(t.inboxItemId)],
 );
 
 export const proposals = sqliteTable(
@@ -267,9 +297,14 @@ export const proposals = sqliteTable(
   {
     id: text("id").primaryKey(),
     inboxItemId: text("inbox_item_id").references(() => inboxItems.id, { onDelete: "cascade" }),
+    intakeItemId: text("intake_item_id").references(() => intakeItems.id, { onDelete: "cascade" }),
+    /** Execution order within the inbox item; `$new` references point backwards. */
+    seq: integer("seq").notNull().default(0),
     kind: text("kind").notNull(),
     payload: text("payload", { mode: "json" }).$type<unknown>().notNull(),
     rationale: text("rationale"),
+    /** Quoted span of the input that supports the proposal. */
+    evidence: text("evidence"),
     confidence: real("confidence"),
     status: text("status", {
       enum: ["pending", "approved", "rejected", "executed", "failed"],

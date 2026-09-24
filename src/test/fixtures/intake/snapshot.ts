@@ -1,0 +1,91 @@
+import { CLASSIFY_PROMPT_VERSION, type ItemSnapshot } from "@/prompts/classify";
+
+/** A representative retrieval snapshot for prompt and validation tests. */
+export const snapshot: ItemSnapshot = {
+  promptVersion: CLASSIFY_PROMPT_VERSION,
+  today: "2026-09-24",
+  me: { username: "rliu" },
+  outputLanguage: "English",
+  source: "teams",
+  sender: { id: "p-ana", displayName: "Ana Bell", title: "Tech lead", team: "Payments" },
+  quote:
+    "The ledger export (PAY-2) is still blocked on INC0012345 from Platform. Can you chase them and move it to Blocked? Expect a fix by Friday.",
+  references: { issueKeys: ["PAY-2"], tickets: ["INC0012345"], urls: [], contactIds: ["p-ana"] },
+  candidates: [
+    {
+      key: "PAY-1",
+      summary: "Billing migration",
+      issueType: "Epic",
+      status: "In Progress",
+      statusCategory: "indeterminate",
+      projectKey: "PAY",
+      epicKey: null,
+      parentKey: null,
+      assignee: "rliu",
+      updated: "2026-09-20T09:15:00.000Z",
+      reasons: ["search"],
+    },
+    {
+      key: "PAY-2",
+      summary: "Export invoices to the new ledger",
+      issueType: "Story",
+      status: "In Progress",
+      statusCategory: "indeterminate",
+      projectKey: "PAY",
+      epicKey: "PAY-1",
+      parentKey: null,
+      assignee: "ana.b",
+      updated: "2026-09-21T15:40:12.000Z",
+      reasons: ["mentioned"],
+    },
+    {
+      key: "OPS-7",
+      summary: "Open firewall to ledger",
+      issueType: "Task",
+      status: "To Do",
+      statusCategory: "new",
+      projectKey: "OPS",
+      epicKey: null,
+      parentKey: null,
+      assignee: "tom.k",
+      updated: "2026-09-22T11:00:00.000Z",
+      reasons: ["search"],
+    },
+  ],
+  projects: [
+    {
+      key: "PAY",
+      issueTypes: ["Epic", "Story", "Task", "Sub-task", "Bug"],
+      statuses: ["To Do", "In Progress", "Blocked", "Done"],
+    },
+    { key: "OPS", issueTypes: ["Task", "Sub-task"], statuses: ["To Do", "In Progress", "Done"] },
+  ],
+  priorities: ["Highest", "High", "Medium", "Low"],
+  jiraUsers: [
+    { username: "rliu", displayName: "Rick Liu" },
+    { username: "ana.b", displayName: "Ana Bell" },
+    { username: "tom.k", displayName: "Tom Kay" },
+  ],
+  teams: [
+    {
+      id: "t-plat",
+      name: "Platform",
+      function: "Shared infrastructure",
+      contactFor: "Kubernetes, CI, secrets",
+    },
+  ],
+  people: [
+    {
+      id: "p-ana",
+      displayName: "Ana Bell",
+      title: "Tech lead",
+      team: "Payments",
+      jiraUsername: "ana.b",
+    },
+    { id: "p-tom", displayName: "Tom Kay", title: null, team: "Network", jiraUsername: "tom.k" },
+  ],
+  dependencies: [],
+  memories: [{ kind: "rule", content: "Anything about the billing migration goes under PAY-1." }],
+  examples: [],
+  notes: [],
+};
