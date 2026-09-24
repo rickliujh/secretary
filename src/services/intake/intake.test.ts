@@ -93,9 +93,8 @@ describe("Intake.triage", () => {
     expect(r.items[0]?.quote).toBe(
       "Hi Rick,\n\nPAY-2 is blocked on INC0012345 from Platform, can you move it to Blocked?",
     );
-    expect((r.items[0]?.snapshot as { candidates: { key: string }[] }).candidates[0]?.key).toBe(
-      "PAY-2",
-    );
+    const snap = r.items[0]?.snapshot as { candidates: { key: string }[] } | undefined;
+    expect(snap?.candidates[0]?.key).toBe("PAY-2");
     expect(r.items[0]).toMatchObject({ tier: "standard", model: "std-m", promptVersion: 1 });
     // The pasted text reaches the model inside the untrusted wrapper.
     expect(JSON.stringify(models.calls[0]?.prompt)).toContain(
