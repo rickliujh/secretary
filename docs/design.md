@@ -125,8 +125,9 @@ JSON columns are typed with zod at the service boundary.
 | `context_notes` | Imported Confluence pages and free notes attached to a team, person or issue | `id`, `subject_type` (team/person/issue), `subject_id`, `title`, `body_md`, `source_url`, `source_id` (Confluence page id), `source_version`, `imported_at` |
 | `dependencies` | External things a ticket waits on | `id`, `issue_key`, `kind` (person/team/incident/external), `label`, `owner_person_id`, `owner_team_id`, `external_ref`, `external_url`, `status` (open/waiting/blocked/resolved), `requested_at`, `expected_at`, `next_followup_at`, `resolved_at`, `notes_md`, `mirror_remote_link_id` |
 | `followups` | Timeline per dependency | `id`, `dependency_id`, `at`, `channel`, `summary`, `communication_id` |
-| `inbox_items` | Raw inputs | `id`, `source` (teams/email/meeting/typed/other), `sender_person_id`, `raw_text`, `received_at`, `status` (new/triaged/filed/dismissed), `triage` json |
-| `proposals` | Suggested actions | `id`, `inbox_item_id`, `kind`, `payload` json, `rationale`, `confidence`, `status` (pending/approved/rejected/executed/failed), `edited_payload` json, `result` json, `created_at`, `decided_at` |
+| `inbox_items` | Raw inputs | `id`, `source` (teams/email/meeting/typed/other), `sender_person_id`, `raw_text`, `received_at`, `status` (new/triaged/filed/dismissed), `summary`, `triage` json (counts, or the error of a failed run) |
+| `intake_items` | Atomic items of an inbox item | `id`, `inbox_item_id`, `idx`, `quote`, `summary`, `snapshot` json (the full retrieval snapshot, for replay), `output` json (validated model output), `prompt_version`, `tier`, `model`, `escalated`, `low_confidence`, `error` |
+| `proposals` | Suggested actions | `id`, `inbox_item_id`, `intake_item_id`, `seq` (execution order), `kind`, `payload` json (canonical `ProposalPayload`), `rationale`, `evidence`, `confidence`, `status` (pending/approved/rejected/executed/failed), `edited_payload` json, `result` json, `created_at`, `decided_at` |
 | `actions_log` | Audit of every outward write | `id`, `proposal_id`, `action`, `target`, `request` json (secrets stripped), `response` json, `ok`, `at` |
 | `memories` | Learning store | `id`, `kind` (rule/fact/preference/example), `subject_type`, `subject_id`, `content`, `example_input`, `example_before` json, `example_after` json, `source` (user/inferred), `source_inbox_item_id`, `confirmed`, `weight`, `created_at`, `last_used_at`, `use_count` |
 | `communications` | Drafts | `id`, `kind` (teams/email), `intent`, `recipient_person_id`, `recipient_team_id`, `issue_keys` json, `dependency_id`, `subject`, `body_md`, `variant`, `status` (draft/copied/sent), `created_at`, `sent_at` |
@@ -328,6 +329,24 @@ rank. Token counts are estimated locally (approximation is fine for budgeting).
 6. Persist inbox item, items and proposals as `pending`. UI renders cards grouped
    by item, with the quoted span shown next to each proposal.
 
+Implementation notes (Phase 3):
+- The model's output schema (`src/prompts/classify.ts`) is separate from the
+  canonical `ProposalPayload` (`src/services/proposals/schema.ts`). Code maps one to
+  the other, so prompts can change without touching stored proposals or the Executor.
+- Output schemas use nullable fields (never optional) and no numeric bounds, because
+  strict structured-output modes differ across providers; confidences are clamped in
+  code.
+- `rerank_candidates` is not called: deterministic merging of mentioned, bm25, sender,
+  recent and tracked-epic candidates within a token budget was enough. The task type
+  stays in the routing table for later use.
+- If segmentation fails validation after repair, the whole cleaned text is classified
+  as one item rather than asking the user.
+- A needs-clarification card takes the user's answer and re-triages the original input
+  with the answer as a separate, trusted prompt block; the question is then closed.
+- Proposal execution resolves `$new` refs from creates already executed in the same
+  inbox item; a proposal whose create failed or is still pending fails with a clear
+  message instead of running.
+
 **Executor** (`services/executor`)
 Approve -> `edited_payload ?? payload` -> Jira/DB action -> re-fetch -> `actions_log`.
 Rejection and edits both create `memories` of kind `example` (FR-7.2). Executes
@@ -434,6 +453,8 @@ No silent fallbacks between providers; the user chooses the model.
 | D13 | Unconfigured tier resolution looks stronger first, then weaker | FR-9.2 says fall back to the next stronger tier; searching weaker tiers after that makes any single configured tier work for every task |
 | D14 | Show Jira's server-rendered HTML (sanitised) instead of converting wiki markup client-side; `jira2md` only for Markdown <-> wiki | Exact rendering of macros, panels and tables without a parser; jira2md (2023, regex based) is adequate for the simpler text the app writes, with a tested pre-pass for dash lists and GFM tables |
 | D15 | Service tests use `bun:sqlite` instead of sql.js | sql.js is built without FTS5; bun:sqlite has it, matching the app's bundled SQLite |
+| D16 | Model output schemas are built per item with candidate enums, nullable fields and no numeric bounds; a separate canonical payload schema is stored and executed | Keeps choices constrained on every provider and lets prompts evolve without migrating stored proposals |
+| D17 | Local directory edits by the user are direct writes; only inferred changes (from pasted text) go through proposals | Matches the hard rule's intent: approval gates writes the secretary infers, not the user's own edits |
 
 ## 13. References
 

@@ -349,6 +349,69 @@ export function createHandler(issues: Map<string, Issue>) {
       });
     }
 
+    const meta = /^issue\/createmeta\/([A-Z]+)\/issuetypes(?:\/(\w[\w-]*))?$/.exec(path);
+    if (meta) {
+      const types = ["Epic", "Story", "Task", "Bug", "Sub-task"] as const;
+      if (!meta[2])
+        return json({
+          isLast: true,
+          values: types.map((t) => ({ id: t, name: t, subtask: t === "Sub-task" })),
+        });
+      const fieldsMeta = [
+        { fieldId: "project", name: "Project", required: true },
+        { fieldId: "issuetype", name: "Issue Type", required: true },
+        { fieldId: "summary", name: "Summary", required: true },
+        { fieldId: "description", name: "Description", required: false },
+        { fieldId: "priority", name: "Priority", required: false, hasDefaultValue: true },
+        { fieldId: "assignee", name: "Assignee", required: false },
+        { fieldId: "duedate", name: "Due Date", required: false },
+        ...(meta[2] === "Sub-task" ? [{ fieldId: "parent", name: "Parent", required: true }] : []),
+        ...(meta[2] === "Epic" ? [{ fieldId: EPIC_NAME, name: "Epic Name", required: true }] : []),
+        ...(meta[2] !== "Epic" && meta[2] !== "Sub-task"
+          ? [{ fieldId: EPIC_LINK, name: "Epic Link", required: false }]
+          : []),
+      ];
+      return json({ isLast: true, values: fieldsMeta });
+    }
+    if (path === "issue" && req.method === "POST") {
+      const f = (body?.fields ?? {}) as Record<string, unknown>;
+      const project = (f.project as { key?: string } | undefined)?.key ?? "";
+      const type = (f.issuetype as { id?: string } | undefined)?.id as Issue["type"] | undefined;
+      if (!["PAY", "OPS"].includes(project) || !type)
+        return error("project and issuetype are required");
+      if (type === "Epic" && !f[EPIC_NAME])
+        return json({ errorMessages: [], errors: { [EPIC_NAME]: "Epic Name is required." } }, 400);
+      const count = [...issues.values()].filter((i) => i.project === project).length;
+      const now = new Date().toISOString().replace("Z", "+0000");
+      const created: Issue = {
+        id: String(30000 + issues.size),
+        key: `${project}-${count + 1}`,
+        project,
+        type,
+        summary: String(f.summary ?? ""),
+        description: (f.description as string | undefined) ?? null,
+        status: "To Do",
+        priority: (f.priority as { name?: string } | undefined)?.name ?? "Medium",
+        assignee:
+          USERS.find((u) => u.name === (f.assignee as { name?: string } | undefined)?.name) ?? null,
+        reporter: USERS[0] as User,
+        epic: (f[EPIC_LINK] as string | undefined) ?? null,
+        epicName: (f[EPIC_NAME] as string | undefined) ?? null,
+        parent: (f.parent as { key?: string } | undefined)?.key ?? null,
+        labels: [],
+        due: (f.duedate as string | undefined) ?? null,
+        created: now,
+        updated: now,
+        comments: [],
+        links: [],
+      };
+      issues.set(created.key, created);
+      return json(
+        { id: created.id, key: created.key, self: `/rest/api/2/issue/${created.id}` },
+        201,
+      );
+    }
+
     const m = /^issue\/([^/]+)(\/.*)?$/.exec(path);
     const issue = m ? issues.get(decodeURIComponent(m[1] ?? "")) : undefined;
     if (m && !issue) return error("Issue Does Not Exist", 404);

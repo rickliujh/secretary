@@ -132,3 +132,56 @@ Not verified yet
   the mock and fixtures only.
 - The new pages have not been exercised in the running app; they typecheck, lint and
   build.
+
+## Phase 3: Intake, proposals, execution (2026-09-24)
+
+Built
+- Deterministic preprocessing: whitespace normalisation, removal of quoted email history
+  and signatures, and extraction of Jira keys (also from browse URLs), ServiceNow numbers
+  (INC, RITM, REQ, CHG, PRB, SCTASK), emails, URLs and mentioned contacts (full name,
+  email, @username, unique first name).
+- `Retrieval` service: candidates from explicit mentions, bm25 full-text search, the
+  sender's issues, recent views and updates, tracked epics and the candidates' epics;
+  project issue types and statuses, priorities and Jira users from the cache; relevant
+  teams and people; open dependencies; confirmed memories and correction examples
+  ranked by overlap, weight and recency; context notes. Every block has a token budget.
+- Prompts: `segment_input` (verbatim quotes, checked in code) and `classify_item` with a
+  per-item output schema whose targets, projects, issue types, statuses, people, teams
+  and users are enums from the candidates. Code validation covers `$new` refs, sub-task
+  parents, epic types, dates, statuses already set, unknown users and incident
+  references; failures go through repair, escalation, then a question.
+- `Intake` service: persists the inbox item first, splits long input, snapshots
+  retrieval per item, classifies, merges `$new` refs across items, drops duplicates,
+  and adds a question when the model asks one or stays below the confidence threshold.
+  Re-triage, and answering a question, re-run it.
+- Canonical proposal payloads for all FR-2.2 kinds; `Executor.runProposal` for each
+  kind (Jira create with create-metadata checks, comment, transition by target status,
+  field updates and assignment; local dependency, contact, team, memory and draft-request
+  writes), all recorded in `actions_log`.
+- `Proposals` service: approve (with optional edits), reject, approve all in order,
+  dismiss, and correction capture into `example` memories (FR-7.2).
+- Inbox page: intake box (source, sender picker, cancel), history with search and
+  pending/failed badges, proposal cards per kind with rationale, evidence and
+  confidence, edit forms per kind, approve/edit/reject with a/e/r on the focused card,
+  approve all, re-triage, dismiss, and clarification cards. Quick intake on the
+  dashboard and a pending count on the sidebar.
+- Eval set: eight sanitised cases (including a prompt injection) with a scorer; a live
+  runner behind `SECRETARY_EVAL_*` variables that can also compare a fast model with the
+  standard one. `mock:jira` now supports create metadata and issue creation.
+
+Decisions and defaults (design.md 7.3 notes, D16, D17)
+- Deterministic ranking replaces the optional `rerank_candidates` call.
+- Segmentation that fails validation falls back to classifying the whole text.
+- Correction examples use `subject_type = proposal_kind` and store the item quote.
+- Approved `remember` proposals are stored as confirmed, `inferred` memories.
+- Approved `draft_message` proposals create a `communications` row in `draft` status
+  whose body holds the notes; the Phase 6 composer writes the message.
+- Project issue types and statuses offered to the model come from the local cache;
+  Jira's create metadata is checked at execution.
+
+Not verified yet
+- No real model has run: every model call in tests is scripted. The Phase 3 checklist
+  needs your sample messages and an LLM endpoint (Settings > Providers and Models). To
+  run the eval: set the `SECRETARY_EVAL_*` variables described in
+  `src/test/eval/eval.live.test.ts` and run `bun test src/test/eval`.
+- The Inbox UI has not been exercised in the running app.

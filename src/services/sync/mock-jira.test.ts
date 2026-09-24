@@ -77,3 +77,54 @@ describe("sync and executor against the mock Jira", () => {
     expect(r.stored).toHaveLength(story.comments.length);
   });
 });
+
+describe("proposals against the mock Jira", () => {
+  test("an approved create_issue proposal creates the issue under its epic", async () => {
+    const { ProposalsLive } = await import("@/services/proposals/live");
+    const { Proposals } = await import("@/services/proposals");
+    const { inboxItems, proposals } = await import("@/db/schema");
+    const created = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          yield* query((d) =>
+            d.insert(inboxItems).values({
+              id: "in1",
+              source: "typed",
+              rawText: "x",
+              receivedAt: "2026-09-24T00:00:00Z",
+            }),
+          );
+          yield* query((d) =>
+            d.insert(proposals).values({
+              id: "p1",
+              inboxItemId: "in1",
+              kind: "create_issue",
+              payload: {
+                kind: "create_issue",
+                ref: "$new:1",
+                projectKey: "PAY",
+                issueType: "Story",
+                summary: "Export credit notes",
+                descriptionMd: null,
+                parent: null,
+                epic: "PAY-1",
+                priority: null,
+                assignee: null,
+                dueDate: null,
+              },
+              createdAt: "2026-09-24T00:00:00Z",
+            }),
+          );
+          const result = yield* (yield* Proposals).approve("p1");
+          const stored = yield* row(result.issueKey ?? "");
+          return { result, row: stored };
+        }),
+        Layer.provideMerge(ProposalsLive, layer),
+      ),
+    );
+    expect(created.result.status).toBe("executed");
+    expect(created.row?.epicKey).toBe("PAY-1");
+    expect(issues.get(created.result.issueKey ?? "")?.summary).toBe("Export credit notes");
+  });
+});
