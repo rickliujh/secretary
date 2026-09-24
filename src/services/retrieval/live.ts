@@ -352,6 +352,7 @@ const make = Effect.gen(function* () {
             }
           : null,
         quote: req.quote,
+        clarification: req.clarification ?? null,
         references: {
           issueKeys: req.references.issueKeys,
           tickets: req.references.tickets,

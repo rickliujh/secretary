@@ -1,5 +1,6 @@
 /** Shared test setup: a DB synced from the Jira fixtures, via the real Sync service. */
 import { Effect, Layer } from "effect";
+import type { AppSettings } from "@/services/settings/schema";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
 import comments from "@/test/fixtures/jira/comments-PAY-2.json";
@@ -13,7 +14,7 @@ import { json, type StubRoute, stubFetch } from "@/test/stub-fetch";
 export const fixtureIssues = [...page1.issues, ...page2.issues];
 
 /** JiraClient + Sync over a stub serving the fixtures; `extra` routes take precedence. */
-export function syncedJiraLayer(extra: StubRoute[] = []) {
+export function syncedJiraLayer(extra: StubRoute[] = [], patch: Partial<AppSettings> = {}) {
   const stub = stubFetch([
     ...extra,
     { match: (u) => u.pathname.endsWith("/myself"), respond: () => json(myself) },
@@ -38,7 +39,7 @@ export function syncedJiraLayer(extra: StubRoute[] = []) {
   ]);
   const layer = Layer.provideMerge(
     SyncLive,
-    jiraTestLayer(stub.fetch, jiraSettings({ trackedEpics: ["PAY-1"] })),
+    jiraTestLayer(stub.fetch, { ...jiraSettings({ trackedEpics: ["PAY-1"] }), ...patch }),
   );
   return { layer, seen: stub.seen };
 }

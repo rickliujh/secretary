@@ -9,6 +9,7 @@ export type SnapshotRequest = {
   senderPersonId: string | null;
   references: References;
   today: string;
+  clarification?: string | null;
 };
 
 export interface RetrievalShape {

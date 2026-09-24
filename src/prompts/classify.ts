@@ -44,6 +44,8 @@ export type ItemSnapshot = {
   source: string;
   sender: { id: string; displayName: string; title: string | null; team: string | null } | null;
   quote: string;
+  /** The user's own answer to an earlier question about this input (trusted). */
+  clarification: string | null;
   references: { issueKeys: string[]; tickets: string[]; urls: string[]; contactIds: string[] };
   candidates: CandidateIssue[];
   projects: { key: string; issueTypes: string[]; statuses: string[] }[];
@@ -507,6 +509,9 @@ ${HARD_RULES}
       from: s.sender ? line([s.sender.displayName, s.sender.title, s.sender.team]) : null,
     })}\nReferences found by code: issues ${s.references.issueKeys.join(", ") || "none"}; tickets ${s.references.tickets.join(", ") || "none"}.`,
   );
+  if (s.clarification) {
+    blocks.push(`## Clarification from the user (trusted)\n${s.clarification}`);
+  }
 
   return { system, prompt: blocks.join("\n\n") };
 }
