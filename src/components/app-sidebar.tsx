@@ -1,6 +1,9 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Sparkles } from "lucide-react";
 import { CONTEXT_NAV, type NavItem, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
+import { queryKeys } from "@/app/query-client";
+import { run } from "@/app/runtime";
 import {
   Sidebar,
   SidebarContent,
@@ -10,12 +13,22 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { pendingCount } from "@/services/inbox/queries";
 
-function NavList({ items, pathname }: { items: NavItem[]; pathname: string }) {
+function NavList({
+  items,
+  pathname,
+  badges = {},
+}: {
+  items: NavItem[];
+  pathname: string;
+  badges?: Record<string, number>;
+}) {
   return (
     <SidebarMenu>
       {items.map((item) => (
@@ -26,6 +39,7 @@ function NavList({ items, pathname }: { items: NavItem[]; pathname: string }) {
               <span>{item.label}</span>
             </Link>
           </SidebarMenuButton>
+          {(badges[item.to] ?? 0) > 0 && <SidebarMenuBadge>{badges[item.to]}</SidebarMenuBadge>}
         </SidebarMenuItem>
       ))}
     </SidebarMenu>
@@ -34,6 +48,11 @@ function NavList({ items, pathname }: { items: NavItem[]; pathname: string }) {
 
 export function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const pending = useQuery({
+    queryKey: queryKeys.pendingCount,
+    queryFn: ({ signal }) => run(pendingCount, signal),
+    refetchInterval: 30_000,
+  });
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -54,7 +73,11 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupLabel>Work</SidebarGroupLabel>
           <SidebarGroupContent>
-            <NavList items={WORK_NAV} pathname={pathname} />
+            <NavList
+              items={WORK_NAV}
+              pathname={pathname}
+              badges={{ "/inbox": pending.data ?? 0 }}
+            />
           </SidebarGroupContent>
         </SidebarGroup>
         <SidebarGroup>

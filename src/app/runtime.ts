@@ -7,15 +7,19 @@ import { ConfluenceClientLive } from "@/services/confluence/live";
 import { DbLive } from "@/services/db/live";
 import { ExecutorLive } from "@/services/executor/live";
 import { FetcherLive } from "@/services/http";
+import { IntakeLive } from "@/services/intake/live";
 import { JiraClientLive } from "@/services/jira/live";
 import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
+import { ProposalsLive } from "@/services/proposals/live";
+import { RetrievalLive } from "@/services/retrieval/live";
 import { SecretsLive } from "@/services/secrets/live";
 import { SettingsLive } from "@/services/settings/live";
 import { SyncLive } from "@/services/sync/live";
 
 const Base = Layer.mergeAll(SettingsLive, SecretsLive, DbLive, FetcherLive);
 
-export const AppLayer = ExecutorLive.pipe(
+export const AppLayer = Layer.mergeAll(IntakeLive, ProposalsLive).pipe(
+  Layer.provideMerge(Layer.mergeAll(RetrievalLive, ExecutorLive)),
   Layer.provideMerge(SyncLive),
   Layer.provideMerge(Layer.mergeAll(LlmLive, JiraClientLive, ConfluenceClientLive)),
   Layer.provideMerge(ModelFactoryLive),

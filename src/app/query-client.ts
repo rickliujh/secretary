@@ -30,4 +30,8 @@ export const queryKeys = {
   jiraUserSuggestions: ["directory", "jira-suggestions"] as const,
   contactsByUsername: ["directory", "by-username"] as const,
   confluenceSearch: (cql: string) => ["confluence", "search", cql] as const,
+  inbox: ["inbox"] as const,
+  inboxList: (search: string) => ["inbox", "list", search] as const,
+  inboxDetail: (id: string) => ["inbox", "detail", id] as const,
+  pendingCount: ["inbox", "pending"] as const,
 };
