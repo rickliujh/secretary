@@ -375,5 +375,5 @@ export const markNotified = (ids: readonly string[], today = localDate()) =>
           .update(dependencies)
           .set({ notifiedOn: today })
           .where(inArray(dependencies.id, [...ids])),
-      )
+      ).pipe(Effect.asVoid)
     : Effect.void;

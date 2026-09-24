@@ -128,3 +128,40 @@ describe("proposals against the mock Jira", () => {
     expect(issues.get(created.result.issueKey ?? "")?.summary).toBe("Export credit notes");
   });
 });
+
+describe("dependency mirroring against the mock Jira", () => {
+  test("mirroring shows the dependency on the issue; resolving updates it; turning off removes it", async () => {
+    const deps = await import("@/services/dependencies/queries");
+    const story = [...issues.values()].find((i) => i.type === "Story");
+    if (!story) throw new Error("no story");
+    const states = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const id = yield* deps.createDependency({
+            issueKey: story.key,
+            kind: "incident",
+            label: "Platform fix",
+            externalRef: "INC0012345",
+            externalUrl: "https://snow.example.com/INC0012345",
+          });
+          yield* deps.mirror(id, true);
+          const afterOn = structuredClone(story.remoteLinks);
+          yield* deps.setStatus(id, "resolved");
+          const afterResolve = structuredClone(story.remoteLinks);
+          yield* deps.mirror(id, false);
+          return { afterOn, afterResolve, afterOff: story.remoteLinks };
+        }),
+        layer,
+      ),
+    );
+    expect(states.afterOn).toHaveLength(1);
+    expect(states.afterOn?.[0]?.object).toMatchObject({
+      title: "Waiting on Platform fix (INC0012345)",
+      status: { resolved: false },
+    });
+    expect(states.afterResolve).toHaveLength(1);
+    expect(states.afterResolve?.[0]?.object.status).toEqual({ resolved: true });
+    expect(states.afterOff).toEqual([]);
+  });
+});

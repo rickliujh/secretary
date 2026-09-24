@@ -185,3 +185,35 @@ Not verified yet
   run the eval: set the `SECRETARY_EVAL_*` variables described in
   `src/test/eval/eval.live.test.ts` and run `bun test src/test/eval`.
 - The Inbox UI has not been exercised in the running app.
+
+## Phase 4: Dependencies and follow-ups (2026-09-25)
+
+Built
+- Dependency service: create, edit, status changes, delete; list joined with the issue,
+  the owner and follow-up history; pure timing logic (days overdue, follow-up due,
+  working-day arithmetic) and grouping by owner, most overdue first.
+- Waiting on page: groups by owner with overdue and to-chase counts, filters for
+  "needs action today" and resolved items, and a detail sheet with the follow-up
+  timeline, log follow-up, draft a chase, resolve or reopen, edit, delete, and a Jira
+  mirror switch.
+- "Waiting on" tab on the ticket detail with an add form; approved `link_dependency`
+  proposals land in the same list.
+- Logging a follow-up records it in the timeline, moves an open dependency to waiting
+  and schedules the next chase (default 3 working days, set in Settings > General).
+- OS notifications for due follow-ups while the app runs, at most once a day per
+  dependency (switch in Settings > General).
+- Jira mirroring (FR-3.4, D18): `upsert_remote_link` and `delete_remote_link` Executor
+  actions; mirrored dependencies update their remote link when edited or resolved.
+- "Draft a chase" saves a chase request (incident number, the ask, first request date)
+  for the Phase 6 composer.
+- `mock:jira` supports remote links; an end-to-end test mirrors, resolves and removes
+  one over HTTP.
+
+Decisions and defaults
+- Expected and follow-up dates are local calendar dates; overdue days compare with
+  today's local date.
+- Remote-link writes skip the issue re-fetch because they do not change cached fields.
+
+Not verified yet
+- Remote links in a real Jira DC, and OS notifications on the desktop.
+- The Waiting page in the running app.

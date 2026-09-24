@@ -2,6 +2,7 @@ import { createRootRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { Search } from "lucide-react";
 import { useState } from "react";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
+import { useFollowupReminders } from "@/app/reminders";
 import { useSyncScheduler } from "@/app/sync";
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
@@ -20,6 +21,7 @@ const ALL_NAV = [...WORK_NAV, ...CONTEXT_NAV, SETTINGS_NAV];
 /** Hooks that need the database, so they run inside the startup gate. */
 function Background() {
   useSyncScheduler();
+  useFollowupReminders();
   return null;
 }
 

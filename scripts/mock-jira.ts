@@ -35,6 +35,11 @@ type Issue = {
   updated: string;
   comments: Comment[];
   links: { type: "Blocks"; inward: string }[];
+  remoteLinks?: {
+    id: number;
+    globalId: string;
+    object: { url: string; title: string; summary?: string; status?: { resolved: boolean } };
+  }[];
 };
 
 const STATUSES = {
@@ -486,7 +491,29 @@ export function createHandler(issues: Map<string, Issue>) {
               ? {}
               : { [EPIC_LINK]: { name: "Epic Link", required: false, operations: ["set"] } },
         });
-      if (sub === "/remotelink") return json([]);
+      if (sub === "/remotelink" && req.method === "GET") return json(issue.remoteLinks ?? []);
+      if (sub === "/remotelink" && req.method === "POST") {
+        const links = (issue.remoteLinks ??= []);
+        const globalId = String(body?.globalId ?? "");
+        const object = body?.object as NonNullable<Issue["remoteLinks"]>[number]["object"];
+        if (!object?.url || !object.title) return error("url and title are required");
+        const existing = links.find((l) => globalId && l.globalId === globalId);
+        if (existing) {
+          existing.object = object;
+          return json({
+            id: existing.id,
+            self: `/rest/api/2/issue/${issue.key}/remotelink/${existing.id}`,
+          });
+        }
+        const id = 10000 + Math.floor(rand() * 89999);
+        links.push({ id, globalId, object });
+        return json({ id, self: `/rest/api/2/issue/${issue.key}/remotelink/${id}` }, 201);
+      }
+      if (sub === "/remotelink" && req.method === "DELETE") {
+        const globalId = url.searchParams.get("globalId");
+        issue.remoteLinks = (issue.remoteLinks ?? []).filter((l) => l.globalId !== globalId);
+        return new Response(null, { status: 204 });
+      }
     }
     return error(`Mock does not implement ${req.method} ${url.pathname}`, 404);
   };

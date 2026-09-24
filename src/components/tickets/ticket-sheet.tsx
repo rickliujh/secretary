@@ -7,6 +7,7 @@ import { z } from "zod";
 import { useSettings } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
+import { IssueDependencies } from "@/components/dependencies/issue-dependencies";
 import { ContextNotes } from "@/components/directory/context-notes";
 import { PersonDialog } from "@/components/directory/person-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -291,6 +292,7 @@ export function TicketSheet({
               <TabsTrigger value="details">Details</TabsTrigger>
               <TabsTrigger value="description">Description</TabsTrigger>
               <TabsTrigger value="comments">Comments ({d.comments.length})</TabsTrigger>
+              <TabsTrigger value="waiting">Waiting on</TabsTrigger>
               <TabsTrigger value="links">Links</TabsTrigger>
               <TabsTrigger value="notes">Notes</TabsTrigger>
             </TabsList>
@@ -330,6 +332,9 @@ export function TicketSheet({
                     </article>
                   ))}
                   <CommentComposer issue={d.issue} />
+                </TabsContent>
+                <TabsContent value="waiting">
+                  <IssueDependencies issueKey={d.issue.key} />
                 </TabsContent>
                 <TabsContent value="links">
                   <Links detail={d} baseUrl={baseUrl} />

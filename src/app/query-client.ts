@@ -34,4 +34,8 @@ export const queryKeys = {
   inboxList: (search: string) => ["inbox", "list", search] as const,
   inboxDetail: (id: string) => ["inbox", "detail", id] as const,
   pendingCount: ["inbox", "pending"] as const,
+  dependencies: ["dependencies"] as const,
+  dependencyList: (includeResolved: boolean, issueKey?: string) =>
+    ["dependencies", "list", includeResolved, issueKey ?? ""] as const,
+  dependency: (id: string) => ["dependencies", "detail", id] as const,
 };

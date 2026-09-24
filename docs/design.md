@@ -123,7 +123,7 @@ JSON columns are typed with zod at the service boundary.
 | `teams` | Org context | `id`, `name`, `function`, `contact_for`, `channel`, `escalation_path`, `confluence_urls` json, `notes_md` |
 | `people` | Contacts | `id`, `display_name`, `jira_username`, `email`, `title`, `team_id`, `responsibilities`, `profile` json (tone, formality, detail, responsiveness, preferred_channel, language), `notes_md` |
 | `context_notes` | Imported Confluence pages and free notes attached to a team, person or issue | `id`, `subject_type` (team/person/issue), `subject_id`, `title`, `body_md`, `source_url`, `source_id` (Confluence page id), `source_version`, `imported_at` |
-| `dependencies` | External things a ticket waits on | `id`, `issue_key`, `kind` (person/team/incident/external), `label`, `owner_person_id`, `owner_team_id`, `external_ref`, `external_url`, `status` (open/waiting/blocked/resolved), `requested_at`, `expected_at`, `next_followup_at`, `resolved_at`, `notes_md`, `mirror_remote_link_id` |
+| `dependencies` | External things a ticket waits on | `id`, `issue_key`, `kind` (person/team/incident/external), `label`, `owner_person_id`, `owner_team_id`, `external_ref`, `external_url`, `status` (open/waiting/blocked/resolved), `requested_at` (timestamp), `expected_at` and `next_followup_at` (local dates), `resolved_at`, `notes_md`, `mirror_remote_link_id`, `notified_on` (date of the last reminder) |
 | `followups` | Timeline per dependency | `id`, `dependency_id`, `at`, `channel`, `summary`, `communication_id` |
 | `inbox_items` | Raw inputs | `id`, `source` (teams/email/meeting/typed/other), `sender_person_id`, `raw_text`, `received_at`, `status` (new/triaged/filed/dismissed), `summary`, `triage` json (counts, or the error of a failed run) |
 | `intake_items` | Atomic items of an inbox item | `id`, `inbox_item_id`, `idx`, `quote`, `summary`, `snapshot` json (the full retrieval snapshot, for replay), `output` json (validated model output), `prompt_version`, `tier`, `model`, `escalated`, `low_confidence`, `error` |
@@ -455,6 +455,7 @@ No silent fallbacks between providers; the user chooses the model.
 | D15 | Service tests use `bun:sqlite` instead of sql.js | sql.js is built without FTS5; bun:sqlite has it, matching the app's bundled SQLite |
 | D16 | Model output schemas are built per item with candidate enums, nullable fields and no numeric bounds; a separate canonical payload schema is stored and executed | Keeps choices constrained on every provider and lets prompts evolve without migrating stored proposals |
 | D17 | Local directory edits by the user are direct writes; only inferred changes (from pasted text) go through proposals | Matches the hard rule's intent: approval gates writes the secretary infers, not the user's own edits |
+| D18 | Dependency mirroring upserts a Jira remote link keyed by `globalId = secretary:dependency:<id>` through the Executor; its URL falls back to the owning team's Confluence page, then a mailto | Re-posting the same globalId updates instead of duplicating; Jira requires a URL on every remote link |
 
 ## 13. References
 
