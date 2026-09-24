@@ -3,6 +3,7 @@ import { z } from "zod";
 import type {
   CommentPage,
   CreateMetaField,
+  CreateMetaIssueType,
   EditMeta,
   JiraField,
   Priority,
@@ -77,6 +78,9 @@ export interface JiraClientShape {
     issueKey: string,
     query: string,
   ) => Effect.Effect<readonly UserRef[], JiraError>;
+  readonly createMetaIssueTypes: (
+    projectKey: string,
+  ) => Effect.Effect<readonly CreateMetaIssueType[], JiraError>;
   readonly createMetaFields: (
     projectKey: string,
     issueTypeId: string,

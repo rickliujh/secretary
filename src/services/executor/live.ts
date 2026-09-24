@@ -1,13 +1,22 @@
+import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { actionsLog } from "@/db/schema";
+import { actionsLog, communications, dependencies, memories, people, teams } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redactValue } from "@/lib/redact";
 import { Db, query } from "@/services/db";
-import { JiraClient } from "@/services/jira";
+import { CreatedIssueSchema, JiraClient } from "@/services/jira";
+import { issueRefs, NEW_REF_RE, type ProposalPayload } from "@/services/proposals/schema";
 import { Sync } from "@/services/sync";
-import { describeAction, Executor, ExecutorError, JiraActionSchema } from ".";
-import { buildJiraWrite, MappingError } from "./jira-mapping";
+import {
+  describeAction,
+  Executor,
+  ExecutorError,
+  type JiraAction,
+  JiraActionSchema,
+  type ProposalResult,
+} from ".";
+import { buildCreateIssue, buildJiraWrite, MappingError } from "./jira-mapping";
 
 const make = Effect.gen(function* () {
   const jira = yield* JiraClient;
@@ -29,63 +38,313 @@ const make = Effect.gen(function* () {
       return id;
     });
 
-  return Executor.of({
-    run: (input, opts = {}) =>
-      Effect.gen(function* () {
-        const parsed = JiraActionSchema.safeParse(input);
-        if (!parsed.success) {
-          return yield* new ExecutorError({
-            kind: "invalid",
-            message: parsed.error.issues.map((i) => i.message).join("; "),
-          });
+  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const fail = (kind: "invalid" | "unsupported", message: string) =>
+    new ExecutorError({ kind, message });
+
+  /** Records a local (non-Jira) write in the audit log. */
+  const audit = (
+    proposalId: string,
+    action: string,
+    target: string,
+    request: unknown,
+    response: unknown,
+  ) => log({ proposalId, action, target, request, response, ok: true });
+
+  const appendNote = (existing: string | null, note: string | null) =>
+    note
+      ? `${existing ? `${existing.trimEnd()}\n\n` : ""}- ${nowIso().slice(0, 10)}: ${note}`
+      : existing;
+
+  /** A single user-initiated or approved Jira write: validate, send, log, re-fetch. */
+  const run = (input: JiraAction, opts: { proposalId?: string } = {}) =>
+    Effect.gen(function* () {
+      const parsed = JiraActionSchema.safeParse(input);
+      if (!parsed.success) {
+        return yield* new ExecutorError({
+          kind: "invalid",
+          message: parsed.error.issues.map((i) => i.message).join("; "),
+        });
+      }
+      const action = parsed.data;
+      const { effective: fieldIds } = yield* sync.fieldInfo;
+      const editMeta =
+        action.kind === "set_epic" ? yield* jira.getEditMeta(action.issueKey) : undefined;
+      const request = yield* Effect.try({
+        try: () => buildJiraWrite(action, { fieldIds, editMeta }),
+        catch: (e) =>
+          new ExecutorError({
+            kind: e instanceof MappingError ? "unsupported" : "invalid",
+            message: e instanceof Error ? e.message : String(e),
+          }),
+      });
+
+      const response = yield* jira.send(request).pipe(
+        Effect.tapError((e) =>
+          log({
+            proposalId: opts.proposalId ?? null,
+            action: action.kind,
+            target: action.issueKey,
+            request,
+            response: { error: e.message, status: e.status ?? null },
+            ok: false,
+          }).pipe(Effect.catchAll(() => Effect.void)),
+        ),
+      );
+      const actionLogId = yield* log({
+        proposalId: opts.proposalId ?? null,
+        action: action.kind,
+        target: action.issueKey,
+        request,
+        response,
+        ok: true,
+      });
+      logger.info(`${describeAction(action)}: done`);
+
+      // Show Jira's truth after every write (design.md 7.3).
+      const refreshed = yield* sync.refreshIssue(action.issueKey).pipe(
+        Effect.as(true),
+        Effect.catchAll((e) =>
+          Effect.sync(() => {
+            logger.warn(`Re-fetch of ${action.issueKey} failed`, e.message);
+            return false;
+          }),
+        ),
+      );
+      return { actionLogId, response, refreshed };
+    });
+
+  const createIssue = (p: Extract<ProposalPayload, { kind: "create_issue" }>, proposalId: string) =>
+    Effect.gen(function* () {
+      const { effective: fieldIds } = yield* sync.fieldInfo;
+      const types = yield* jira.createMetaIssueTypes(p.projectKey);
+      const type = types.find((t) => t.name.toLowerCase() === p.issueType.toLowerCase());
+      if (!type) {
+        return yield* fail(
+          "unsupported",
+          `${p.projectKey} has no issue type "${p.issueType}" (available: ${types.map((t) => t.name).join(", ")}).`,
+        );
+      }
+      const fields = yield* jira.createMetaFields(p.projectKey, type.id);
+      const plan = yield* Effect.try({
+        try: () =>
+          buildCreateIssue(
+            {
+              projectKey: p.projectKey,
+              issueTypeId: type.id,
+              issueTypeName: type.name,
+              summary: p.summary,
+              descriptionMd: p.descriptionMd,
+              parent: p.parent,
+              epic: p.epic,
+              priority: p.priority,
+              assignee: p.assignee,
+              dueDate: p.dueDate,
+            },
+            { fieldIds, fields },
+          ),
+        catch: (e) => fail("unsupported", e instanceof Error ? e.message : String(e)),
+      });
+      const response = yield* jira.send(plan.request).pipe(
+        Effect.tapError((e) =>
+          log({
+            proposalId,
+            action: "create_issue",
+            target: p.projectKey,
+            request: plan.request,
+            response: { error: e.message },
+            ok: false,
+          }).pipe(Effect.ignore),
+        ),
+      );
+      const created = CreatedIssueSchema.safeParse(response);
+      if (!created.success)
+        return yield* fail("invalid", "Jira created the issue but did not return its key.");
+      const key = created.data.key;
+      yield* log({
+        proposalId,
+        action: "create_issue",
+        target: key,
+        request: plan.request,
+        response,
+        ok: true,
+      });
+      yield* sync.refreshIssue(key).pipe(Effect.ignore);
+      if (plan.epicAfterCreate)
+        yield* run(
+          { kind: "set_epic", issueKey: key, epicKey: plan.epicAfterCreate },
+          { proposalId },
+        );
+      return { message: `Created ${key}`, issueKey: key } satisfies ProposalResult;
+    });
+
+  const transition = (
+    p: Extract<ProposalPayload, { kind: "transition_issue" }>,
+    proposalId: string,
+  ) =>
+    Effect.gen(function* () {
+      const available = yield* jira.getTransitions(p.target);
+      const wanted = p.toStatus.toLowerCase();
+      const t =
+        available.find((x) => x.to.name.toLowerCase() === wanted) ??
+        available.find((x) => x.name.toLowerCase() === wanted);
+      if (!t) {
+        return yield* fail(
+          "unsupported",
+          `${p.target} cannot move to ${p.toStatus} from its current status (available: ${available.map((x) => x.to.name).join(", ") || "none"}).`,
+        );
+      }
+      yield* run(
+        { kind: "transition", issueKey: p.target, transitionId: t.id, transitionName: t.to.name },
+        { proposalId },
+      );
+      return {
+        message: `Moved ${p.target} to ${t.to.name}`,
+        issueKey: p.target,
+      } satisfies ProposalResult;
+    });
+
+  const runProposal = (
+    payload: ProposalPayload,
+    opts: { proposalId: string; inboxItemId: string | null },
+  ) =>
+    Effect.gen(function* () {
+      const unresolved = issueRefs(payload).filter((r) => NEW_REF_RE.test(r));
+      if (unresolved.length) {
+        return yield* fail(
+          "invalid",
+          `Approve the new issue ${unresolved.join(", ")} first; this proposal depends on it.`,
+        );
+      }
+      const { proposalId } = opts;
+      const jiraAction = (action: JiraAction, message: string) =>
+        Effect.as(run(action, { proposalId }), {
+          message,
+          issueKey: action.issueKey,
+        } satisfies ProposalResult);
+
+      switch (payload.kind) {
+        case "create_issue":
+          return yield* createIssue(payload, proposalId);
+        case "add_comment":
+          return yield* jiraAction(
+            { kind: "add_comment", issueKey: payload.target, bodyMarkdown: payload.bodyMd },
+            `Commented on ${payload.target}`,
+          );
+        case "transition_issue":
+          return yield* transition(payload, proposalId);
+        case "update_issue": {
+          const { assignee, ...fields } = payload.changes;
+          if (Object.keys(fields).length > 0) {
+            yield* run({ kind: "update_fields", issueKey: payload.target, fields }, { proposalId });
+          }
+          if (assignee !== undefined) {
+            yield* run(
+              { kind: "assign", issueKey: payload.target, username: assignee },
+              { proposalId },
+            );
+          }
+          return {
+            message: `Updated ${payload.target}`,
+            issueKey: payload.target,
+          } satisfies ProposalResult;
         }
-        const action = parsed.data;
-        const { effective: fieldIds } = yield* sync.fieldInfo;
-        const editMeta =
-          action.kind === "set_epic" ? yield* jira.getEditMeta(action.issueKey) : undefined;
-        const request = yield* Effect.try({
-          try: () => buildJiraWrite(action, { fieldIds, editMeta }),
-          catch: (e) =>
-            new ExecutorError({
-              kind: e instanceof MappingError ? "unsupported" : "invalid",
-              message: e instanceof Error ? e.message : String(e),
-            }),
-        });
+        case "link_dependency": {
+          const id = newId();
+          const row = {
+            id,
+            issueKey: payload.target,
+            kind: payload.dependencyKind,
+            label: payload.label,
+            ownerPersonId: payload.ownerPersonId,
+            ownerTeamId: payload.ownerTeamId,
+            externalRef: payload.externalRef,
+            externalUrl: payload.externalUrl,
+            status: "open" as const,
+            requestedAt: nowIso(),
+            expectedAt: payload.expectedAt,
+            nextFollowupAt: payload.nextFollowupAt,
+          };
+          yield* q((d) => d.insert(dependencies).values(row));
+          yield* audit(proposalId, "link_dependency", payload.target, row, { id });
+          return {
+            message: `${payload.target} now waits on ${payload.label}`,
+            dependencyId: id,
+            issueKey: payload.target,
+          } satisfies ProposalResult;
+        }
+        case "update_person": {
+          const person = yield* q((d) =>
+            d.select().from(people).where(eq(people.id, payload.personId)).get(),
+          );
+          if (!person) return yield* fail("invalid", "That contact no longer exists.");
+          const { profile, ...rest } = payload.changes;
+          const set = {
+            ...rest,
+            profile: { ...(person.profile ?? {}), ...(profile ?? {}) },
+            notesMd: appendNote(person.notesMd, payload.noteAppend),
+          };
+          yield* q((d) => d.update(people).set(set).where(eq(people.id, person.id)));
+          yield* audit(proposalId, "update_person", person.id, set, null);
+          return { message: `Updated ${person.displayName}` } satisfies ProposalResult;
+        }
+        case "update_team": {
+          const team = yield* q((d) =>
+            d.select().from(teams).where(eq(teams.id, payload.teamId)).get(),
+          );
+          if (!team) return yield* fail("invalid", "That team no longer exists.");
+          const set = { ...payload.changes, notesMd: appendNote(team.notesMd, payload.noteAppend) };
+          yield* q((d) => d.update(teams).set(set).where(eq(teams.id, team.id)));
+          yield* audit(proposalId, "update_team", team.id, set, null);
+          return { message: `Updated ${team.name}` } satisfies ProposalResult;
+        }
+        case "remember": {
+          const id = newId();
+          const row = {
+            id,
+            kind: payload.memoryKind,
+            subjectType: payload.subjectType,
+            subjectId: payload.subjectId,
+            content: payload.content,
+            source: "inferred" as const,
+            sourceInboxItemId: opts.inboxItemId,
+            // Approval is the confirmation (FR-7.5).
+            confirmed: true,
+            createdAt: nowIso(),
+          };
+          yield* q((d) => d.insert(memories).values(row));
+          yield* audit(proposalId, "remember", id, row, null);
+          return { message: "Remembered", memoryId: id } satisfies ProposalResult;
+        }
+        case "draft_message": {
+          const id = newId();
+          // The composer (Phase 6) turns these notes into the actual message.
+          const row = {
+            id,
+            kind: payload.channel,
+            intent: payload.intent,
+            recipientPersonId: payload.recipientPersonId,
+            recipientTeamId: payload.recipientTeamId,
+            issueKeys: payload.issueKeys,
+            bodyMd: payload.notes,
+            status: "draft" as const,
+            createdAt: nowIso(),
+          };
+          yield* q((d) => d.insert(communications).values(row));
+          yield* audit(proposalId, "draft_message", id, row, null);
+          return {
+            message: "Draft request saved for the Drafts page",
+            communicationId: id,
+          } satisfies ProposalResult;
+        }
+        case "needs_clarification":
+          return yield* fail("unsupported", "Answer the question instead of approving it.");
+      }
+    });
 
-        const response = yield* jira.send(request).pipe(
-          Effect.tapError((e) =>
-            log({
-              proposalId: opts.proposalId ?? null,
-              action: action.kind,
-              target: action.issueKey,
-              request,
-              response: { error: e.message, status: e.status ?? null },
-              ok: false,
-            }).pipe(Effect.catchAll(() => Effect.void)),
-          ),
-        );
-        const actionLogId = yield* log({
-          proposalId: opts.proposalId ?? null,
-          action: action.kind,
-          target: action.issueKey,
-          request,
-          response,
-          ok: true,
-        });
-        logger.info(`${describeAction(action)}: done`);
-
-        // Show Jira's truth after every write (design.md 7.3).
-        const refreshed = yield* sync.refreshIssue(action.issueKey).pipe(
-          Effect.as(true),
-          Effect.catchAll((e) =>
-            Effect.sync(() => {
-              logger.warn(`Re-fetch of ${action.issueKey} failed`, e.message);
-              return false;
-            }),
-          ),
-        );
-        return { actionLogId, response, refreshed };
-      }),
+  return Executor.of({
+    runProposal,
+    run: (input, opts = {}) => run(input, opts),
   });
 });
 

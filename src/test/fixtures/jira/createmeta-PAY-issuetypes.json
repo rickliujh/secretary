@@ -1,0 +1,40 @@
+{
+  "maxResults": 50,
+  "startAt": 0,
+  "total": 4,
+  "isLast": true,
+  "values": [
+    {
+      "self": "https://jira.example.com/rest/api/2/issuetype/10000",
+      "id": "10000",
+      "description": "Created by Jira Software",
+      "iconUrl": "",
+      "name": "Epic",
+      "subtask": false
+    },
+    {
+      "self": "https://jira.example.com/rest/api/2/issuetype/10001",
+      "id": "10001",
+      "description": "",
+      "iconUrl": "",
+      "name": "Story",
+      "subtask": false
+    },
+    {
+      "self": "https://jira.example.com/rest/api/2/issuetype/10003",
+      "id": "10003",
+      "description": "",
+      "iconUrl": "",
+      "name": "Sub-task",
+      "subtask": true
+    },
+    {
+      "self": "https://jira.example.com/rest/api/2/issuetype/10004",
+      "id": "10004",
+      "description": "",
+      "iconUrl": "",
+      "name": "Bug",
+      "subtask": false
+    }
+  ]
+}

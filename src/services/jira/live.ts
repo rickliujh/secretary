@@ -8,6 +8,7 @@ import { Settings } from "@/services/settings";
 import {
   CommentPageSchema,
   CreateMetaFieldsSchema,
+  CreateMetaIssueTypesSchema,
   type Credentials,
   EditMetaSchema,
   FieldSchema,
@@ -108,6 +109,14 @@ const make = Effect.gen(function* () {
       call(z.array(UserRefSchema), "user/assignable/search", {
         searchParams: { issueKey, username: query, maxResults: 20 },
       }),
+    createMetaIssueTypes: (projectKey) =>
+      call(
+        CreateMetaIssueTypesSchema,
+        `issue/createmeta/${encodeURIComponent(projectKey)}/issuetypes`,
+        {
+          searchParams: { maxResults: 100 },
+        },
+      ).pipe(Effect.map((r) => r.values)),
     createMetaFields: (projectKey, issueTypeId) =>
       call(
         CreateMetaFieldsSchema,

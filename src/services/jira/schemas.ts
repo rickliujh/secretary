@@ -148,6 +148,7 @@ export type Project = z.infer<typeof ProjectSchema>;
 const FieldMetaSchema = z.object({
   name: z.string(),
   required: z.boolean().default(false),
+  hasDefaultValue: z.boolean().optional(),
   schema: z.object({ type: z.string().optional(), custom: z.string().optional() }).optional(),
   operations: z.array(z.string()).optional(),
   allowedValues: z.array(z.unknown()).optional(),
@@ -161,6 +162,7 @@ export const CreateMetaIssueTypesSchema = z.object({
   values: z.array(IssueTypeSchema.extend({ id: z.string() })),
   isLast: z.boolean().optional(),
 });
+export type CreateMetaIssueType = z.infer<typeof CreateMetaIssueTypesSchema>["values"][number];
 
 /** `GET /issue/createmeta/{project}/issuetypes/{id}` (DC 8.4+). */
 export const CreateMetaFieldsSchema = z.object({
