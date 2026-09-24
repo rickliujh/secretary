@@ -103,3 +103,38 @@ describe("buildJiraWrite", () => {
     ).toBe("issue/A_B-1/transitions");
   });
 });
+
+describe("remote links", () => {
+  test("upsert posts a globalId so repeats update; delete targets the globalId", () => {
+    const up = buildJiraWrite(
+      {
+        kind: "upsert_remote_link",
+        issueKey: "PAY-2",
+        globalId: "secretary:dependency:d1",
+        url: "https://snow/INC1",
+        title: "Waiting on INC1",
+        resolved: false,
+      },
+      { fieldIds },
+    );
+    expect(up).toEqual({
+      method: "POST",
+      path: "issue/PAY-2/remotelink",
+      body: {
+        globalId: "secretary:dependency:d1",
+        application: { type: "secretary", name: "Secretary" },
+        relationship: "waits on",
+        object: { url: "https://snow/INC1", title: "Waiting on INC1", status: { resolved: false } },
+      },
+    });
+    expect(
+      buildJiraWrite(
+        { kind: "delete_remote_link", issueKey: "PAY-2", globalId: "secretary:dependency:d1" },
+        { fieldIds },
+      ),
+    ).toEqual({
+      method: "DELETE",
+      path: "issue/PAY-2/remotelink?globalId=secretary%3Adependency%3Ad1",
+    });
+  });
+});

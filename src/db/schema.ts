@@ -187,7 +187,10 @@ export const dependencies = sqliteTable(
     nextFollowupAt: text("next_followup_at"),
     resolvedAt: text("resolved_at"),
     notesMd: text("notes_md"),
+    /** Jira remote link id when mirrored to the issue (FR-3.4); null when not mirrored. */
     mirrorRemoteLinkId: text("mirror_remote_link_id"),
+    /** Local date (YYYY-MM-DD) of the last follow-up reminder, so each fires once a day. */
+    notifiedOn: text("notified_on"),
   },
   (t) => [
     index("dependencies_issue_idx").on(t.issueKey),

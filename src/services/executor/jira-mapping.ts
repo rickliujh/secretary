@@ -64,6 +64,28 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
       }
       throw new MappingError(`Neither Epic Link nor parent can be edited on ${action.issueKey}.`);
     }
+    case "upsert_remote_link":
+      return {
+        method: "POST",
+        path: issuePath(action.issueKey, "/remotelink"),
+        body: {
+          // Posting the same globalId again updates the link instead of adding one.
+          globalId: action.globalId,
+          application: { type: "secretary", name: "Secretary" },
+          relationship: "waits on",
+          object: {
+            url: action.url,
+            title: action.title,
+            ...(action.summary ? { summary: action.summary } : {}),
+            status: { resolved: action.resolved },
+          },
+        },
+      };
+    case "delete_remote_link":
+      return {
+        method: "DELETE",
+        path: `${issuePath(action.issueKey, "/remotelink")}?globalId=${encodeURIComponent(action.globalId)}`,
+      };
   }
 }
 

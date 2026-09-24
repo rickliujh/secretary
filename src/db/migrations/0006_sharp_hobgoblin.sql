@@ -1,0 +1,1 @@
+ALTER TABLE `dependencies` ADD `notified_on` text;

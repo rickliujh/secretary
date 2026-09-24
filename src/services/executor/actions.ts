@@ -38,6 +38,21 @@ export const JiraActionSchema = z.discriminatedUnion("kind", [
     username: z.string().min(1).nullable(),
   }),
   z.object({ kind: z.literal("set_epic"), issueKey: IssueKey, epicKey: IssueKey.nullable() }),
+  /** Creates or updates (same globalId) a remote link mirroring a dependency (FR-3.4). */
+  z.object({
+    kind: z.literal("upsert_remote_link"),
+    issueKey: IssueKey,
+    globalId: z.string().min(1),
+    url: z.string().min(1),
+    title: z.string().trim().min(1),
+    summary: z.string().optional(),
+    resolved: z.boolean(),
+  }),
+  z.object({
+    kind: z.literal("delete_remote_link"),
+    issueKey: IssueKey,
+    globalId: z.string().min(1),
+  }),
 ]);
 export type JiraAction = z.infer<typeof JiraActionSchema>;
 
@@ -55,5 +70,9 @@ export function describeAction(a: JiraAction): string {
       return a.epicKey
         ? `Link ${a.issueKey} to epic ${a.epicKey}`
         : `Remove epic from ${a.issueKey}`;
+    case "upsert_remote_link":
+      return `Mirror "${a.title}" on ${a.issueKey}`;
+    case "delete_remote_link":
+      return `Remove mirrored dependency from ${a.issueKey}`;
   }
 }

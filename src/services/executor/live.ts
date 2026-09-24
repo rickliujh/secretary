@@ -101,8 +101,13 @@ const make = Effect.gen(function* () {
       });
       logger.info(`${describeAction(action)}: done`);
 
-      // Show Jira's truth after every write (design.md 7.3).
-      const refreshed = yield* sync.refreshIssue(action.issueKey).pipe(
+      // Show Jira's truth after every write (design.md 7.3). Remote links are
+      // not part of the cached issue, so those writes need no re-fetch.
+      const touchesIssue =
+        action.kind !== "upsert_remote_link" && action.kind !== "delete_remote_link";
+      const refreshed = yield* (
+        touchesIssue ? sync.refreshIssue(action.issueKey) : Effect.void
+      ).pipe(
         Effect.as(true),
         Effect.catchAll((e) =>
           Effect.sync(() => {

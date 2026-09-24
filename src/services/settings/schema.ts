@@ -83,6 +83,14 @@ export const SettingsSchema = z.object({
       outputLanguage: z.string().trim().min(1).default("English"),
     })
     .default({ outputLanguage: "English" }),
+  dependencies: z
+    .object({
+      /** Working days until the next follow-up after one is logged. */
+      followupDays: z.number().int().min(1).max(30).default(3),
+      /** OS notifications when a follow-up is due (FR-3.5). */
+      reminders: z.boolean().default(true),
+    })
+    .default({ followupDays: 3, reminders: true }),
 });
 
 export type AppSettings = z.infer<typeof SettingsSchema>;
