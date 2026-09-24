@@ -165,3 +165,47 @@ describe("dependency mirroring against the mock Jira", () => {
     expect(states.afterOff).toEqual([]);
   });
 });
+
+describe("dashboard over 2,000 synced issues", () => {
+  test("loads and builds within the 1 second budget (FR-5 AC)", async () => {
+    const { buildDashboard } = await import("@/services/dashboard/sections");
+    const { loadDashboardInputs } = await import("@/services/dashboard/data");
+    const { DEFAULT_WEIGHTS } = await import("@/services/settings/schema");
+    const big = generate(2000);
+    const bigServer = Bun.serve({ port: 0, fetch: createHandler(big) });
+    try {
+      const bigLayer = Layer.provideMerge(
+        SyncLive,
+        jiraTestLayer(
+          (input, init) => fetch(input, init),
+          jiraSettings({
+            baseUrl: `http://localhost:${bigServer.port}`,
+            trackedEpics: ["PAY-1", "PAY-2", "OPS-1"],
+          }),
+        ),
+      );
+      const r = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            yield* (yield* Sync).run();
+            const started = performance.now();
+            const inputs = yield* loadDashboardInputs(new Date("2026-09-24T09:00:00Z"));
+            const d = buildDashboard(inputs, DEFAULT_WEIGHTS, "2026-09-24", "2026-09-24T09:00:00Z");
+            return {
+              ms: performance.now() - started,
+              issues: inputs.issues.length,
+              focus: d.topFocus.length,
+            };
+          }),
+          bigLayer,
+        ),
+      );
+      expect(r.issues).toBe(2000);
+      expect(r.focus).toBe(10);
+      console.log(`dashboard over ${r.issues} issues: ${r.ms.toFixed(0)} ms`);
+      expect(r.ms).toBeLessThan(1000);
+    } finally {
+      bigServer.stop(true);
+    }
+  }, 60_000);
+});

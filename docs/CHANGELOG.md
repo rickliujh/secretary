@@ -217,3 +217,30 @@ Decisions and defaults
 Not verified yet
 - Remote links in a real Jira DC, and OS notifications on the desktop.
 - The Waiting page in the running app.
+
+## Phase 5: Dashboard and scoring (2026-09-25)
+
+Built
+- Pure, explainable ranking (`services/dashboard/scoring.ts`): priority, due proximity,
+  blocked, blocking, staleness, overdue dependencies, pins and a local adjustment, each
+  with a reason and its points. Weights are editable in Settings > Ranking.
+- Dashboard sections from one snapshot of the cache: Top focus (with a "why here"
+  breakdown), Waiting on me (unseen comments from others on your issues and mentions of
+  you), I am waiting on, At risk (blocked, stale, past due, due soon and not started),
+  Due soon, pending proposals, and Epic health per tracked epic (done, in progress, to
+  do, blocked, stale). Blocked and blocking come from Jira issue links.
+- Pin, snooze (tomorrow, 3 working days, a week) and ranking adjustments, stored in
+  `issue_meta` only and never sent to Jira.
+- Daily brief: facts from code, prose from one `daily_brief` call validated to name
+  every overdue dependency and the top due-soon and focus items; cached until the facts
+  change, and skipped entirely when there is nothing to report.
+- Quick intake stays on the dashboard; the dashboard refreshes after syncs, decisions
+  and dependency changes, and every five minutes so relative dates roll over.
+
+Checks
+- Changing a weight reorders Top focus predictably (unit test).
+- With 2,000 issues synced from `mock:jira`, loading and building the dashboard takes
+  about 70 ms in tests (FR-5 AC: under 1 second).
+
+Not verified yet
+- The brief with a real model, and the dashboard in the running app.

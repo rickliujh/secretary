@@ -359,6 +359,25 @@ same batch (`$new:1` placeholders resolved at run time).
        + override`
 Weights in settings with defaults. Returns the score and a list of reasons.
 
+Implementation (Phase 5, `services/dashboard/scoring.ts`): each factor is scaled to
+0..1 before weighting. Priority maps Jira names (Highest/Blocker 1 ... Lowest 0.1,
+none 0.4); due proximity is 1 when due or overdue and falls to 0 two weeks out;
+blocked is 1 when an open issue blocks it, its status reads blocked/on hold, or a
+dependency is blocked; blocking scales with blocked issues (full at three); staleness
+starts after 7 idle days and is full at 30; the dependency factor is full at 7 days
+overdue; pinned is 1. The local override is added as points. Defaults: priority 3,
+due 4, blocked 2, blocking 2, stale 1, dependency 3, pinned 10 (Settings > Ranking).
+Top focus covers open, non-epic issues that are assigned to the user, pinned, under a
+tracked epic or have an open dependency, minus snoozed ones.
+
+Brief implementation: code collects the facts (changes since the last brief, top
+focus with reasons, due soon, overdue dependencies, follow-ups due, waiting on me,
+pending proposals) and `daily_brief` returns three Markdown sections through
+`llm.object`, validated so every overdue dependency, the first due-soon items and the
+first focus items are named; a failed check goes through repair and escalation. The
+brief is cached in `sync_state` with a hash of the facts and is shown as out of date
+once anything changes; with nothing to report no model call is made.
+
 **Brief** (`services/brief`) `generateText` over dashboard data since
 `last_brief_at`; cached until any relevant table changes.
 

@@ -8,6 +8,7 @@ import { GeneralSection } from "@/components/settings/general-section";
 import { JiraSyncSection } from "@/components/settings/jira-sync-section";
 import { ModelsSection } from "@/components/settings/models-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
+import { RankingSection } from "@/components/settings/ranking-section";
 import { UsageSection } from "@/components/settings/usage-section";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -50,6 +51,9 @@ function SettingsPage() {
         </TabsContent>
         <TabsContent value="models">
           <ModelsSection />
+        </TabsContent>
+        <TabsContent value="ranking">
+          <RankingSection />
         </TabsContent>
         <TabsContent value="jira" className="flex flex-col gap-4">
           <AtlassianSection product="jira" />
