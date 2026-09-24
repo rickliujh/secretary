@@ -137,7 +137,7 @@ export function createHandler(pages: Page[] = PAGES) {
     const m = /^\/rest\/api\/content\/(\d+)$/.exec(url.pathname);
     if (m) {
       const p = pages.find((x) => x.id === m[1]);
-      if (!p) return json({ statusCode: 404, message: "No content found with id: " + m[1] }, 404);
+      if (!p) return json({ statusCode: 404, message: `No content found with id: ${m[1]}` }, 404);
       return json({
         ...summary(p, base),
         ancestors: [],
