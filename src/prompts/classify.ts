@@ -75,7 +75,11 @@ const common = {
   confidence: z.number().describe("0 to 1: how sure you are this action is right"),
 };
 
-/** Builds the per-item output schema from the snapshot's candidates. */
+/**
+ * Builds the per-item output schema from the snapshot's candidates. Proposal
+ * kinds are single-value enums rather than literals so the JSON Schema has no
+ * `const` (see the test "uses only widely supported JSON Schema keywords").
+ */
 export function buildItemSchema(s: ItemSnapshot) {
   const targets = enumOf([...s.candidates.map((c) => c.key), ...NEW_REFS]);
   const projects = s.projects.map((p) => p.key);
@@ -88,13 +92,13 @@ export function buildItemSchema(s: ItemSnapshot) {
 
   const variants: z.ZodObject[] = [
     z.object({
-      kind: z.literal("add_comment"),
+      kind: z.enum(["add_comment"]),
       target: targets,
       body: z.string().describe("Comment text in Markdown"),
       ...common,
     }),
     z.object({
-      kind: z.literal("update_issue"),
+      kind: z.enum(["update_issue"]),
       target: targets,
       summary: z.string().nullable(),
       priority: nullableEnum(s.priorities),
@@ -103,13 +107,13 @@ export function buildItemSchema(s: ItemSnapshot) {
       ...common,
     }),
     z.object({
-      kind: z.literal("transition_issue"),
+      kind: z.enum(["transition_issue"]),
       target: targets,
       toStatus: statuses.length > 0 ? enumOf(statuses) : z.string(),
       ...common,
     }),
     z.object({
-      kind: z.literal("link_dependency"),
+      kind: z.enum(["link_dependency"]),
       target: targets,
       dependencyKind: z.enum(DEPENDENCY_KINDS),
       label: z.string().describe("What or who the issue is waiting on"),
@@ -120,7 +124,7 @@ export function buildItemSchema(s: ItemSnapshot) {
       ...common,
     }),
     z.object({
-      kind: z.literal("remember"),
+      kind: z.enum(["remember"]),
       memoryKind: z.enum(MEMORY_KINDS),
       content: z
         .string()
@@ -128,7 +132,7 @@ export function buildItemSchema(s: ItemSnapshot) {
       ...common,
     }),
     z.object({
-      kind: z.literal("draft_message"),
+      kind: z.enum(["draft_message"]),
       channel: z.enum(["teams", "email"]),
       intent: z.enum(MESSAGE_INTENTS),
       recipientPersonId: nullableEnum(personIds),
@@ -141,7 +145,7 @@ export function buildItemSchema(s: ItemSnapshot) {
   if (projects.length > 0) {
     variants.unshift(
       z.object({
-        kind: z.literal("create_issue"),
+        kind: z.enum(["create_issue"]),
         ref: z.enum(NEW_REFS),
         projectKey: enumOf(projects),
         issueType: issueTypes.length > 0 ? enumOf(issueTypes) : z.string(),
@@ -165,7 +169,7 @@ export function buildItemSchema(s: ItemSnapshot) {
   if (personIds.length > 0) {
     variants.push(
       z.object({
-        kind: z.literal("update_person"),
+        kind: z.enum(["update_person"]),
         personId: enumOf(personIds),
         title: z.string().nullable(),
         responsibilities: z.string().nullable(),
@@ -182,7 +186,7 @@ export function buildItemSchema(s: ItemSnapshot) {
   if (teamIds.length > 0) {
     variants.push(
       z.object({
-        kind: z.literal("update_team"),
+        kind: z.enum(["update_team"]),
         teamId: enumOf(teamIds),
         function: z.string().nullable(),
         contactFor: z.string().nullable(),
@@ -196,7 +200,9 @@ export function buildItemSchema(s: ItemSnapshot) {
 
   return z.object({
     summary: z.string().describe("One line: what this item is about and what should happen"),
-    proposals: z.array(z.discriminatedUnion("kind", variants as [z.ZodObject, ...z.ZodObject[]])),
+    // A plain union (anyOf), not a discriminated union (oneOf): strict structured-output
+    // modes accept anyOf and enums but not oneOf or const.
+    proposals: z.array(z.union(variants as [z.ZodObject, ...z.ZodObject[]])),
     question: z.string().nullable().describe("Ask the user when you are unsure; otherwise null"),
     confidence: z.number().describe("0 to 1: overall confidence in these proposals"),
   });

@@ -69,10 +69,21 @@ describe("item schema", () => {
     expect(schema.safeParse(badPerson).success).toBe(false);
   });
 
-  test("converts to JSON Schema without numeric bounds (strict providers reject them)", () => {
+  test("uses only widely supported JSON Schema keywords", () => {
     const json = JSON.stringify(z.toJSONSchema(schema));
     expect(json).toContain('"PAY-2"');
-    expect(json).not.toContain("minimum");
+    // Strict structured-output modes reject these.
+    for (const keyword of [
+      '"oneOf"',
+      '"const"',
+      '"minimum"',
+      '"maximum"',
+      '"maxLength"',
+      '"pattern"',
+      '"format"',
+    ]) {
+      expect(json).not.toContain(keyword);
+    }
   });
 });
 
