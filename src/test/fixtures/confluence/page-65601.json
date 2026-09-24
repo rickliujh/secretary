@@ -1,0 +1,35 @@
+{
+  "id": "65601",
+  "type": "page",
+  "status": "current",
+  "title": "Payments platform team",
+  "space": { "id": 98305, "key": "PAY", "name": "Payments", "type": "global" },
+  "version": {
+    "by": { "type": "known", "username": "ana.b", "displayName": "Ana Bell" },
+    "when": "2026-09-01T10:00:00.000+01:00",
+    "number": 7,
+    "message": "",
+    "minorEdit": false
+  },
+  "ancestors": [{ "id": "65537", "type": "page", "status": "current", "title": "Payments home" }],
+  "body": {
+    "storage": {
+      "value": "<h2>What we own</h2><ul><li>Invoicing</li><li>Ledger exports</li></ul><ac:structured-macro ac:name=\"info\" ac:schema-version=\"1\"><ac:rich-text-body><p>Contact us in <strong>#payments-help</strong>.</p></ac:rich-text-body></ac:structured-macro><h2>Escalation</h2><p>Page the on-call via <ac:link><ri:page ri:content-title=\"Escalation runbook\" /></ac:link>.</p>",
+      "representation": "storage",
+      "_expandable": { "content": "/rest/api/content/65601" }
+    },
+    "_expandable": {
+      "editor": "",
+      "view": "",
+      "export_view": "",
+      "styled_view": "",
+      "anonymous_export_view": ""
+    }
+  },
+  "_links": {
+    "webui": "/display/PAY/Payments+platform+team",
+    "base": "https://wiki.example.com",
+    "context": "",
+    "self": "https://wiki.example.com/rest/api/content/65601"
+  }
+}

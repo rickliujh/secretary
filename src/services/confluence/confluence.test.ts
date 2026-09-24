@@ -8,6 +8,7 @@ import { makeSettingsTest } from "@/services/settings/test";
 import current from "@/test/fixtures/confluence/user-current.json";
 import { json, type StubRoute, stubFetch } from "@/test/stub-fetch";
 import { ConfluenceClient, type ConfluenceError } from ".";
+import { textToCql, webUrl } from "./cql";
 import { ConfluenceClientLive } from "./live";
 
 function run(routes: StubRoute[]) {
@@ -54,5 +55,57 @@ describe("ConfluenceClient.testConnection", () => {
         result.cause._tag === "Fail" &&
         (result.cause.error as ConfluenceError).kind,
     ).toBe("auth");
+  });
+});
+
+describe("ConfluenceClient search and page", () => {
+  test("search sends CQL with expansions; page fetch expands the storage body", async () => {
+    const { default: search } = await import("@/test/fixtures/confluence/search.json");
+    const { default: pageJson } = await import("@/test/fixtures/confluence/page-65601.json");
+    const stub = stubFetch([
+      { match: (u) => u.pathname === "/rest/api/content/search", respond: () => json(search) },
+      { match: (u) => u.pathname === "/rest/api/content/65601", respond: () => json(pageJson) },
+    ]);
+    const layer = ConfluenceClientLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          makeSettingsTest({
+            ...defaultSettings(),
+            confluence: { baseUrl: "https://wiki.example.com/" },
+          }),
+          makeSecretsTest({ [secretNames.confluencePat]: "conf-pat-123456" }),
+          makeFetcherTest(stub.fetch),
+        ),
+      ),
+    );
+    const cql = textToCql('payments "team"', "PAY");
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const c = yield* ConfluenceClient;
+          return { found: yield* c.search(cql ?? ""), page: yield* c.getPage("65601") };
+        }),
+        layer,
+      ),
+    );
+    expect(cql).toBe(
+      'type = page AND space = "PAY" AND (title ~ "payments \\"team\\"" OR text ~ "payments \\"team\\"")',
+    );
+    const url = new URL(stub.seen[0]?.url ?? "");
+    expect(url.searchParams.get("cql")).toBe(cql);
+    expect(url.searchParams.get("expand")).toBe("space,version");
+    expect(r.found.results[0]?.title).toBe("Payments platform team");
+    expect(webUrl(r.found.results[0]?._links ?? {}, r.found._links.base ?? "")).toBe(
+      "https://wiki.example.com/display/PAY/Payments+platform+team",
+    );
+    expect(new URL(stub.seen[1]?.url ?? "").searchParams.get("expand")).toBe(
+      "body.storage,version,space,ancestors",
+    );
+    expect(r.page.version.number).toBe(7);
+    expect(r.page.body.storage.value).toContain("<h2>What we own</h2>");
+  });
+
+  test("empty free text produces no query", () => {
+    expect(textToCql("   ")).toBeNull();
   });
 });

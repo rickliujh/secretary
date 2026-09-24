@@ -1,0 +1,49 @@
+{
+  "results": [
+    {
+      "id": "65601",
+      "type": "page",
+      "status": "current",
+      "title": "Payments platform team",
+      "space": {
+        "id": 98305,
+        "key": "PAY",
+        "name": "Payments",
+        "type": "global",
+        "_links": { "webui": "/display/PAY", "self": "https://wiki.example.com/rest/api/space/PAY" }
+      },
+      "version": {
+        "by": { "type": "known", "username": "ana.b", "displayName": "Ana Bell" },
+        "when": "2026-09-01T10:00:00.000+01:00",
+        "number": 7,
+        "message": "",
+        "minorEdit": false
+      },
+      "_links": {
+        "webui": "/display/PAY/Payments+platform+team",
+        "edit": "/pages/resumedraft.action?draftId=65601",
+        "tinyui": "/x/QYAB",
+        "self": "https://wiki.example.com/rest/api/content/65601"
+      },
+      "_expandable": {
+        "container": "/rest/api/space/PAY",
+        "metadata": "",
+        "operations": "",
+        "children": "/rest/api/content/65601/child",
+        "restrictions": "/rest/api/content/65601/restriction/byOperation",
+        "history": "/rest/api/content/65601/history",
+        "ancestors": "",
+        "body": "",
+        "descendants": "/rest/api/content/65601/descendant"
+      }
+    }
+  ],
+  "start": 0,
+  "limit": 25,
+  "size": 1,
+  "_links": {
+    "self": "https://wiki.example.com/rest/api/content/search?cql=type=page",
+    "base": "https://wiki.example.com",
+    "context": ""
+  }
+}

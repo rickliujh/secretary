@@ -26,7 +26,9 @@ describe("storageToMarkdown", () => {
 
   test("headings, links and users", () => {
     expect(md).toStartWith("# Payments platform");
-    expect(md).toContain("Owned by @user. See the runbook and [home](https://wiki.example.com/display/PAY/Home).");
+    expect(md).toContain(
+      "Owned by @user. See the runbook and [home](https://wiki.example.com/display/PAY/Home).",
+    );
   });
 
   test("info panels become labelled blockquotes", () => {

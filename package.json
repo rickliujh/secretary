@@ -13,7 +13,8 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "db:generate": "drizzle-kit generate",
-    "mock:jira": "bun scripts/mock-jira.ts"
+    "mock:jira": "bun scripts/mock-jira.ts",
+    "mock:confluence": "bun scripts/mock-confluence.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.62",

@@ -9,9 +9,24 @@
 import { gfm } from "@joplin/turndown-plugin-gfm";
 import TurndownService from "turndown";
 
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-const VOID_ELEMENTS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+const VOID_ELEMENTS = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "source",
+  "track",
+  "wbr",
+]);
 
 export function preprocessStorage(storage: string): string {
   return (
@@ -19,13 +34,15 @@ export function preprocessStorage(storage: string): string {
       // Code bodies: keep text verbatim; <pre> stops turndown collapsing whitespace.
       .replace(
         /<ac:plain-text-body>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/ac:plain-text-body>/g,
-        (_m, text: string) => `<ac:plain-text-body><pre>${escapeHtml(text)}</pre></ac:plain-text-body>`,
+        (_m, text: string) =>
+          `<ac:plain-text-body><pre>${escapeHtml(text)}</pre></ac:plain-text-body>`,
       )
       .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_m, text: string) => escapeHtml(text))
       // Elements with no text of their own become text here: a paragraph holding
       // only an image would otherwise count as blank and be dropped by turndown.
       .replace(/<ac:image\b[^>]*>([\s\S]*?)<\/ac:image>/g, (_m, inner: string) => {
-        const name = /ri:filename="([^"]*)"/.exec(inner)?.[1] ?? /ri:value="([^"]*)"/.exec(inner)?.[1];
+        const name =
+          /ri:filename="([^"]*)"/.exec(inner)?.[1] ?? /ri:value="([^"]*)"/.exec(inner)?.[1];
         return `(image: ${name || "embedded"})`;
       })
       .replace(/<ac:link>\s*<ri:user\b[^>]*?(?:\/>|>\s*<\/ri:user>)\s*<\/ac:link>/g, "@user")
@@ -46,14 +63,24 @@ const PANEL_LABELS: Record<string, string> = {
   tip: "Tip",
   panel: "",
 };
-const DROPPED_MACROS = new Set(["toc", "children", "pagetree", "anchor", "recently-updated", "livesearch", "contentbylabel"]);
+const DROPPED_MACROS = new Set([
+  "toc",
+  "children",
+  "pagetree",
+  "anchor",
+  "recently-updated",
+  "livesearch",
+  "contentbylabel",
+]);
 
 const tag = (node: Node) => node.nodeName.toLowerCase();
 const attr = (node: Node, name: string) => (node as El).getAttribute?.(name) ?? "";
 const childrenByTag = (node: Node, name: string) =>
   Array.from(node.childNodes).filter((c) => tag(c) === name) as El[];
 const param = (macro: Node, name: string) =>
-  childrenByTag(macro, "ac:parameter").find((p) => attr(p, "ac:name") === name)?.textContent?.trim() ?? "";
+  childrenByTag(macro, "ac:parameter")
+    .find((p) => attr(p, "ac:name") === name)
+    ?.textContent?.trim() ?? "";
 
 const quote = (text: string) =>
   text
@@ -99,7 +126,8 @@ export function storageToMarkdown(storage: string, opts: { baseUrl?: string } = 
 
   td.addRule("ac-parameter", { filter: (n) => tag(n) === "ac:parameter", replacement: () => "" });
   td.addRule("ac-dropped", {
-    filter: (n) => ["ac:emoticon", "ac:placeholder", "ac:inline-comment-marker-ref"].includes(tag(n)),
+    filter: (n) =>
+      ["ac:emoticon", "ac:placeholder", "ac:inline-comment-marker-ref"].includes(tag(n)),
     replacement: () => "",
   });
 
@@ -128,17 +156,17 @@ export function storageToMarkdown(storage: string, opts: { baseUrl?: string } = 
   });
 
   const link = (content: string, node: Node) => {
-      const body =
-        childrenByTag(node, "ac:plain-text-link-body")[0]?.textContent?.trim() ||
-        childrenByTag(node, "ac:link-body")[0]?.textContent?.trim();
-      const page = childrenByTag(node, "ri:page")[0];
-      const user = childrenByTag(node, "ri:user")[0];
-      const attachment = childrenByTag(node, "ri:attachment")[0];
-      if (body) return body;
-      if (page) return attr(page, "ri:content-title");
-      if (user) return "@user";
-      if (attachment) return attr(attachment, "ri:filename");
-      return content;
+    const body =
+      childrenByTag(node, "ac:plain-text-link-body")[0]?.textContent?.trim() ||
+      childrenByTag(node, "ac:link-body")[0]?.textContent?.trim();
+    const page = childrenByTag(node, "ri:page")[0];
+    const user = childrenByTag(node, "ri:user")[0];
+    const attachment = childrenByTag(node, "ri:attachment")[0];
+    if (body) return body;
+    if (page) return attr(page, "ri:content-title");
+    if (user) return "@user";
+    if (attachment) return attr(attachment, "ri:filename");
+    return content;
   };
   td.addRule("ac-link", { filter: (n) => tag(n) === "ac:link", replacement: link });
   meaningfulWhenEmpty["ac:link"] = (node) => link("", node);
@@ -148,7 +176,10 @@ export function storageToMarkdown(storage: string, opts: { baseUrl?: string } = 
     const url = attr(childrenByTag(node, "ri:url")[0] ?? node, "ri:value");
     return `(image: ${file || url || "embedded"})`;
   };
-  td.addRule("ac-image", { filter: (n) => tag(n) === "ac:image", replacement: (_c, node) => image(node) });
+  td.addRule("ac-image", {
+    filter: (n) => tag(n) === "ac:image",
+    replacement: (_c, node) => image(node),
+  });
   meaningfulWhenEmpty["ac:image"] = image;
 
   td.addRule("ac-task-list", {

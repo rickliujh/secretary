@@ -24,12 +24,52 @@ export const ConfluenceUserSchema = z.object({
 });
 export type ConfluenceUser = z.infer<typeof ConfluenceUserSchema>;
 
+const LinksSchema = z
+  .object({ webui: z.string().optional(), base: z.string().optional() })
+  .default({});
+
+const SpaceSchema = z.object({ key: z.string(), name: z.string().optional() });
+const VersionSchema = z.object({ number: z.number(), when: z.string().optional() });
+
+export const ContentSummarySchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  title: z.string(),
+  space: SpaceSchema.optional(),
+  version: VersionSchema.optional(),
+  _links: LinksSchema,
+});
+export type ContentSummary = z.infer<typeof ContentSummarySchema>;
+
+export const SearchResultSchema = z.object({
+  results: z.array(ContentSummarySchema),
+  start: z.number().default(0),
+  limit: z.number().optional(),
+  size: z.number(),
+  totalSize: z.number().optional(),
+  _links: LinksSchema,
+});
+export type SearchResult = z.infer<typeof SearchResultSchema>;
+
+export const PageSchema = ContentSummarySchema.extend({
+  ancestors: z.array(z.object({ id: z.string(), title: z.string() })).default([]),
+  body: z.object({ storage: z.object({ value: z.string() }) }),
+  version: VersionSchema,
+});
+export type Page = z.infer<typeof PageSchema>;
+
 export type Credentials = { baseUrl?: string; pat?: string };
 
 export interface ConfluenceClientShape {
   readonly testConnection: (
     overrides?: Credentials,
   ) => Effect.Effect<ConfluenceUser, ConfluenceError>;
+  readonly baseUrl: Effect.Effect<string, ConfluenceError>;
+  readonly search: (
+    cql: string,
+    opts?: { limit?: number; start?: number },
+  ) => Effect.Effect<SearchResult, ConfluenceError>;
+  readonly getPage: (id: string) => Effect.Effect<Page, ConfluenceError>;
 }
 
 export class ConfluenceClient extends Context.Tag("ConfluenceClient")<
