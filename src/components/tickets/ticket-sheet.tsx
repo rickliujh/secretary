@@ -1,11 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, Paperclip, Pencil } from "lucide-react";
+import { ExternalLink, Paperclip, Pencil, UserPlus } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { z } from "zod";
 import { useSettings } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
+import { ContextNotes } from "@/components/directory/context-notes";
+import { PersonDialog } from "@/components/directory/person-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -19,6 +22,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { dateTime, relativeTime, shortDate } from "@/lib/time";
+import { contactsByUsername } from "@/services/directory/queries";
+import { normalizeUsername } from "@/services/directory/schema";
 import { AttachmentSchema, IssueLinkSchema } from "@/services/jira";
 import { markViewed, type TicketDetail, ticketDetail } from "@/services/tickets/queries";
 import { JiraHtml } from "./jira-html";
@@ -45,6 +50,59 @@ const rawList = <T,>(schema: z.ZodType<T>, value: unknown): T[] => {
   return r.success ? r.data : [];
 };
 
+/** A Jira user shown as a link to their contact, or with a button to create one (FR-4 contact matching). */
+function JiraUser({
+  username,
+  display,
+  email,
+}: {
+  username: string | null;
+  display: string | null;
+  email: string | null;
+}) {
+  const [adding, setAdding] = useState(false);
+  const contacts = useQuery({
+    queryKey: queryKeys.contactsByUsername,
+    queryFn: ({ signal }) => run(contactsByUsername, signal),
+  });
+  if (!username) return null;
+  const contact = contacts.data?.get(normalizeUsername(username));
+  if (contact) {
+    return (
+      <Link to="/people" search={{ id: contact.id }} className="underline">
+        {contact.displayName}
+      </Link>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1">
+      {display ?? username}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-6"
+        aria-label="Add as contact"
+        title="Add as contact"
+        onClick={() => setAdding(true)}
+      >
+        <UserPlus className="size-3.5" />
+      </Button>
+      <PersonDialog
+        open={adding}
+        onOpenChange={setAdding}
+        initial={{ displayName: display ?? username, jiraUsername: username, email }}
+      />
+    </span>
+  );
+}
+
+const rawEmail = (raw: unknown, field: "assignee" | "reporter") => {
+  const r = z
+    .object({ emailAddress: z.string() })
+    .safeParse((raw as Record<string, unknown> | null)?.[field]);
+  return r.success ? r.data.emailAddress : null;
+};
+
 function Details({ detail }: { detail: TicketDetail }) {
   const i = detail.issue;
   return (
@@ -54,8 +112,24 @@ function Details({ detail }: { detail: TicketDetail }) {
       </Row>
       <Row label="Type">{i.issueType}</Row>
       <Row label="Priority">{i.priority}</Row>
-      <Row label="Assignee">{i.assigneeDisplay}</Row>
-      <Row label="Reporter">{i.reporterDisplay}</Row>
+      <Row label="Assignee">
+        {i.assignee ? (
+          <JiraUser
+            username={i.assignee}
+            display={i.assigneeDisplay}
+            email={rawEmail(i.raw, "assignee")}
+          />
+        ) : null}
+      </Row>
+      <Row label="Reporter">
+        {i.reporter ? (
+          <JiraUser
+            username={i.reporter}
+            display={i.reporterDisplay}
+            email={rawEmail(i.raw, "reporter")}
+          />
+        ) : null}
+      </Row>
       <Row label="Epic">{i.epicKey}</Row>
       <Row label="Parent">{i.parentKey}</Row>
       <Row label="Sprint">{i.sprint}</Row>
@@ -218,6 +292,7 @@ export function TicketSheet({
               <TabsTrigger value="description">Description</TabsTrigger>
               <TabsTrigger value="comments">Comments ({d.comments.length})</TabsTrigger>
               <TabsTrigger value="links">Links</TabsTrigger>
+              <TabsTrigger value="notes">Notes</TabsTrigger>
             </TabsList>
             <ScrollArea className="min-h-0 flex-1">
               <div className="p-4">
@@ -258,6 +333,9 @@ export function TicketSheet({
                 </TabsContent>
                 <TabsContent value="links">
                   <Links detail={d} baseUrl={baseUrl} />
+                </TabsContent>
+                <TabsContent value="notes">
+                  <ContextNotes subject={{ type: "issue", id: d.issue.key }} />
                 </TabsContent>
               </div>
             </ScrollArea>

@@ -69,13 +69,14 @@ export const importConfluencePage = (pageId: string, subject: Subject) =>
       db
         .select({ id: contextNotes.id })
         .from(contextNotes)
-        .where(and(forSubject(subject), eq(contextNotes.sourceUrl, sourceUrl)))
+        .where(and(forSubject(subject), eq(contextNotes.sourceId, page.id)))
         .get(),
     );
     const values = {
       title: page.title,
       bodyMd,
       sourceUrl,
+      sourceId: page.id,
       sourceVersion: page.version.number,
       importedAt: nowIso(),
     };

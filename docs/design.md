@@ -122,7 +122,7 @@ JSON columns are typed with zod at the service boundary.
 | `issue_notes` | Private notes and imported context on an issue | `id`, `issue_key`, `body_md`, `source_url`, `created_at` |
 | `teams` | Org context | `id`, `name`, `function`, `contact_for`, `channel`, `escalation_path`, `confluence_urls` json, `notes_md` |
 | `people` | Contacts | `id`, `display_name`, `jira_username`, `email`, `title`, `team_id`, `responsibilities`, `profile` json (tone, formality, detail, responsiveness, preferred_channel, language), `notes_md` |
-| `context_notes` | Imported Confluence pages and free notes attached to team/person | `id`, `subject_type` (team/person), `subject_id`, `title`, `body_md`, `source_url`, `source_version`, `imported_at` |
+| `context_notes` | Imported Confluence pages and free notes attached to a team, person or issue | `id`, `subject_type` (team/person/issue), `subject_id`, `title`, `body_md`, `source_url`, `source_id` (Confluence page id), `source_version`, `imported_at` |
 | `dependencies` | External things a ticket waits on | `id`, `issue_key`, `kind` (person/team/incident/external), `label`, `owner_person_id`, `owner_team_id`, `external_ref`, `external_url`, `status` (open/waiting/blocked/resolved), `requested_at`, `expected_at`, `next_followup_at`, `resolved_at`, `notes_md`, `mirror_remote_link_id` |
 | `followups` | Timeline per dependency | `id`, `dependency_id`, `at`, `channel`, `summary`, `communication_id` |
 | `inbox_items` | Raw inputs | `id`, `source` (teams/email/meeting/typed/other), `sender_person_id`, `raw_text`, `received_at`, `status` (new/triaged/filed/dismissed), `triage` json |
@@ -206,11 +206,15 @@ re-fetched and upserted so the UI shows Jira's truth.
 | Purpose | Endpoint |
 |---|---|
 | Test | `GET /rest/api/user/current` |
-| Search | `GET /rest/api/content/search?cql=...&limit=25&expand=space,version` (siteSearch ~ "text" for free text) |
+| Search | `GET /rest/api/content/search?cql=...&limit=25&expand=space,version`. Free text becomes `type = page AND (title ~ "q" OR text ~ "q")` (not `siteSearch`, which older DC versions lack); raw CQL is available as a toggle |
 | Page body | `GET /rest/api/content/{id}?expand=body.storage,version,space,ancestors` |
 
-Imported pages: storage XHTML -> Markdown via turndown -> `context_notes`. Store
-`source_version` to allow "check for update" later.
+Imported pages: storage XHTML -> Markdown via turndown (+ `@joplin/turndown-plugin-gfm`)
+in `src/lib/confluence-md.ts` -> `context_notes`. A pre-pass handles what HTML parsers
+get wrong in storage format (CDATA code bodies, self-closing `ac:`/`ri:` tags);
+rules cover code, panel, expand, status, jira and task-list macros, page and user
+links, and images (as placeholders). `source_id` and `source_version` are stored;
+re-importing the same page onto the same subject replaces the note.
 
 ## 7. LLM layer
 

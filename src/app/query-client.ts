@@ -21,4 +21,13 @@ export const queryKeys = {
   epics: (project: string) => ["tickets", "epics", project] as const,
   priorities: ["jira", "priorities"] as const,
   fieldInfo: ["jira", "fields"] as const,
+  directory: ["directory"] as const,
+  teams: ["directory", "teams"] as const,
+  people: ["directory", "people"] as const,
+  team: (id: string) => ["directory", "team", id] as const,
+  person: (id: string) => ["directory", "person", id] as const,
+  notes: (type: string, id: string) => ["directory", "notes", type, id] as const,
+  jiraUserSuggestions: ["directory", "jira-suggestions"] as const,
+  contactsByUsername: ["directory", "by-username"] as const,
+  confluenceSearch: (cql: string) => ["confluence", "search", cql] as const,
 };

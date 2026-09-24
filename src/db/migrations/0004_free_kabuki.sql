@@ -1,0 +1,1 @@
+ALTER TABLE `context_notes` ADD `source_id` text;

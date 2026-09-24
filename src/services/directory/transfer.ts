@@ -34,6 +34,7 @@ const NoteRow = z.object({
   title: z.string(),
   bodyMd: z.string(),
   sourceUrl: z.string().nullable(),
+  sourceId: z.string().nullable().default(null),
   sourceVersion: z.number().nullable(),
   importedAt: z.string(),
 });

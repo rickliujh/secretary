@@ -156,6 +156,8 @@ export const contextNotes = sqliteTable(
     title: text("title").notNull(),
     bodyMd: text("body_md").notNull(),
     sourceUrl: text("source_url"),
+    /** Confluence page id, for re-import. */
+    sourceId: text("source_id"),
     sourceVersion: integer("source_version"),
     importedAt: text("imported_at").notNull(),
   },

@@ -2,13 +2,22 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "opener:default",
     {
       "identifier": "http:default",
-      "allow": [{ "url": "https://*:*" }, { "url": "http://*:*" }]
+      "allow": [
+        {
+          "url": "https://*:*"
+        },
+        {
+          "url": "http://*:*"
+        }
+      ]
     },
     "sql:default",
     "sql:allow-execute",
@@ -17,6 +26,8 @@
     "notification:default",
     "log:default",
     "dialog:default",
-    "fs:default"
+    "fs:default",
+    "fs:allow-write-text-file",
+    "fs:allow-read-text-file"
   ]
 }

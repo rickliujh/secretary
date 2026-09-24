@@ -18,7 +18,7 @@ export function JiraHtml({
     // biome-ignore lint/a11y/useKeyWithClickEvents: delegates clicks on the anchors inside, which are focusable themselves.
     // biome-ignore lint/a11y/noStaticElementInteractions: same as above.
     <div
-      className={cn("jira-content text-sm", className)}
+      className={cn("rich-content text-sm", className)}
       onClick={(e) => {
         const anchor = (e.target as HTMLElement).closest("a");
         const href = anchor?.getAttribute("href");

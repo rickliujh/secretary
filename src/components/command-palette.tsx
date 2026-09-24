@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Settings2, Ticket } from "lucide-react";
+import { Building2, Settings2, Ticket, UserRound } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
 import { queryKeys } from "@/app/query-client";
@@ -15,6 +15,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
+import { listPeople, listTeams } from "@/services/directory/queries";
 import { listTicketRows, searchTicketKeys } from "@/services/tickets/queries";
 
 const MAX_TICKETS = 20;
@@ -39,6 +40,16 @@ export function CommandPalette({
     queryKey: queryKeys.ticketSearch(q),
     queryFn: ({ signal }) => run(searchTicketKeys(q), signal),
     enabled: open && q.length >= 2,
+  });
+  const people = useQuery({
+    queryKey: queryKeys.people,
+    queryFn: ({ signal }) => run(listPeople, signal),
+    enabled: open,
+  });
+  const teams = useQuery({
+    queryKey: queryKeys.teams,
+    queryFn: ({ signal }) => run(listTeams, signal),
+    enabled: open,
   });
   const tickets = useMemo(() => {
     if (!keys.data || !rows.data) return [];
@@ -86,6 +97,35 @@ export function CommandPalette({
                 <Ticket />
                 <span className="font-mono text-xs">{t.key}</span>
                 <span className="truncate">{t.summary}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+        {q.length >= 1 && (people.data?.length ?? 0) > 0 && (
+          <CommandGroup heading="People">
+            {(people.data ?? []).map((p) => (
+              <CommandItem
+                key={p.id}
+                value={`person ${p.displayName} ${p.jiraUsername ?? ""} ${p.title ?? ""}`}
+                onSelect={() => go(() => navigate({ to: "/people", search: { id: p.id } }))}
+              >
+                <UserRound />
+                {p.displayName}
+                {p.title && <span className="text-muted-foreground">{p.title}</span>}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+        {q.length >= 1 && (teams.data?.length ?? 0) > 0 && (
+          <CommandGroup heading="Teams">
+            {(teams.data ?? []).map((t) => (
+              <CommandItem
+                key={t.id}
+                value={`team ${t.name}`}
+                onSelect={() => go(() => navigate({ to: "/teams", search: { id: t.id } }))}
+              >
+                <Building2 />
+                {t.name}
               </CommandItem>
             ))}
           </CommandGroup>

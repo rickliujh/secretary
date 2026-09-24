@@ -92,3 +92,43 @@ Not verified yet
   end to end against the mock server and recorded-style fixtures only.
 - The ticket UI has not been exercised in the running app; it typechecks, lints and
   builds.
+
+## Phase 2: Organisational context (2026-09-24)
+
+Built
+- Teams and People pages with create, edit and delete, detail sheets, and a structured
+  communication profile (formality, detail, responsiveness, preferred channel,
+  language, tone) plus free Markdown notes.
+- Contact matching: Jira usernames match contacts case-insensitively at display time,
+  so assignees and reporters in the ticket view link to contacts, or offer "Add as
+  contact" prefilled from Jira. The People page suggests Jira users from the cache who
+  are not contacts yet, most frequent first.
+- `ConfluenceClient` search and page fetch; search dialog with free text, space filter
+  and a raw CQL toggle; import as a Markdown context note on a team, person or ticket;
+  re-import updates in place; open in the browser.
+- Context notes (imported pages and free notes) on team, person and ticket detail, with
+  an FTS5 index (`0003_context_notes_fts`) ready for Phase 3 retrieval.
+- JSON backup: export and import of teams, people and their notes, validated with zod
+  and idempotent (upsert by id). Secrets are never part of it.
+- `bun run mock:confluence`: a fake Confluence DC with team pages and runbooks in real
+  storage format, also used by an end-to-end import test.
+- People and teams in the Ctrl+K palette; shared Markdown renderer (react-markdown +
+  remark-gfm, no raw HTML).
+
+Decisions and defaults
+- Free-text Confluence search uses `text ~` and `title ~`, not `siteSearch ~`.
+- Storage-format conversion uses turndown with the maintained Joplin GFM plugin and a
+  tested pre-pass (design.md section 6). Images become `(image: name)` placeholders.
+- `context_notes.source_id` added so imported pages can be re-imported.
+- Deleting a team keeps its members as contacts without a team and deletes the team's
+  notes; deleting a person deletes their notes.
+- Directory edits are the user's own local writes, so they do not go through proposals.
+  Profile updates inferred from pasted text arrive as proposals in Phase 3.
+- `fs:allow-read-text-file` and `fs:allow-write-text-file` added for the backup files
+  chosen in the save and open dialogs.
+
+Not verified yet
+- Nothing has run against a real Confluence. Search and import run end to end against
+  the mock and fixtures only.
+- The new pages have not been exercised in the running app; they typecheck, lint and
+  build.
