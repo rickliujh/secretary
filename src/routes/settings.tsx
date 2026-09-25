@@ -37,7 +37,7 @@ function SettingsPage() {
         value={tab}
         onValueChange={(value) => navigate({ search: { tab: value as SettingsTab } })}
       >
-        <TabsList className="mb-4">
+        <TabsList className="mb-4 h-auto flex-wrap justify-start *:h-7 *:flex-none">
           {SETTINGS_TABS.map((t) => (
             <TabsTrigger key={t.value} value={t.value}>
               {t.label}

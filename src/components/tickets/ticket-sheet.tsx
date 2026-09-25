@@ -288,7 +288,7 @@ export function TicketSheet({
         )}
         {d && (
           <Tabs defaultValue="details" className="min-h-0 flex-1 gap-0">
-            <TabsList className="mx-4 mt-3">
+            <TabsList className="mx-4 mt-3 h-auto flex-wrap justify-start *:h-7 *:flex-none">
               <TabsTrigger value="details">Details</TabsTrigger>
               <TabsTrigger value="description">Description</TabsTrigger>
               <TabsTrigger value="comments">Comments ({d.comments.length})</TabsTrigger>
