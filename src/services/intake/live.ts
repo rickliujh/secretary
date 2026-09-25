@@ -308,7 +308,7 @@ const make = Effect.gen(function* () {
         (lowConfidence && value.proposals.length === 0 ? UNSURE_QUESTION : null);
       return {
         itemId,
-        mapped: mapItemOutput(value),
+        mapped: mapItemOutput(value, job.quote),
         question,
         summary: value.summary,
       } satisfies Classified;

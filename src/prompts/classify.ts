@@ -407,7 +407,6 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
     }
     if (used("assignee") && typeof p.assignee === "string" && !knownUsers.has(p.assignee))
       errors.push(`${at}: assignee ${p.assignee} is not a known Jira user.`);
-    if (!p.evidence?.trim()) errors.push(`${at}: evidence must quote the input.`);
 
     if (p.kind === "create_issue") {
       const proj = project(String(p.projectKey));
@@ -558,11 +557,15 @@ export function fromPayload(
   }
 }
 
-export function mapItemOutput(out: ItemOutput): MappedProposal[] {
+/**
+ * `quote` stands in for missing evidence: a model that forgets to quote has not
+ * made the action wrong, so it is not worth a repair or a question.
+ */
+export function mapItemOutput(out: ItemOutput, quote = ""): MappedProposal[] {
   return out.proposals.map((p) => ({
     payload: toPayload(p),
     rationale: p.rationale,
-    evidence: p.evidence,
+    evidence: p.evidence?.trim() || quote.slice(0, 300),
     confidence: clamp01(p.confidence),
   }));
 }

@@ -120,6 +120,15 @@ describe("item schema", () => {
     expect(errors).toContain("Proposal 2 (link_dependency): link_dependency needs label.");
   });
 
+  test("missing evidence is not an error; the item's text stands in", () => {
+    const out = { ...good, proposals: [{ ...good.proposals[0], evidence: "" }] };
+    const parsed = schema.parse(out) as ItemOutput;
+    expect(validateItemOutput(parsed, snapshot)).toEqual([]);
+    expect(mapItemOutput(parsed, "PAY-2 is still blocked")[0]?.evidence).toBe(
+      "PAY-2 is still blocked",
+    );
+  });
+
   test("leftovers in fields a kind does not use are ignored", () => {
     const out = {
       ...good,
