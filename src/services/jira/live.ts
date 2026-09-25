@@ -1,9 +1,10 @@
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer } from "effect";
 import type { KyInstance } from "ky";
 import { z } from "zod";
+import { resolveCredentials } from "@/services/atlassian/credentials";
 import { Fetcher } from "@/services/http";
-import { HttpFailure, makeBearerClient, normalizeBaseUrl, requestJson } from "@/services/http/json";
-import { Secrets, secretNames } from "@/services/secrets";
+import { HttpFailure, makeAtlassianClient, requestJson } from "@/services/http/json";
+import { Secrets } from "@/services/secrets";
 import { Settings } from "@/services/settings";
 import {
   CommentPageSchema,
@@ -36,25 +37,16 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const { fetch } = yield* Fetcher;
 
-  const credentials = (overrides: Credentials = {}) =>
-    Effect.gen(function* () {
-      const stored = yield* settings.get.pipe(Effect.mapError((e) => notConfigured(e.message)));
-      const baseUrl = overrides.baseUrl?.trim() || stored.jira.baseUrl;
-      const pat =
-        overrides.pat?.trim() ||
-        Option.getOrUndefined(
-          yield* secrets
-            .get(secretNames.jiraPat)
-            .pipe(Effect.mapError((e) => notConfigured(e.message))),
-        );
-      if (!baseUrl) return yield* notConfigured("Set the Jira base URL in Settings.");
-      if (!pat) return yield* notConfigured("Set a Jira personal access token in Settings.");
-      return { baseUrl: normalizeBaseUrl(baseUrl), pat };
-    });
+  const credentials = (overrides?: Credentials) =>
+    resolveCredentials("jira", overrides).pipe(
+      Effect.provideService(Settings, settings),
+      Effect.provideService(Secrets, secrets),
+      Effect.mapError((e) => notConfigured(e.message)),
+    );
 
   const client = (overrides?: Credentials) =>
-    Effect.map(credentials(overrides), ({ baseUrl, pat }) =>
-      makeBearerClient({ baseUrl, apiPrefix: "/rest/api/2", token: pat, fetch }),
+    Effect.map(credentials(overrides), ({ apiBase, auth }) =>
+      makeAtlassianClient({ baseUrl: apiBase, apiPrefix: "/rest/api/2", auth, fetch }),
     );
 
   const call = <T>(
@@ -75,7 +67,8 @@ const make = Effect.gen(function* () {
   return JiraClient.of({
     testConnection: (overrides) => call(JiraUserSchema, "myself", undefined, overrides),
     myself: call(JiraUserSchema, "myself"),
-    baseUrl: Effect.map(credentials(), (c) => c.baseUrl),
+    baseUrl: Effect.map(credentials(), (c) => c.apiBase),
+    deployment: Effect.map(credentials(), (c) => c.deployment),
     fields: call(z.array(FieldSchema), "field"),
     search: (req) =>
       call(SearchPageSchema, "search", {

@@ -5,13 +5,22 @@
  */
 import { z } from "zod";
 
-export const UserRefSchema = z.object({
-  name: z.string(),
-  key: z.string().optional(),
-  displayName: z.string(),
-  emailAddress: z.string().optional(),
-  active: z.boolean().optional(),
-});
+/**
+ * A Jira user. Data Center identifies users by `name` (username); Cloud has no
+ * `name` and uses `accountId` (design.md D19). `id` is whichever applies, and is
+ * what the app stores as "the Jira user" (assignee, reporter, contacts).
+ */
+export const UserRefSchema = z
+  .object({
+    name: z.string().optional(),
+    accountId: z.string().optional(),
+    key: z.string().optional(),
+    displayName: z.string(),
+    emailAddress: z.string().optional(),
+    active: z.boolean().optional(),
+  })
+  .transform((u) => ({ ...u, id: u.accountId ?? u.name ?? "" }))
+  .refine((u) => u.id !== "", "User has neither accountId nor name");
 export type UserRef = z.infer<typeof UserRefSchema>;
 
 export const StatusSchema = z.object({

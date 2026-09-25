@@ -463,7 +463,7 @@ No silent fallbacks between providers; the user chooses the model.
 | D4 | OS keychain via keyring crate | Stronghold deprecated; no extra password prompt |
 | D5 | Human approval for every write | Requirement principle 1; also the prompt-injection control |
 | D6 | Deterministic priority score plus optional LLM brief | Explainable ranking; cheap; the model adds narrative not ranking |
-| D7 | Jira DC only, provider seam kept | User environment; avoid speculative Cloud work |
+| D7 | Jira DC only, provider seam kept (superseded by D19) | User environment; avoid speculative Cloud work |
 | D8 | Draft only for Teams/email | User decision 2026-09-23; avoids Graph auth |
 | D9 | Deterministic-first pipelines; model calls are narrow, candidate-constrained and validated | User requirement 2026-09-23: behaviour must not depend on which model is configured |
 | D10 | Three model tiers with per-task routing and optional escalation | Most tasks work on mid-tier models; strong tier reserved for consolidation and escalations |
@@ -475,6 +475,8 @@ No silent fallbacks between providers; the user chooses the model.
 | D16 | Model output schemas are built per item with candidate enums, nullable fields and no numeric bounds; a separate canonical payload schema is stored and executed | Keeps choices constrained on every provider and lets prompts evolve without migrating stored proposals |
 | D17 | Local directory edits by the user are direct writes; only inferred changes (from pasted text) go through proposals | Matches the hard rule's intent: approval gates writes the secretary infers, not the user's own edits |
 | D18 | Dependency mirroring upserts a Jira remote link keyed by `globalId = secretary:dependency:<id>` through the Executor; its URL falls back to the owning team's Confluence page, then a mailto | Re-posting the same globalId updates instead of duplicating; Jira requires a URL on every remote link |
+| D19 | Support Atlassian Cloud as well as Data Center. The deployment is detected from the URL (`*.atlassian.net` is Cloud) with a manual override in settings. Cloud uses Basic auth with account email and API token, the site root for Jira and `/wiki` for Confluence, account IDs instead of usernames, cursor-paged enhanced search, and `parent` for epics. Everything above the clients (sync, intake, dashboard) is unchanged | 2026-09-25: the user's company runs Jira and Confluence Cloud only; D7's provider seam made this a client-level change |
+| D20 | The HTTP plugin trusts the OS certificate store as well as its bundled roots, and a manual proxy (with bypass list and optional login) can be set; PAC files are not evaluated | Company networks inspect TLS with a locally installed root and publish proxies through PAC files, which reqwest does not read |
 
 ## 13. References
 

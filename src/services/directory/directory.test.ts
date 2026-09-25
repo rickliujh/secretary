@@ -139,7 +139,10 @@ describe("context notes", () => {
     return Layer.provideMerge(
       ConfluenceClientLive,
       Layer.mergeAll(
-        makeSettingsTest({ ...s, confluence: { baseUrl: "https://wiki.example.com" } }),
+        makeSettingsTest({
+          ...s,
+          confluence: { ...defaultSettings().confluence, baseUrl: "https://wiki.example.com" },
+        }),
         makeSecretsTest({ [secretNames.confluencePat]: "conf-pat-000000" }),
         makeFetcherTest(stub.fetch),
         DbTest,

@@ -172,7 +172,7 @@ const make = Effect.gen(function* () {
 
       const me = yield* jira.myself;
       if (me.timeZone) yield* withDb(setState(SYNC_KEYS.timeZone, me.timeZone));
-      yield* withDb(setState(SYNC_KEYS.username, me.name));
+      yield* withDb(setState(SYNC_KEYS.username, me.id));
       const { effective: fieldIds } = yield* discoverFields;
 
       const tracked = new Set(settings.jira.trackedEpics);

@@ -58,7 +58,9 @@ export const PageSchema = ContentSummarySchema.extend({
 });
 export type Page = z.infer<typeof PageSchema>;
 
-export type Credentials = { baseUrl?: string; pat?: string };
+export type { Credentials } from "@/services/atlassian/credentials";
+
+import type { Credentials } from "@/services/atlassian/credentials";
 
 export interface ConfluenceClientShape {
   readonly testConnection: (

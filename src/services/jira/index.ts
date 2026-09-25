@@ -25,18 +25,25 @@ export class JiraError extends Data.TaggedError("JiraError")<{
   readonly status?: number;
 }> {}
 
-/** `GET /rest/api/2/myself` on Data Center. */
-export const JiraUserSchema = z.object({
-  name: z.string(),
-  key: z.string().optional(),
-  displayName: z.string(),
-  emailAddress: z.string().optional(),
-  active: z.boolean().optional(),
-  timeZone: z.string().optional(),
-});
+/** `GET /rest/api/2/myself`; `id` is the account ID on Cloud and the username on Data Center. */
+export const JiraUserSchema = z
+  .object({
+    name: z.string().optional(),
+    accountId: z.string().optional(),
+    key: z.string().optional(),
+    displayName: z.string(),
+    emailAddress: z.string().optional(),
+    active: z.boolean().optional(),
+    timeZone: z.string().optional(),
+  })
+  .transform((u) => ({ ...u, id: u.accountId ?? u.name ?? "" }))
+  .refine((u) => u.id !== "", "User has neither accountId nor name");
 export type JiraUser = z.infer<typeof JiraUserSchema>;
 
-export type Credentials = { baseUrl?: string; pat?: string };
+export type { Credentials } from "@/services/atlassian/credentials";
+
+import type { Credentials } from "@/services/atlassian/credentials";
+import type { Deployment } from "@/services/atlassian/deployment";
 
 export type SearchRequest = {
   jql: string;
@@ -61,8 +68,9 @@ export interface JiraClientShape {
    */
   readonly testConnection: (overrides?: Credentials) => Effect.Effect<JiraUser, JiraError>;
   readonly myself: Effect.Effect<JiraUser, JiraError>;
-  /** Base URL from settings, for building browse links. */
+  /** API root (the site root on Cloud), for building browse links. */
   readonly baseUrl: Effect.Effect<string, JiraError>;
+  readonly deployment: Effect.Effect<Deployment, JiraError>;
   readonly fields: Effect.Effect<readonly JiraField[], JiraError>;
   readonly search: (req: SearchRequest) => Effect.Effect<SearchPage, JiraError>;
   readonly getIssue: (

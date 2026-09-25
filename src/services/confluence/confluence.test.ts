@@ -18,7 +18,7 @@ function run(routes: StubRoute[]) {
       Layer.mergeAll(
         makeSettingsTest({
           ...defaultSettings(),
-          confluence: { baseUrl: "https://wiki.example.com" },
+          confluence: { ...defaultSettings().confluence, baseUrl: "https://wiki.example.com" },
         }),
         makeSecretsTest({ [secretNames.confluencePat]: "conf-pat-123456" }),
         makeFetcherTest(stub.fetch),
@@ -71,7 +71,7 @@ describe("ConfluenceClient search and page", () => {
         Layer.mergeAll(
           makeSettingsTest({
             ...defaultSettings(),
-            confluence: { baseUrl: "https://wiki.example.com/" },
+            confluence: { ...defaultSettings().confluence, baseUrl: "https://wiki.example.com/" },
           }),
           makeSecretsTest({ [secretNames.confluencePat]: "conf-pat-123456" }),
           makeFetcherTest(stub.fetch),

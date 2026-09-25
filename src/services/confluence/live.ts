@@ -1,9 +1,10 @@
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer } from "effect";
 import type { KyInstance } from "ky";
 import type { z } from "zod";
+import { resolveCredentials } from "@/services/atlassian/credentials";
 import { Fetcher } from "@/services/http";
-import { HttpFailure, makeBearerClient, normalizeBaseUrl, requestJson } from "@/services/http/json";
-import { Secrets, secretNames } from "@/services/secrets";
+import { HttpFailure, makeAtlassianClient, requestJson } from "@/services/http/json";
+import { Secrets } from "@/services/secrets";
 import { Settings } from "@/services/settings";
 import {
   ConfluenceClient,
@@ -26,21 +27,12 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const { fetch } = yield* Fetcher;
 
-  const credentials = (overrides: Credentials = {}) =>
-    Effect.gen(function* () {
-      const stored = yield* settings.get.pipe(Effect.mapError((e) => notConfigured(e.message)));
-      const baseUrl = overrides.baseUrl?.trim() || stored.confluence.baseUrl;
-      const pat =
-        overrides.pat?.trim() ||
-        Option.getOrUndefined(
-          yield* secrets
-            .get(secretNames.confluencePat)
-            .pipe(Effect.mapError((e) => notConfigured(e.message))),
-        );
-      if (!baseUrl) return yield* notConfigured("Set the Confluence base URL in Settings.");
-      if (!pat) return yield* notConfigured("Set a Confluence personal access token in Settings.");
-      return { baseUrl: normalizeBaseUrl(baseUrl), pat };
-    });
+  const credentials = (overrides?: Credentials) =>
+    resolveCredentials("confluence", overrides).pipe(
+      Effect.provideService(Settings, settings),
+      Effect.provideService(Secrets, secrets),
+      Effect.mapError((e) => notConfigured(e.message)),
+    );
 
   const call = <T>(
     schema: z.ZodType<T>,
@@ -48,11 +40,11 @@ const make = Effect.gen(function* () {
     options?: Parameters<KyInstance>[1],
     overrides?: Credentials,
   ) =>
-    Effect.flatMap(credentials(overrides), ({ baseUrl, pat }) =>
+    Effect.flatMap(credentials(overrides), ({ apiBase, auth }) =>
       Effect.tryPromise({
         try: (signal) =>
           requestJson(
-            makeBearerClient({ baseUrl, apiPrefix: "/rest/api", token: pat, fetch }),
+            makeAtlassianClient({ baseUrl: apiBase, apiPrefix: "/rest/api", auth, fetch }),
             path,
             schema,
             {
@@ -76,7 +68,7 @@ const make = Effect.gen(function* () {
             }),
         ),
       ),
-    baseUrl: Effect.map(credentials(), (c) => c.baseUrl),
+    baseUrl: Effect.map(credentials(), (c) => c.apiBase),
     search: (cql, opts = {}) =>
       call(SearchResultSchema, "content/search", {
         searchParams: {

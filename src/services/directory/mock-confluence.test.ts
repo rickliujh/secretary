@@ -22,7 +22,7 @@ const layer = Layer.provideMerge(
   Layer.mergeAll(
     makeSettingsTest({
       ...defaultSettings(),
-      confluence: { baseUrl: `http://localhost:${server.port}` },
+      confluence: { ...defaultSettings().confluence, baseUrl: `http://localhost:${server.port}` },
     }),
     makeSecretsTest({ [secretNames.confluencePat]: "mock-token-000" }),
     makeFetcherTest((i, init) => fetch(i, init)),

@@ -180,8 +180,9 @@ export function AssignButton({ issue }: { issue: Issue }) {
                   </CommandItem>
                 )}
                 {(users.data ?? []).map((u) => (
-                  <CommandItem key={u.name} value={u.name} onSelect={() => assign(u.name)}>
-                    {u.displayName} <span className="text-muted-foreground">{u.name}</span>
+                  <CommandItem key={u.id} value={u.id} onSelect={() => assign(u.id)}>
+                    {u.displayName}{" "}
+                    <span className="text-muted-foreground">{u.emailAddress ?? u.name ?? ""}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>

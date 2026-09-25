@@ -33,8 +33,9 @@ Principles, in priority order:
 ## 2. Users and environment
 
 - Single user, desktop (Linux first, Windows and macOS builds expected to work).
-- Jira Data Center (self-hosted), REST API v2, Personal Access Token (Bearer).
-- Confluence Data Center, REST API, PAT. Read only.
+- Jira Data Center (self-hosted, REST API v2, Personal Access Token as Bearer) or Jira Cloud
+  (`*.atlassian.net`, account email and API token as Basic auth). Added 2026-09-25, design.md D19.
+- Confluence Data Center (PAT) or Confluence Cloud (email and API token). Read only.
 - ServiceNow: incidents referenced by number and URL. No API access in v1.
 - Microsoft Teams and Outlook are used for communication but are **not**
   integrated in v1. The secretary produces text; the user pastes it.

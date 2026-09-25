@@ -110,7 +110,7 @@ export function mapComment(
   return {
     id: c.id,
     issueKey,
-    author: c.author?.name ?? null,
+    author: c.author?.id ?? null,
     authorDisplay: c.author?.displayName ?? null,
     body: c.body,
     bodyHtml: renderedBody ?? c.renderedBody ?? null,
@@ -169,9 +169,9 @@ export function mapIssue(raw: RawIssue, ctx: MapContext): MappedIssue {
         ? categoryKey
         : "new") as IssueRow["statusCategory"],
       priority: parse(NamedSchema, f.priority)?.name ?? null,
-      assignee: assignee?.name ?? null,
+      assignee: assignee?.id ?? null,
       assigneeDisplay: assignee?.displayName ?? null,
-      reporter: reporter?.name ?? null,
+      reporter: reporter?.id ?? null,
       reporterDisplay: reporter?.displayName ?? null,
       parentKey: parent && !parentIsEpic ? parent.key : null,
       epicKey:

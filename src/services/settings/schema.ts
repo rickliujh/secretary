@@ -46,8 +46,15 @@ export type TaskOverride = z.infer<typeof TaskOverrideSchema>;
 export const DEFAULT_JQL =
   "(assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) AND updated >= -90d";
 
+/** Cloud or Data Center (design.md D19); "auto" treats *.atlassian.net as Cloud. */
+export const DeploymentSetting = z.enum(["auto", "cloud", "datacenter"]);
+export type DeploymentSetting = z.infer<typeof DeploymentSetting>;
+
 const JiraSettingsSchema = z.object({
   baseUrl: optionalUrl.default(""),
+  deployment: DeploymentSetting.default("auto"),
+  /** Atlassian account email, used with the API token on Cloud. */
+  email: z.string().trim().default(""),
   jql: z.string().default(DEFAULT_JQL),
   trackedEpics: z.array(z.string()).default([]),
   syncIntervalMinutes: z.number().int().min(1).max(1440).default(10),
@@ -63,6 +70,9 @@ const JiraSettingsSchema = z.object({
 
 const ConfluenceSettingsSchema = z.object({
   baseUrl: optionalUrl.default(""),
+  deployment: DeploymentSetting.default("auto"),
+  /** Blank on Cloud means "same as Jira". */
+  email: z.string().trim().default(""),
 });
 
 /** Top-focus ranking weights (FR-5.2); each factor is scaled 0..1 before weighting. */
@@ -90,7 +100,7 @@ export const SettingsSchema = z.object({
     .default({ fast: null, standard: null, strong: null }),
   taskOverrides: z.partialRecord(z.enum(TASK_TYPES), TaskOverrideSchema).default({}),
   jira: JiraSettingsSchema.default(JiraSettingsSchema.parse({})),
-  confluence: ConfluenceSettingsSchema.default({ baseUrl: "" }),
+  confluence: ConfluenceSettingsSchema.default(ConfluenceSettingsSchema.parse({})),
   general: z
     .object({
       outputLanguage: z.string().trim().min(1).default("English"),

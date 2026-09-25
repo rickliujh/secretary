@@ -5,6 +5,7 @@
 import ky, { HTTPError, type KyInstance, TimeoutError } from "ky";
 import type { z } from "zod";
 import { redact } from "@/lib/redact";
+import { type AtlassianAuth, authorizationHeader } from "@/services/atlassian/deployment";
 import type { FetchFn } from ".";
 
 export type HttpFailureKind = "auth" | "http" | "network" | "timeout" | "decode";
@@ -21,17 +22,18 @@ export class HttpFailure extends Error {
 
 export const normalizeBaseUrl = (url: string) => url.trim().replace(/\/+$/, "");
 
-export function makeBearerClient(opts: {
+export function makeAtlassianClient(opts: {
+  /** API root, already resolved for the deployment (see atlassian/deployment.ts). */
   baseUrl: string;
   apiPrefix: string;
-  token: string;
+  auth: AtlassianAuth;
   fetch: FetchFn;
   timeoutMs?: number;
 }): KyInstance {
   return ky.create({
     prefix: `${normalizeBaseUrl(opts.baseUrl)}${opts.apiPrefix}`,
     headers: {
-      Authorization: `Bearer ${opts.token}`,
+      Authorization: authorizationHeader(opts.auth),
       Accept: "application/json",
       // Stops Jira/Confluence from answering XSRF checks with a login page.
       "X-Atlassian-Token": "no-check",
