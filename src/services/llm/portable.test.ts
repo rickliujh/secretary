@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { emptyToNull, portableSchema } from "./portable";
+import { emptyToNull, NONE, portableSchema } from "./portable";
 
 const schema = z.object({
   kind: z.enum(["add_comment"]),
@@ -20,18 +20,20 @@ describe("portable schemas", () => {
     };
     const text = JSON.stringify(p);
     for (const k of ['"anyOf"', '"oneOf"', '"const"', '"null"']) expect(text).not.toContain(k);
+    // Gemini rejects empty enum values.
+    expect(text).not.toMatch(/"enum":\[[^\]]*""/);
     expect(p.required.sort()).toEqual(["body", "confidence", "items", "kind", "never", "target"]);
     expect(p.properties.kind?.enum).toEqual(["add_comment"]);
-    expect(p.properties.target?.enum).toEqual(["PAY-1", "PAY-2", ""]);
-    expect(p.properties.never).toEqual({ type: "string", enum: [""] });
+    expect(p.properties.target?.enum).toEqual(["PAY-1", "PAY-2", NONE]);
+    expect(p.properties.never).toEqual({ type: "string", enum: [NONE] });
   });
 
   test("replies map back so the real schema validates them", () => {
     const reply = {
       kind: "add_comment",
-      target: "",
+      target: NONE,
       body: "hi",
-      never: "",
+      never: NONE,
       items: [{ note: "" }],
       confidence: 0.8,
     };

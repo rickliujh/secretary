@@ -30,7 +30,7 @@ export function toLlmError(error: unknown): LlmError {
     return new LlmError({ kind: "cancelled", message: "The request was cancelled" });
   if (APICallError.isInstance(root)) {
     const status = root.statusCode;
-    const detail = redact(root.responseBody?.slice(0, 500) ?? root.message);
+    const detail = redact(root.responseBody?.slice(0, 2000) ?? root.message);
     if (status === 401 || status === 403)
       return new LlmError({
         kind: "auth",

@@ -80,6 +80,7 @@ describe("item schema", () => {
       '"oneOf"',
       '"const"',
       '"null"',
+      '""',
       '"minimum"',
       '"maximum"',
       '"maxLength"',

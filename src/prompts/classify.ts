@@ -7,6 +7,7 @@
  */
 import { z } from "zod";
 import { CHANNELS, DETAIL, FORMALITY, RESPONSIVENESS } from "@/services/directory/schema";
+import { NONE } from "@/services/llm/portable";
 import {
   DEPENDENCY_KINDS,
   MEMORY_KINDS,
@@ -471,7 +472,7 @@ ${HARD_RULES}
 - Today is ${s.today}. Resolve relative dates ("Friday", "next week") to YYYY-MM-DD.
 - Write summaries, comments and notes in ${s.outputLanguage}.
 - Prefer the fewest actions that fully capture the item. Do not duplicate actions.
-- Every proposal has the same fields. Choose its kind, fill the fields that kind needs, and leave the rest empty ("" or []).
+- Every proposal has the same fields. Choose its kind, fill the fields that kind needs, and leave the rest empty ("", "${NONE}" or []).
 - Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
 - Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
 - Use remember for rules and preferences the user states about how to handle future work.

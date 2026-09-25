@@ -4,13 +4,17 @@
  * Gemini, and proxies translating to it) collapse `anyOf` to its first branch
  * and cannot express `null`. The model therefore sees a schema without `anyOf`,
  * `oneOf`, `const` or `null`: nullable fields become required, an empty string
- * means "none", and enums gain "" as a choice. Replies are mapped back ("" ->
- * null where the real schema allows null) and validated with the real zod schema.
+ * means "none" in text fields, and enums gain NONE as a choice (Gemini rejects
+ * "" as an enum value). Replies are mapped back ("" or NONE -> null where the
+ * real schema allows null) and validated with the real zod schema.
  */
 import { jsonSchema, type Schema } from "ai";
 import { z } from "zod";
 
 type Json = { [key: string]: unknown };
+
+/** The enum choice meaning "none". Non-empty because Gemini rejects "" in enums. */
+export const NONE = "(none)";
 
 const isObject = (v: unknown): v is Json => !!v && typeof v === "object" && !Array.isArray(v);
 const isNull = (v: unknown) => isObject(v) && v.type === "null";
@@ -37,7 +41,7 @@ function nullableBranch(node: Json): Json | undefined {
 
 function allowsEmpty(node: Json): Json {
   if (Array.isArray(node.enum))
-    return node.enum.includes("") ? node : { ...node, enum: [...node.enum, ""] };
+    return node.enum.includes(NONE) ? node : { ...node, enum: [...node.enum, NONE] };
   if (node.type === "string") {
     const hint = "Empty string when not applicable.";
     return { ...node, description: node.description ? `${node.description} ${hint}` : hint };
@@ -58,7 +62,7 @@ export function portableSchema(node: unknown): unknown {
   if (isNull(node))
     return {
       type: "string",
-      enum: [""],
+      enum: [NONE],
       ...(node.description ? { description: node.description } : {}),
     };
   const out: Json = {};
@@ -81,12 +85,14 @@ export function portableSchema(node: unknown): unknown {
   return out;
 }
 
-/** Maps "" back to null wherever the original schema allows null. */
+const isNone = (v: unknown) => v === "" || v === NONE;
+
+/** Maps "" and NONE back to null wherever the original schema allows null. */
 export function emptyToNull(value: unknown, schema: unknown): unknown {
   if (!isObject(schema)) return value;
   const inner = nullableBranch(schema);
-  if (inner) return value === "" ? null : emptyToNull(value, inner);
-  if (isNull(schema)) return value === "" ? null : value;
+  if (inner) return isNone(value) ? null : emptyToNull(value, inner);
+  if (isNull(schema)) return isNone(value) ? null : value;
   if (Array.isArray(value))
     return isObject(schema.items) ? value.map((v) => emptyToNull(v, schema.items)) : value;
   if (isObject(value) && isObject(schema.properties)) {
