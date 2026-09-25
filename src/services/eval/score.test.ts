@@ -17,6 +17,17 @@ describe("eval scoring", () => {
     }),
   ];
 
+  test("an expected date must match the proposal's date", () => {
+    const update = [
+      p({ kind: "update_issue", target: "PAY-4", changes: { dueDate: "2026-11-09" } }),
+    ];
+    const want = (date: string) => ({
+      required: [{ kind: "update_issue" as const, target: "PAY-4", date }],
+    });
+    expect(scoreCase(want("2026-11-09"), update).pass).toBe(true);
+    expect(scoreCase(want("2026-10-26"), update).pass).toBe(false);
+  });
+
   test("required kinds and targets must all be present", () => {
     expect(
       scoreCase(

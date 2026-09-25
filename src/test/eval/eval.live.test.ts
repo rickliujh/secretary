@@ -32,6 +32,7 @@ import { ProviderSchema, type TierBindings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
+import boardSprints from "@/test/fixtures/jira/board-7-sprints.json";
 import comments from "@/test/fixtures/jira/comments-PAY-2.json";
 import fields from "@/test/fixtures/jira/field.json";
 import myself from "@/test/fixtures/jira/myself.json";
@@ -47,6 +48,9 @@ const configured = !!(
   env.SECRETARY_EVAL_STANDARD_MODEL
 );
 const PASS_RATE = 0.75;
+/** The fixtures' "today": Payments 15 is the active sprint (2026-09-14 to 2026-09-28). */
+const EVAL_TODAY = "2026-09-24";
+
 const selected = env.SECRETARY_EVAL_CASE
   ? EVAL_CASES.filter((c) => c.name.includes(env.SECRETARY_EVAL_CASE ?? ""))
   : EVAL_CASES;
@@ -61,6 +65,10 @@ function layerFor(tiers: TierBindings) {
   const jiraStub = stubFetch([
     { match: (u) => u.pathname.endsWith("/myself"), respond: () => json(myself) },
     { match: (u) => u.pathname.endsWith("/field"), respond: () => json(fields) },
+    {
+      match: (u) => u.pathname.endsWith("/rest/agile/1.0/board/7/sprint"),
+      respond: () => json(boardSprints),
+    },
     { match: (u) => u.pathname.endsWith("/comment"), respond: () => json(comments) },
     // Project metadata as a real sync reads it (every issue type and status per project).
     {
@@ -156,9 +164,15 @@ const runCases = (cases: EvalCase[]) =>
             instruction: c.instruction ?? null,
             source: c.source,
             senderPersonId: c.sender ? senders[c.sender] : null,
+            // Fixed, so relative dates and the sprint calendar match the fixtures.
+            today: EVAL_TODAY,
           });
           if (c.followUp)
-            yield* intake.reply({ inboxItemId: first.inboxItemId, instruction: c.followUp });
+            yield* intake.reply({
+              inboxItemId: first.inboxItemId,
+              instruction: c.followUp,
+              today: EVAL_TODAY,
+            });
           return first;
         }),
       );

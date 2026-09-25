@@ -4,7 +4,19 @@
  */
 import type { ProposalKind, ProposalPayload } from "@/services/proposals/schema";
 
-export type Expected = { kind: ProposalKind; target?: string };
+export type Expected = {
+  kind: ProposalKind;
+  target?: string;
+  /** The date the proposal must set: dueDate, or expectedAt for a dependency. */
+  date?: string;
+};
+
+const dateOf = (p: ProposalPayload): string | null | undefined => {
+  if (p.kind === "create_issue") return p.dueDate;
+  if (p.kind === "update_issue") return p.changes.dueDate;
+  if (p.kind === "link_dependency") return p.expectedAt;
+  return undefined;
+};
 
 export type EvalExpectation = {
   /** Every one of these must be proposed. */
@@ -41,7 +53,10 @@ export function scoreCase(
   const missing = expected.required.filter(
     (e) =>
       !actual.some(
-        (a) => a.kind === e.kind && (e.target === undefined || payloadTarget(a) === e.target),
+        (a) =>
+          a.kind === e.kind &&
+          (e.target === undefined || payloadTarget(a) === e.target) &&
+          (e.date === undefined || dateOf(a) === e.date),
       ),
   );
   const forbidden = [
