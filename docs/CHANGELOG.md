@@ -306,3 +306,19 @@ Built
 - A failed turn keeps the user's message and shows "Try again".
 - Eval cases for a typed instruction with a paste and for follow-ups that add or drop
   a proposal.
+
+## Sprint calendar (2026-09-26)
+
+Why: "end of the second sprint of Q3" could not be turned into a date, and sprint
+names differ between teams (design.md D23).
+
+Built
+- Sync keeps every sprint's board, state and dates: from issues' Sprint field (legacy
+  strings and objects) and from the Agile API's board sprints, with the full history on
+  full syncs so positions within a quarter are correct.
+- `services/sprints/calendar.ts`: quarter labels (with a fiscal-year start month in
+  Settings > General), positions of sprints within a quarter, and projected sprints
+  from each board's usual length and cadence, marked as estimates.
+- The classify prompt lists the sprints of the boards behind the item's projects; the
+  model only matches the wording to a listed sprint and uses its end date.
+- Eval cases for "the second sprint of Q4" and "this sprint", with dates checked.
