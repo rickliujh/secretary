@@ -7,6 +7,7 @@ import { DataSection } from "@/components/settings/data-section";
 import { GeneralSection } from "@/components/settings/general-section";
 import { JiraSyncSection } from "@/components/settings/jira-sync-section";
 import { ModelsSection } from "@/components/settings/models-section";
+import { NetworkSection } from "@/components/settings/network-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RankingSection } from "@/components/settings/ranking-section";
 import { UsageSection } from "@/components/settings/usage-section";
@@ -43,8 +44,9 @@ function SettingsPage() {
             </TabsTrigger>
           ))}
         </TabsList>
-        <TabsContent value="general">
+        <TabsContent value="general" className="flex flex-col gap-4">
           <GeneralSection />
+          <NetworkSection />
         </TabsContent>
         <TabsContent value="providers">
           <ProvidersSection />

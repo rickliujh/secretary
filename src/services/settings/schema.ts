@@ -105,6 +105,26 @@ export const SettingsSchema = z.object({
     })
     .default({ followupDays: 3, reminders: true }),
   scoring: ScoringWeightsSchema.default(DEFAULT_WEIGHTS),
+  network: z
+    .object({
+      /**
+       * "system": HTTPS_PROXY/HTTP_PROXY variables and the manual macOS/Windows proxy.
+       * PAC (automatic configuration) files are not evaluated, so PAC users pick
+       * "manual" and enter the proxy the PAC file returns.
+       */
+      proxyMode: z.enum(["system", "manual"]).default("system"),
+      proxyUrl: z.union([z.literal(""), z.url({ protocol: /^(https?|socks5h?)$/ })]).default(""),
+      /** Comma-separated hosts that bypass the proxy, e.g. "localhost,127.0.0.1,.internal". */
+      noProxy: z.string().default("localhost,127.0.0.1"),
+      /** Proxy login; the password is in the keychain. */
+      proxyUsername: z.string().default(""),
+    })
+    .default({
+      proxyMode: "system",
+      proxyUrl: "",
+      noProxy: "localhost,127.0.0.1",
+      proxyUsername: "",
+    }),
 });
 
 export type AppSettings = z.infer<typeof SettingsSchema>;

@@ -106,7 +106,7 @@ export async function requestJson<T>(
       throw new HttpFailure("timeout", "The server did not respond in time.");
     throw new HttpFailure(
       "network",
-      `Could not reach the server: ${redact(error instanceof Error ? error.message : String(error))}`,
+      `Could not reach the server: ${redact(error instanceof Error ? error.message : String(error))}. If you are behind a company proxy, set it in Settings > General > Network.`,
     );
   }
   const body = await response.text();

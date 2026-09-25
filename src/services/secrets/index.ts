@@ -4,6 +4,7 @@ import { Context, Data, Effect, type Option } from "effect";
 export const secretNames = {
   jiraPat: "jira.pat",
   confluencePat: "confluence.pat",
+  proxyPassword: "network.proxy-password",
   providerApiKey: (providerId: string) => `llm.${providerId}.api-key`,
   /** JSON object of extra request headers (design.md D12). */
   providerHeaders: (providerId: string) => `llm.${providerId}.headers`,

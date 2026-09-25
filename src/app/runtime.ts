@@ -16,7 +16,9 @@ import { SecretsLive } from "@/services/secrets/live";
 import { SettingsLive } from "@/services/settings/live";
 import { SyncLive } from "@/services/sync/live";
 
-const Base = Layer.mergeAll(SettingsLive, SecretsLive, DbLive, FetcherLive);
+const Base = FetcherLive.pipe(
+  Layer.provideMerge(Layer.mergeAll(SettingsLive, SecretsLive, DbLive)),
+);
 
 export const AppLayer = Layer.mergeAll(IntakeLive, ProposalsLive).pipe(
   Layer.provideMerge(Layer.mergeAll(RetrievalLive, ExecutorLive)),
