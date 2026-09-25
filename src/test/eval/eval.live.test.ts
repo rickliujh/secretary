@@ -165,6 +165,7 @@ const runCases = (cases: EvalCase[]) =>
       if (attempt._tag === "Left") {
         const e = attempt.left;
         out.push({ c, payloads: [], errors: [`${e._tag}: ${e.message}`] });
+        console.log(`  error ${c.name}: ${e.message.slice(0, 200)}`);
         continue;
       }
       const r = attempt.right;
@@ -180,11 +181,10 @@ const runCases = (cases: EvalCase[]) =>
       const items = yield* query((d) =>
         d.select().from(intakeItems).where(eq(intakeItems.inboxItemId, r.inboxItemId)).all(),
       );
-      out.push({
-        c,
-        payloads: rows.map((x) => x.payload as ProposalPayload),
-        errors: items.map((i) => i.error).filter((e): e is string => !!e),
-      });
+      const payloads = rows.map((x) => x.payload as ProposalPayload);
+      out.push({ c, payloads, errors: items.map((i) => i.error).filter((e): e is string => !!e) });
+      // Progress, so a slow or interrupted run still shows what each case did.
+      console.log(`  done  ${c.name}: ${signature(payloads) || "(nothing)"}`);
     }
     return out;
   });
@@ -219,7 +219,8 @@ describe.skipIf(!configured)("live intake eval", () => {
       Effect.provide(runCases(selected), layerFor({ fast: bind, standard: bind, strong: null })),
     );
     expect(report(`standard: ${model}`, results)).toBeGreaterThanOrEqual(PASS_RATE);
-  }, 600_000);
+    // Slow models need well over a minute per case; follow-ups add a turn.
+  }, 1_800_000);
 
   test.skipIf(!env.SECRETARY_EVAL_FAST_MODEL)(
     "fast and standard agree on explicit single-item cases",
