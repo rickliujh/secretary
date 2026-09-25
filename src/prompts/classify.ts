@@ -17,7 +17,7 @@ import {
 } from "@/services/proposals/schema";
 import { HARD_RULES, untrusted } from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 1;
+export const CLASSIFY_PROMPT_VERSION = 2;
 export const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -70,144 +70,133 @@ export type ItemSnapshot = {
 };
 
 const enumOf = (values: readonly string[]) => z.enum(values as [string, ...string[]]);
+// nullish so replies may omit fields; the model-facing schema still lists every
+// field as required (services/llm/portable.ts).
 const nullableEnum = (values: readonly string[]) =>
-  values.length > 0 ? enumOf(values).nullable() : z.null();
+  values.length > 0 ? enumOf(values).nullish() : z.null().optional();
+const nullableText = (description?: string) =>
+  description ? z.string().nullish().describe(description) : z.string().nullish();
 
-const common = {
-  rationale: z.string().describe("One sentence: why this action, citing the input"),
-  evidence: z.string().describe("The exact words from the input that support this action"),
-  confidence: z.number().describe("0 to 1: how sure you are this action is right"),
+/** Fields each proposal kind must fill; the rest stay null (checked in `validateItemOutput`). */
+export const REQUIRED_FIELDS: Record<string, readonly string[]> = {
+  create_issue: ["ref", "projectKey", "issueType", "summary"],
+  update_issue: ["target"],
+  add_comment: ["target", "body"],
+  transition_issue: ["target", "toStatus"],
+  link_dependency: ["target", "dependencyKind", "label"],
+  update_person: ["personId"],
+  update_team: ["teamId"],
+  remember: ["memoryKind", "content"],
+  draft_message: ["channel", "intent", "notes"],
 };
 
 /**
- * Builds the per-item output schema from the snapshot's candidates. Proposal
- * kinds are single-value enums rather than literals so the JSON Schema has no
- * `const` (see the test "uses only widely supported JSON Schema keywords").
+ * Builds the per-item output schema from the snapshot's candidates. Each
+ * proposal is one flat object: `kind` picks the action and every other field is
+ * nullable, with the fields each kind needs listed in its description and
+ * checked in code. A union of per-kind objects is more precise, but some
+ * structured-output modes (Gemini among them) collapse `anyOf` to its first
+ * branch, which forced every proposal into one kind (design.md D21).
  */
 export function buildItemSchema(s: ItemSnapshot) {
-  const targets = enumOf([...s.candidates.map((c) => c.key), ...NEW_REFS]);
+  const targets = [...s.candidates.map((c) => c.key), ...NEW_REFS];
   const projects = s.projects.map((p) => p.key);
   const issueTypes = [...new Set(s.projects.flatMap((p) => p.issueTypes))];
   const epics = s.candidates.filter((c) => c.issueType === "Epic").map((c) => c.key);
+  const nonEpics = s.candidates.filter((c) => c.issueType !== "Epic").map((c) => c.key);
   const statuses = [...new Set(s.projects.flatMap((p) => p.statuses))];
   const users = s.jiraUsers.map((u) => u.username);
   const personIds = s.people.map((p) => p.id);
   const teamIds = s.teams.map((t) => t.id);
 
-  const variants: z.ZodObject[] = [
-    z.object({
-      kind: z.enum(["add_comment"]),
-      target: targets,
-      body: z.string().describe("Comment text in Markdown"),
-      ...common,
-    }),
-    z.object({
-      kind: z.enum(["update_issue"]),
-      target: targets,
-      summary: z.string().nullable(),
-      priority: nullableEnum(s.priorities),
-      dueDate: z.string().nullable().describe("YYYY-MM-DD"),
-      assignee: nullableEnum(users).describe("Jira user id from the list"),
-      ...common,
-    }),
-    z.object({
-      kind: z.enum(["transition_issue"]),
-      target: targets,
-      toStatus: statuses.length > 0 ? enumOf(statuses) : z.string(),
-      ...common,
-    }),
-    z.object({
-      kind: z.enum(["link_dependency"]),
-      target: targets,
-      dependencyKind: z.enum(DEPENDENCY_KINDS),
-      label: z.string().describe("What or who the issue is waiting on"),
-      ownerPersonId: nullableEnum(personIds),
-      ownerTeamId: nullableEnum(teamIds),
-      externalRef: z.string().nullable().describe("For incidents: the ServiceNow number"),
-      expectedAt: z.string().nullable().describe("YYYY-MM-DD"),
-      ...common,
-    }),
-    z.object({
-      kind: z.enum(["remember"]),
-      memoryKind: z.enum(MEMORY_KINDS),
-      content: z
-        .string()
-        .describe("The rule, fact or preference, stated so it makes sense on its own"),
-      ...common,
-    }),
-    z.object({
-      kind: z.enum(["draft_message"]),
-      channel: z.enum(["teams", "email"]),
-      intent: z.enum(MESSAGE_INTENTS),
-      recipientPersonId: nullableEnum(personIds),
-      recipientTeamId: nullableEnum(teamIds),
-      issueKeys: z.array(targets),
-      notes: z.string().describe("What the message should say"),
-      ...common,
-    }),
-  ];
-  if (projects.length > 0) {
-    variants.unshift(
-      z.object({
-        kind: z.enum(["create_issue"]),
-        ref: z.enum(NEW_REFS),
-        projectKey: enumOf(projects),
-        issueType: issueTypes.length > 0 ? enumOf(issueTypes) : z.string(),
-        summary: z.string(),
-        description: z.string().nullable().describe("Markdown"),
-        parent: z
-          .union([
-            nullableEnum(s.candidates.filter((c) => c.issueType !== "Epic").map((c) => c.key)),
-            z.enum(NEW_REFS),
-          ])
-          .nullable()
-          .describe("Only for Sub-task"),
-        epic: z.union([nullableEnum(epics), z.enum(NEW_REFS)]).nullable(),
-        priority: nullableEnum(s.priorities),
-        assignee: nullableEnum(users),
-        dueDate: z.string().nullable().describe("YYYY-MM-DD"),
-        ...common,
-      }),
-    );
-  }
-  if (personIds.length > 0) {
-    variants.push(
-      z.object({
-        kind: z.enum(["update_person"]),
-        personId: enumOf(personIds),
-        title: z.string().nullable(),
-        responsibilities: z.string().nullable(),
-        formality: z.enum(FORMALITY).nullable(),
-        detail: z.enum(DETAIL).nullable(),
-        responsiveness: z.enum(RESPONSIVENESS).nullable(),
-        preferredChannel: z.enum(CHANNELS).nullable(),
-        tone: z.string().nullable(),
-        note: z.string().nullable().describe("A fact about the person worth keeping"),
-        ...common,
-      }),
-    );
-  }
-  if (teamIds.length > 0) {
-    variants.push(
-      z.object({
-        kind: z.enum(["update_team"]),
-        teamId: enumOf(teamIds),
-        function: z.string().nullable(),
-        contactFor: z.string().nullable(),
-        channel: z.string().nullable(),
-        escalationPath: z.string().nullable(),
-        note: z.string().nullable(),
-        ...common,
-      }),
-    );
-  }
+  const kinds = Object.keys(REQUIRED_FIELDS).filter(
+    (k) =>
+      (k !== "create_issue" || projects.length > 0) &&
+      (k !== "update_person" || personIds.length > 0) &&
+      (k !== "update_team" || teamIds.length > 0),
+  );
+  const uses = (...ks: string[]) => `Used by ${ks.join(", ")}.`;
+
+  const proposal = z.object({
+    kind: enumOf(kinds).describe(
+      `The action. Fields each kind needs: ${kinds.map((k) => `${k}: ${REQUIRED_FIELDS[k]?.join(", ")}`).join("; ")}. Leave other fields empty.`,
+    ),
+    target: nullableEnum(targets).describe(
+      `The issue acted on. ${uses("add_comment", "update_issue", "transition_issue", "link_dependency")}`,
+    ),
+    // create_issue
+    ref: nullableEnum(NEW_REFS).describe(
+      `Placeholder key for a new issue. ${uses("create_issue")}`,
+    ),
+    projectKey: nullableEnum(projects).describe(uses("create_issue")),
+    issueType: (issueTypes.length > 0 ? nullableEnum(issueTypes) : nullableText()).describe(
+      uses("create_issue"),
+    ),
+    summary: nullableText(`Issue title. ${uses("create_issue", "update_issue")}`),
+    description: nullableText(`Markdown. ${uses("create_issue")}`),
+    parent: nullableEnum([...nonEpics, ...NEW_REFS]).describe(
+      `Only for a Sub-task. ${uses("create_issue")}`,
+    ),
+    epic: nullableEnum([...epics, ...NEW_REFS]).describe(uses("create_issue")),
+    priority: nullableEnum(s.priorities).describe(uses("create_issue", "update_issue")),
+    assignee: nullableEnum(users).describe(
+      `Jira user id from the list. ${uses("create_issue", "update_issue")}`,
+    ),
+    dueDate: nullableText(`YYYY-MM-DD. ${uses("create_issue", "update_issue")}`),
+    // add_comment
+    body: nullableText(`Comment text in Markdown. ${uses("add_comment")}`),
+    // transition_issue
+    toStatus: (statuses.length > 0 ? nullableEnum(statuses) : nullableText()).describe(
+      uses("transition_issue"),
+    ),
+    // link_dependency
+    dependencyKind: nullableEnum(DEPENDENCY_KINDS).describe(uses("link_dependency")),
+    label: nullableText(`What or who the issue is waiting on. ${uses("link_dependency")}`),
+    ownerPersonId: nullableEnum(personIds).describe(uses("link_dependency")),
+    ownerTeamId: nullableEnum(teamIds).describe(uses("link_dependency")),
+    externalRef: nullableText(`For incidents: the ServiceNow number. ${uses("link_dependency")}`),
+    expectedAt: nullableText(`YYYY-MM-DD. ${uses("link_dependency")}`),
+    // remember
+    memoryKind: nullableEnum(MEMORY_KINDS).describe(uses("remember")),
+    content: nullableText(
+      `The rule, fact or preference, stated so it makes sense on its own. ${uses("remember")}`,
+    ),
+    // draft_message
+    channel: nullableEnum(["teams", "email"]).describe(uses("draft_message")),
+    intent: nullableEnum(MESSAGE_INTENTS).describe(uses("draft_message")),
+    recipientPersonId: nullableEnum(personIds).describe(uses("draft_message")),
+    recipientTeamId: nullableEnum(teamIds).describe(uses("draft_message")),
+    issueKeys: z
+      .array(enumOf(targets))
+      .default([])
+      .describe(`Issues the message is about; [] otherwise. ${uses("draft_message")}`),
+    notes: nullableText(`What the message should say. ${uses("draft_message")}`),
+    // update_person
+    personId: nullableEnum(personIds).describe(uses("update_person")),
+    title: nullableText(uses("update_person")),
+    responsibilities: nullableText(uses("update_person")),
+    formality: nullableEnum(FORMALITY).describe(uses("update_person")),
+    detail: nullableEnum(DETAIL).describe(uses("update_person")),
+    responsiveness: nullableEnum(RESPONSIVENESS).describe(uses("update_person")),
+    preferredChannel: nullableEnum(CHANNELS).describe(uses("update_person")),
+    tone: nullableText(uses("update_person")),
+    // update_team
+    teamId: nullableEnum(teamIds).describe(uses("update_team")),
+    function: nullableText(uses("update_team")),
+    contactFor: nullableText(uses("update_team")),
+    teamChannel: nullableText(`Where to reach the team. ${uses("update_team")}`),
+    escalationPath: nullableText(uses("update_team")),
+    note: nullableText(`A fact worth keeping. ${uses("update_person", "update_team")}`),
+    // every kind
+    rationale: z.string().describe("One sentence: why this action, citing the input"),
+    evidence: z.string().describe("The exact words from the input that support this action"),
+    confidence: z.number().describe("0 to 1: how sure you are this action is right"),
+  });
 
   return z.object({
     summary: z.string().describe("One line: what this item is about and what should happen"),
-    // A plain union (anyOf), not a discriminated union (oneOf): strict structured-output
-    // modes accept anyOf and enums but not oneOf or const.
-    proposals: z.array(z.union(variants as [z.ZodObject, ...z.ZodObject[]])),
-    question: z.string().nullable().describe("Ask the user when you are unsure; otherwise null"),
+    proposals: z.array(proposal),
+    question: nullableText("Ask the user when you are unsure; otherwise empty"),
     confidence: z.number().describe("0 to 1: overall confidence in these proposals"),
   });
 }
@@ -315,7 +304,7 @@ export function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
         changes: defined({
           function: str(g("function")),
           contactFor: str(g("contactFor")),
-          channel: str(g("channel")),
+          channel: str(g("teamChannel")),
           escalationPath: str(g("escalationPath")),
         }),
         noteAppend: str(g("note")),
@@ -368,6 +357,11 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
 
   out.proposals.forEach((p, i) => {
     const at = `Proposal ${i + 1} (${p.kind})`;
+    const missing = (REQUIRED_FIELDS[p.kind] ?? []).filter((f) => {
+      const v = p[f];
+      return v === null || v === undefined || (typeof v === "string" && !v.trim());
+    });
+    if (missing.length) errors.push(`${at}: ${p.kind} needs ${missing.join(", ")}.`);
     for (const field of ["target", "parent", "epic"]) {
       const v = p[field];
       if (typeof v === "string" && NEW_REF_RE.test(v) && !created.has(v))
@@ -459,11 +453,12 @@ export function mapItemOutput(out: ItemOutput): MappedProposal[] {
 const line = (parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(" | ");
 
 export function buildClassifyPrompt(s: ItemSnapshot) {
-  const system = `You are a personal work secretary. You turn one piece of incoming text into concrete, approvable actions on the user's Jira Data Center tickets and their notes about people and teams.
+  const system = `You are a personal work secretary. You turn one piece of incoming text into concrete, approvable actions on the user's Jira tickets and their notes about people and teams.
 ${HARD_RULES}
 - Today is ${s.today}. Resolve relative dates ("Friday", "next week") to YYYY-MM-DD.
 - Write summaries, comments and notes in ${s.outputLanguage}.
 - Prefer the fewest actions that fully capture the item. Do not duplicate actions.
+- Every proposal has the same fields. Choose its kind, fill the fields that kind needs, and leave the rest empty ("" or []).
 - Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
 - Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
 - Use remember for rules and preferences the user states about how to handle future work.

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
+import { emptyToNull, portableSchema } from "@/services/llm/portable";
 import { snapshot } from "@/test/fixtures/intake/snapshot";
 import {
   buildClassifyPrompt,
@@ -69,13 +70,16 @@ describe("item schema", () => {
     expect(schema.safeParse(badPerson).success).toBe(false);
   });
 
-  test("uses only widely supported JSON Schema keywords", () => {
-    const json = JSON.stringify(z.toJSONSchema(schema));
+  test("the model-facing schema uses only widely supported JSON Schema keywords", () => {
+    const json = JSON.stringify(portableSchema(z.toJSONSchema(schema)));
     expect(json).toContain('"PAY-2"');
-    // Strict structured-output modes reject these.
+    // Strict structured-output modes reject these, and some collapse anyOf to its
+    // first branch (design.md D21).
     for (const keyword of [
+      '"anyOf"',
       '"oneOf"',
       '"const"',
+      '"null"',
       '"minimum"',
       '"maximum"',
       '"maxLength"',
@@ -84,6 +88,35 @@ describe("item schema", () => {
     ]) {
       expect(json).not.toContain(keyword);
     }
+  });
+
+  test("a reply with empty strings for unused fields maps back to the same proposals", () => {
+    const json = z.toJSONSchema(schema) as unknown as {
+      properties: { proposals: { items: { properties: object } } };
+    };
+    const fields = Object.keys(json.properties.proposals.items.properties);
+    const flat = good.proposals.map((p) => ({
+      ...Object.fromEntries(fields.map((f) => [f, f === "issueKeys" ? [] : ""])),
+      ...Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v ?? ""])),
+    }));
+    const parsed = schema.parse(emptyToNull({ ...good, question: "", proposals: flat }, json));
+    expect(validateItemOutput(parsed as ItemOutput, snapshot)).toEqual([]);
+    expect(mapItemOutput(parsed as ItemOutput)).toEqual(
+      mapItemOutput(schema.parse(good) as ItemOutput),
+    );
+  });
+
+  test("each kind must fill its own fields", () => {
+    const out = {
+      ...good,
+      proposals: [
+        { kind: "add_comment", target: "PAY-2", body: null, ...base },
+        { kind: "link_dependency", target: "PAY-2", dependencyKind: "person", ...base },
+      ],
+    };
+    const errors = validateItemOutput(schema.parse(out) as ItemOutput, snapshot);
+    expect(errors).toContain("Proposal 1 (add_comment): add_comment needs body.");
+    expect(errors).toContain("Proposal 2 (link_dependency): link_dependency needs label.");
   });
 });
 

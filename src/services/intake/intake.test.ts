@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { inboxItems, intakeItems, llmCalls, proposals } from "@/db/schema";
+import { CLASSIFY_PROMPT_VERSION } from "@/prompts/classify";
 import { query } from "@/services/db";
 import type { LlmError } from "@/services/llm";
 import { intakeTestLayer, out } from "@/test/intake-layer";
@@ -95,7 +96,11 @@ describe("Intake.triage", () => {
     );
     const snap = r.items[0]?.snapshot as { candidates: { key: string }[] } | undefined;
     expect(snap?.candidates[0]?.key).toBe("PAY-2");
-    expect(r.items[0]).toMatchObject({ tier: "standard", model: "std-m", promptVersion: 1 });
+    expect(r.items[0]).toMatchObject({
+      tier: "standard",
+      model: "std-m",
+      promptVersion: CLASSIFY_PROMPT_VERSION,
+    });
     // The pasted text reaches the model inside the untrusted wrapper.
     expect(JSON.stringify(models.calls[0]?.prompt)).toContain(
       '<untrusted_input source=\\"teams\\">',

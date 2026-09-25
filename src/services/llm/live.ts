@@ -19,6 +19,7 @@ import {
   toLlmError,
   type Usage,
 } from ".";
+import { portableOutputSchema } from "./portable";
 import { callSettings, makeLanguageModel } from "./providers";
 import { escalationTarget, findProvider, type ResolvedTier, resolveTask } from "./routing";
 import type { InternalTask, TaskType, Tier } from "./tasks";
@@ -185,7 +186,7 @@ export const makeLlm = Effect.gen(function* () {
         const common = {
           model: p.languageModel,
           system: req.system,
-          output: Output.object({ schema: req.schema }),
+          output: Output.object({ schema: portableOutputSchema(req.schema) }),
           maxRetries: 1,
           abortSignal: signal,
           ...callSettings(p.provider),

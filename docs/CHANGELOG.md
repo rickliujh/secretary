@@ -269,3 +269,16 @@ Verified by the user
 Not verified yet
 - Confluence Cloud on the real site; Cloud issue creation and epic changes on the real
   site; whether `search/jql` returns wiki strings rather than ADF for descriptions.
+
+## Portable model output schemas (2026-09-25)
+
+Why: all three Gemini models scored 25% on the intake eval because their structured
+output collapsed the proposal union to its first branch (design.md D21).
+
+Built
+- `services/llm/portable.ts`: every object call sends a schema without `anyOf`,
+  `oneOf`, `const` or `null`, maps "" back to null and validates with zod.
+- `classify_item` proposals are one flat object; per-kind required fields are checked
+  in `validateItemOutput`. Prompt version 2.
+- Intake validation checks a project's issue types and statuses only when Jira's
+  project metadata was fetched at sync, not from the cache alone.
