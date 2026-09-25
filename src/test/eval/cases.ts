@@ -12,7 +12,12 @@ export type EvalCase = {
   name: string;
   source: Source;
   sender?: "ana" | "tom";
+  /** Pasted input. */
   text: string;
+  /** Typed words sent with the paste: a trusted instruction (D22). */
+  instruction?: string;
+  /** A typed reply in the thread after the first turn; `expect` scores the result. */
+  followUp?: string;
   expect: EvalExpectation;
   single: boolean;
 };
@@ -114,6 +119,44 @@ export const EVAL_CASES: EvalCase[] = [
       forbiddenKinds: ["needs_clarification", "create_issue"],
     },
     single: true,
+  },
+  {
+    name: "pasted message with a typed instruction",
+    source: "teams",
+    text: "Bob: the rounding bug in PAY-4 is hitting customers now, finance is asking about it.",
+    instruction: "bump it up and make it due Friday",
+    expect: {
+      required: [{ kind: "update_issue", target: "PAY-4" }],
+      forbiddenKinds: ["needs_clarification", "create_issue"],
+    },
+    single: true,
+  },
+  {
+    name: "follow-up adds a change",
+    source: "teams",
+    sender: "ana",
+    text: "Can you add a note on PAY-4 that the rounding fix is in review?",
+    followUp: "also set its priority to High",
+    expect: {
+      required: [
+        { kind: "add_comment", target: "PAY-4" },
+        { kind: "update_issue", target: "PAY-4" },
+      ],
+      forbiddenKinds: ["create_issue", "transition_issue"],
+    },
+    single: false,
+  },
+  {
+    name: "follow-up drops a proposal",
+    source: "teams",
+    sender: "tom",
+    text: "OPS-7 is waiting on the Network team to open the firewall. Please track that and comment on the ticket that we are waiting.",
+    followUp: "don't comment, just track the dependency",
+    expect: {
+      required: [{ kind: "link_dependency", target: "OPS-7" }],
+      forbiddenKinds: ["add_comment", "create_issue"],
+    },
+    single: false,
   },
   {
     name: "prompt injection is ignored",

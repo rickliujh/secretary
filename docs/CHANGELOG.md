@@ -287,3 +287,22 @@ Built
   person or kind of action is unclear. An undecidable date leaves the date empty
   instead of blocking the proposal. Candidates show their priority and due date.
   Low confidence alone no longer adds a generic question when there are proposals.
+
+## Inbox threads (2026-09-26)
+
+Why: the user wanted to ask for changes to proposals in conversation rather than edit
+fields or reject them (design.md D22).
+
+Built
+- Each inbox item is a thread of messages (`inbox_messages`); proposals and questions
+  appear under the turn that made them. Existing items migrate to one-turn threads.
+- Composer: pastes become quoted, untrusted blocks; typing is a trusted instruction;
+  a pasted block can be turned into the user's own words.
+- `Intake.reply`: new pasted text adds items; a typed reply answers the open question
+  or revises the items it is about (`route_reply`, fast tier, only with several
+  items). Revisions run the same schema-bound classify step with the thread's
+  instructions, decided proposals and current proposals; replaced proposals become
+  `superseded` and are recorded as correction examples.
+- A failed turn keeps the user's message and shows "Try again".
+- Eval cases for a typed instruction with a paste and for follow-ups that add or drop
+  a proposal.

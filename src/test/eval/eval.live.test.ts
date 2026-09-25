@@ -148,11 +148,18 @@ const runCases = (cases: EvalCase[]) =>
     const out: { c: EvalCase; payloads: ProposalPayload[]; errors: string[] }[] = [];
     for (const c of cases) {
       // A provider error (timeout, rate limit) fails this case, not the whole run.
+      const intake = yield* Intake;
       const attempt = yield* Effect.either(
-        (yield* Intake).triage({
-          text: c.text,
-          source: c.source,
-          senderPersonId: c.sender ? senders[c.sender] : null,
+        Effect.gen(function* () {
+          const first = yield* intake.triage({
+            text: c.text,
+            instruction: c.instruction ?? null,
+            source: c.source,
+            senderPersonId: c.sender ? senders[c.sender] : null,
+          });
+          if (c.followUp)
+            yield* intake.reply({ inboxItemId: first.inboxItemId, instruction: c.followUp });
+          return first;
         }),
       );
       if (attempt._tag === "Left") {
@@ -161,14 +168,15 @@ const runCases = (cases: EvalCase[]) =>
         continue;
       }
       const r = attempt.right;
-      const rows = yield* query((d) =>
+      // Scored on what the thread ends with: replaced proposals do not count.
+      const rows = (yield* query((d) =>
         d
           .select()
           .from(proposals)
           .where(eq(proposals.inboxItemId, r.inboxItemId))
           .orderBy(asc(proposals.seq))
           .all(),
-      );
+      )).filter((x) => x.status !== "superseded");
       const items = yield* query((d) =>
         d.select().from(intakeItems).where(eq(intakeItems.inboxItemId, r.inboxItemId)).all(),
       );
