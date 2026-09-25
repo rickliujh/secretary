@@ -11,6 +11,8 @@ export const SYNC_KEYS = {
   fields: "jira.fields",
   timeZone: "jira.timeZone",
   username: "jira.username",
+  /** JSON { [projectKey]: { issueTypes: string[], statuses: string[], at } } from /project/{key}/statuses. */
+  projectMeta: "jira.projectMeta",
 } as const;
 
 export const getState = (key: string) =>
@@ -25,3 +27,14 @@ export const setState = (key: string, value: string) =>
       .values({ key, value })
       .onConflictDoUpdate({ target: syncState.key, set: { value } }),
   );
+
+export type ProjectMeta = Record<string, { issueTypes: string[]; statuses: string[] }>;
+
+export const parseProjectMeta = (value: string | undefined): ProjectMeta => {
+  if (!value) return {};
+  try {
+    return JSON.parse(value) as ProjectMeta;
+  } catch {
+    return {};
+  }
+};

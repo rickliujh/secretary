@@ -58,8 +58,14 @@ export const snapshot: ItemSnapshot = {
       key: "PAY",
       issueTypes: ["Epic", "Story", "Task", "Sub-task", "Bug"],
       statuses: ["To Do", "In Progress", "Blocked", "Done"],
+      complete: true,
     },
-    { key: "OPS", issueTypes: ["Task", "Sub-task"], statuses: ["To Do", "In Progress", "Done"] },
+    {
+      key: "OPS",
+      issueTypes: ["Task", "Sub-task"],
+      statuses: ["To Do", "In Progress", "Done"],
+      complete: true,
+    },
   ],
   priorities: ["Highest", "High", "Medium", "Low"],
   jiraUsers: [

@@ -84,12 +84,11 @@ describe("Retrieval.snapshot", () => {
     expect(byKey.get("OPS-7")?.reasons).toContain("search");
     expect(byKey.get("PAY-4")?.reasons).toContain("recent");
     expect(byKey.has("PAY-1")).toBe(true);
-    expect(s.projects.find((p) => p.key === "PAY")?.issueTypes).toEqual([
-      "Bug",
-      "Epic",
-      "Story",
-      "Sub-task",
-    ]);
+    // Without project metadata from sync, the lists come from the cache and are marked incomplete.
+    expect(s.projects.find((p) => p.key === "PAY")).toMatchObject({
+      issueTypes: ["Bug", "Epic", "Story", "Sub-task"],
+      complete: false,
+    });
     expect(s.priorities).toEqual(["Highest", "High", "Medium", "Low"]);
     expect(s.jiraUsers.map((u) => u.username)).toContain("ana.b");
     expect(s.me).toEqual({ username: "rliu" });

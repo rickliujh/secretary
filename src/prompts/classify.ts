@@ -48,7 +48,11 @@ export type ItemSnapshot = {
   clarification: string | null;
   references: { issueKeys: string[]; tickets: string[]; urls: string[]; contactIds: string[] };
   candidates: CandidateIssue[];
-  projects: { key: string; issueTypes: string[]; statuses: string[] }[];
+  /**
+   * `complete` when issue types and statuses come from Jira's project metadata;
+   * otherwise they are only what the cached issues happen to use.
+   */
+  projects: { key: string; issueTypes: string[]; statuses: string[]; complete?: boolean }[];
   priorities: string[];
   jiraUsers: { username: string; displayName: string }[];
   teams: { id: string; name: string; function: string | null; contactFor: string | null }[];
@@ -380,7 +384,11 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
 
     if (p.kind === "create_issue") {
       const proj = project(String(p.projectKey));
-      if (proj && proj.issueTypes.length > 0 && !proj.issueTypes.includes(String(p.issueType)))
+      if (
+        proj?.complete &&
+        proj.issueTypes.length > 0 &&
+        !proj.issueTypes.includes(String(p.issueType))
+      )
         errors.push(
           `${at}: issue type ${p.issueType} is not available in ${p.projectKey} (${proj.issueTypes.join(", ")}).`,
         );
@@ -395,8 +403,11 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
     }
     if (p.kind === "transition_issue") {
       const c = candidates.get(String(p.target));
+      // Per-project statuses are only authoritative when they came from Jira's project
+      // metadata; a cache-only list misses statuses no cached ticket is in. Jira's own
+      // transitions are checked again when the proposal is executed.
       const proj = c ? project(c.projectKey) : undefined;
-      if (proj && proj.statuses.length > 0 && !proj.statuses.includes(String(p.toStatus)))
+      if (proj?.complete && !proj.statuses.includes(String(p.toStatus)))
         errors.push(
           `${at}: status ${p.toStatus} is not used in ${proj.key} (${proj.statuses.join(", ")}).`,
         );

@@ -19,7 +19,7 @@ import { Db, query } from "@/services/db";
 import { normalizeUsername } from "@/services/directory/schema";
 import { describePayload, ProposalPayloadSchema } from "@/services/proposals/schema";
 import { Settings } from "@/services/settings";
-import { getState, SYNC_KEYS } from "@/services/sync/state";
+import { getState, parseProjectMeta, SYNC_KEYS } from "@/services/sync/state";
 import { BUDGETS, CANDIDATE_LIMIT, Retrieval, type SnapshotRequest } from ".";
 import {
   mergeCandidates,
@@ -172,6 +172,11 @@ const make = Effect.gen(function* () {
         string,
         { key: string; issueTypes: Set<string>; statuses: Set<string> }
       >();
+      // Jira's project metadata (read at sync) is authoritative; the cache only adds
+      // projects it does not cover.
+      const projectMeta = parseProjectMeta(
+        yield* Effect.provideService(getState(SYNC_KEYS.projectMeta), Db, db),
+      );
       for (const [key, type, status] of projectRows) {
         const p = projects.get(key) ?? { key, issueTypes: new Set(), statuses: new Set() };
         p.issueTypes.add(type);
@@ -362,11 +367,17 @@ const make = Effect.gen(function* () {
         candidates,
         projects: [...projects.values()]
           .sort((a, b) => a.key.localeCompare(b.key))
-          .map((p) => ({
-            key: p.key,
-            issueTypes: [...p.issueTypes].sort(),
-            statuses: [...p.statuses].sort(),
-          })),
+          .map((p) => {
+            const meta = projectMeta[p.key];
+            return meta
+              ? { key: p.key, issueTypes: meta.issueTypes, statuses: meta.statuses, complete: true }
+              : {
+                  key: p.key,
+                  issueTypes: [...p.issueTypes].sort(),
+                  statuses: [...p.statuses].sort(),
+                  complete: false,
+                };
+          }),
         priorities,
         jiraUsers,
         teams: teamsOut,

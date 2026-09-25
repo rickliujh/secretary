@@ -232,3 +232,49 @@ describe("validateSegments", () => {
     ).toContain("not copied verbatim");
   });
 });
+
+describe("per-project checks need Jira's project metadata", () => {
+  test("cache-only project lists do not reject statuses or issue types they have not seen", () => {
+    const partial = {
+      ...snapshot,
+      projects: snapshot.projects.map((p) => ({
+        ...p,
+        statuses: ["To Do"],
+        issueTypes: ["Task"],
+        complete: false,
+      })),
+    };
+    const out = (proposals: Record<string, unknown>[]) =>
+      validateItemOutput(
+        {
+          summary: "s",
+          question: null,
+          confidence: 0.9,
+          proposals: proposals as ItemOutput["proposals"],
+        },
+        partial,
+      );
+    const e = { rationale: "r", evidence: "e", confidence: 0.9 };
+    expect(out([{ kind: "transition_issue", target: "OPS-7", toStatus: "Done", ...e }])).toEqual(
+      [],
+    );
+    expect(
+      out([
+        {
+          kind: "create_issue",
+          ref: "$new:1",
+          projectKey: "OPS",
+          issueType: "Bug",
+          summary: "s",
+          description: null,
+          parent: null,
+          epic: null,
+          priority: null,
+          assignee: null,
+          dueDate: null,
+          ...e,
+        },
+      ]),
+    ).toEqual([]);
+  });
+});

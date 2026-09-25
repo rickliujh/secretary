@@ -6,6 +6,7 @@
  *   SECRETARY_EVAL_API_KEY=...
  *   SECRETARY_EVAL_STANDARD_MODEL=claude-sonnet-5
  *   SECRETARY_EVAL_FAST_MODEL=claude-haiku-4-5   # optional: also compares tiers
+ *   SECRETARY_EVAL_CASE="status change"         # optional: run only cases whose name contains this
  *   bun test src/test/eval
  *
  * Jira is a stub over the fixtures, so nothing is written anywhere.
@@ -13,7 +14,7 @@
 import { describe, expect, test } from "bun:test";
 import { asc, eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { proposals } from "@/db/schema";
+import { intakeItems, proposals } from "@/db/schema";
 import { query } from "@/services/db";
 import { DbTest } from "@/services/db/test";
 import { createPerson, createTeam } from "@/services/directory/queries";
@@ -23,7 +24,7 @@ import { Intake } from "@/services/intake";
 import { IntakeLive } from "@/services/intake/live";
 import { JiraClientLive } from "@/services/jira/live";
 import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
-import type { ProposalPayload } from "@/services/proposals/schema";
+import { describePayload, type ProposalPayload } from "@/services/proposals/schema";
 import { RetrievalLive } from "@/services/retrieval/live";
 import { secretNames } from "@/services/secrets";
 import { makeSecretsTest } from "@/services/secrets/test";
@@ -46,6 +47,9 @@ const configured = !!(
   env.SECRETARY_EVAL_STANDARD_MODEL
 );
 const PASS_RATE = 0.75;
+const selected = env.SECRETARY_EVAL_CASE
+  ? EVAL_CASES.filter((c) => c.name.includes(env.SECRETARY_EVAL_CASE ?? ""))
+  : EVAL_CASES;
 
 function layerFor(tiers: TierBindings) {
   const provider = ProviderSchema.parse({
@@ -58,6 +62,25 @@ function layerFor(tiers: TierBindings) {
     { match: (u) => u.pathname.endsWith("/myself"), respond: () => json(myself) },
     { match: (u) => u.pathname.endsWith("/field"), respond: () => json(fields) },
     { match: (u) => u.pathname.endsWith("/comment"), respond: () => json(comments) },
+    // Project metadata as a real sync reads it (every issue type and status per project).
+    {
+      match: (u) => /\/project\/[A-Z]+\/statuses$/.test(u.pathname),
+      respond: (r) => {
+        const pay = r.url.pathname.includes("/PAY/");
+        const statuses = (names: string[]) => names.map((name) => ({ name }));
+        return json(
+          pay
+            ? ["Epic", "Story", "Task", "Bug", "Sub-task"].map((name) => ({
+                name,
+                statuses: statuses(["To Do", "In Progress", "Blocked", "In Review", "Done"]),
+              }))
+            : ["Task", "Sub-task"].map((name) => ({
+                name,
+                statuses: statuses(["To Do", "In Progress", "Done"]),
+              })),
+        );
+      },
+    },
     {
       match: (u) => u.pathname.endsWith("/search"),
       respond: (r) => {
@@ -122,7 +145,7 @@ const runCases = (cases: EvalCase[]) =>
       teamId: network,
     });
     const senders = { ana, tom };
-    const out: { c: EvalCase; payloads: ProposalPayload[] }[] = [];
+    const out: { c: EvalCase; payloads: ProposalPayload[]; errors: string[] }[] = [];
     for (const c of cases) {
       const r = yield* (yield* Intake).triage({
         text: c.text,
@@ -137,17 +160,33 @@ const runCases = (cases: EvalCase[]) =>
           .orderBy(asc(proposals.seq))
           .all(),
       );
-      out.push({ c, payloads: rows.map((x) => x.payload as ProposalPayload) });
+      const items = yield* query((d) =>
+        d.select().from(intakeItems).where(eq(intakeItems.inboxItemId, r.inboxItemId)).all(),
+      );
+      out.push({
+        c,
+        payloads: rows.map((x) => x.payload as ProposalPayload),
+        errors: items.map((i) => i.error).filter((e): e is string => !!e),
+      });
     }
     return out;
   });
 
-const report = (label: string, results: { c: EvalCase; payloads: ProposalPayload[] }[]) => {
+const report = (
+  label: string,
+  results: { c: EvalCase; payloads: ProposalPayload[]; errors?: string[] }[],
+) => {
   let passed = 0;
   console.log(`\n${label}`);
   for (const { c, payloads } of results) {
     const s = scoreCase(c.expect, payloads);
     if (s.pass) passed++;
+    else {
+      // Details for diagnosis: what was proposed, what was asked, what failed validation.
+      for (const p of payloads) console.log(`      ${describePayload(p)}`);
+      for (const e of results.find((x) => x.c === c)?.errors ?? [])
+        console.log(`      validation: ${e.replace(/\n/g, " | ")}`);
+    }
     console.log(
       `${s.pass ? "PASS" : "FAIL"}  ${c.name}: ${signature(payloads) || "(nothing)"}${s.missing.length ? `  missing ${s.missing.map((m) => `${m.kind}:${m.target ?? "*"}`).join(", ")}` : ""}${s.forbidden.length ? `  forbidden ${s.forbidden.join(", ")}` : ""}`,
     );
@@ -160,7 +199,7 @@ describe.skipIf(!configured)("live intake eval", () => {
     const model = env.SECRETARY_EVAL_STANDARD_MODEL ?? "";
     const bind = { providerId: "eval", model };
     const results = await Effect.runPromise(
-      Effect.provide(runCases(EVAL_CASES), layerFor({ fast: bind, standard: bind, strong: null })),
+      Effect.provide(runCases(selected), layerFor({ fast: bind, standard: bind, strong: null })),
     );
     expect(report(`standard: ${model}`, results)).toBeGreaterThanOrEqual(PASS_RATE);
   }, 600_000);
@@ -168,7 +207,7 @@ describe.skipIf(!configured)("live intake eval", () => {
   test.skipIf(!env.SECRETARY_EVAL_FAST_MODEL)(
     "fast and standard agree on explicit single-item cases",
     async () => {
-      const single = EVAL_CASES.filter((c) => c.single);
+      const single = selected.filter((c) => c.single);
       const run = (model: string) => {
         const bind = { providerId: "eval", model };
         return Effect.runPromise(

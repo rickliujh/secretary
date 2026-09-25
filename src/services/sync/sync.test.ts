@@ -50,7 +50,7 @@ function setup() {
     SyncLive,
     jiraTestLayer(stub.fetch, jiraSettings({ trackedEpics: ["PAY-1"] })),
   );
-  return { state, searches, seen: stub.seen, layer };
+  return { state, searches, seen: stub.seen, layer, fetch: stub.fetch };
 }
 
 const ftsKeys = (match: string) =>
@@ -183,3 +183,49 @@ describe("Sync", () => {
     expect(() => SearchPageSchema.parse(page2)).not.toThrow();
   });
 });
+
+describe("project metadata", () => {
+  test("a full sync reads every issue type and status per project for intake validation", async () => {
+    const { getState, parseProjectMeta, SYNC_KEYS } = await import("./state");
+    const { layer } = setupWithStatuses();
+    const meta = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          return parseProjectMeta(yield* getState(SYNC_KEYS.projectMeta));
+        }),
+        layer,
+      ),
+    );
+    expect(meta.OPS).toEqual({
+      issueTypes: ["Sub-task", "Task"],
+      statuses: ["Done", "In Progress", "To Do"],
+    });
+    expect(Object.keys(meta).sort()).toEqual(["OPS", "PAY"]);
+  });
+});
+
+function setupWithStatuses() {
+  const statuses = [
+    {
+      name: "Task",
+      subtask: false,
+      statuses: [{ name: "To Do" }, { name: "In Progress" }, { name: "Done" }],
+    },
+    { name: "Sub-task", subtask: true, statuses: [{ name: "To Do" }, { name: "Done" }] },
+  ];
+  const base = setup();
+  return {
+    layer: Layer.provideMerge(
+      SyncLive,
+      jiraTestLayer(
+        async (input, init) => {
+          const url = new URL(input instanceof Request ? input.url : String(input));
+          if (/\/project\/[A-Z]+\/statuses$/.test(url.pathname)) return json(statuses);
+          return base.fetch(input, init);
+        },
+        jiraSettings({ trackedEpics: ["PAY-1"] }),
+      ),
+    ),
+  };
+}

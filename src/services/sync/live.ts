@@ -17,10 +17,12 @@ import {
   type SyncStatus,
 } from ".";
 import { buildScopeJql, chunk, withUpdatedSince } from "./jql";
-import { getState, SYNC_KEYS, setState } from "./state";
+import { getState, parseProjectMeta, SYNC_KEYS, setState } from "./state";
 import { replaceComments, upsertIssues } from "./upsert";
 
 const PAGE_SIZE = 100;
+const MAX_PROJECTS_WITH_META = 30;
+
 const SUBTASK_PARENTS_PER_QUERY = 100;
 
 const initialStatus: SyncStatus = {
@@ -228,6 +230,31 @@ const make = Effect.gen(function* () {
           if (r.maxUpdated && (!maxUpdated || r.maxUpdated > maxUpdated)) maxUpdated = r.maxUpdated;
         }
       }
+
+      // Real issue types and statuses per project, so intake validation does not
+      // depend on which tickets happen to be cached. Refreshed on full syncs and
+      // for projects seen for the first time; failures just keep the old data.
+      yield* patch({ phase: "Reading project metadata" });
+      const projectKeys = (yield* query((d) =>
+        d
+          .selectDistinct({ key: jiraIssues.projectKey })
+          .from(jiraIssues)
+          .where(eq(jiraIssues.stale, false))
+          .all(),
+      ).pipe(withDb)).map((r) => r.key);
+      const meta = parseProjectMeta(yield* withDb(getState(SYNC_KEYS.projectMeta)));
+      let metaChanged = false;
+      for (const key of projectKeys.slice(0, MAX_PROJECTS_WITH_META)) {
+        if (!full && meta[key]) continue;
+        const types = yield* jira.projectStatuses(key).pipe(Effect.option);
+        if (types._tag === "None") continue;
+        meta[key] = {
+          issueTypes: [...new Set(types.value.map((t) => t.name))].sort(),
+          statuses: [...new Set(types.value.flatMap((t) => t.statuses.map((x) => x.name)))].sort(),
+        };
+        metaChanged = true;
+      }
+      if (metaChanged) yield* withDb(setState(SYNC_KEYS.projectMeta, JSON.stringify(meta)));
 
       // Tracked-epic flags follow settings even for issues not updated in this run.
       yield* query((d) =>

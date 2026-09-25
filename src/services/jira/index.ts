@@ -8,6 +8,7 @@ import type {
   JiraField,
   Priority,
   Project,
+  ProjectStatuses,
   RawIssue,
   RemoteLink,
   Transition,
@@ -97,6 +98,7 @@ export interface JiraClientShape {
     issueTypeId: string,
   ) => Effect.Effect<readonly CreateMetaField[], JiraError>;
   readonly remoteLinks: (key: string) => Effect.Effect<readonly RemoteLink[], JiraError>;
+  readonly projectStatuses: (projectKey: string) => Effect.Effect<ProjectStatuses, JiraError>;
   /**
    * Raw write. Only `Executor` may call this (CLAUDE.md hard rule): every
    * Jira write is an approved proposal or an explicit user action.

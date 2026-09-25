@@ -20,6 +20,7 @@ import {
   PrioritySchema,
   PrioritySearchSchema,
   ProjectSchema,
+  ProjectStatusesSchema,
   RawIssueSchema,
   RemoteLinkSchema,
   SearchPageSchema,
@@ -163,6 +164,8 @@ const make = Effect.gen(function* () {
         `issue/createmeta/${encodeURIComponent(projectKey)}/issuetypes/${encodeURIComponent(issueTypeId)}`,
         { searchParams: { maxResults: 200 } },
       ),
+    projectStatuses: (projectKey) =>
+      call(ProjectStatusesSchema, `project/${encodeURIComponent(projectKey)}/statuses`),
     remoteLinks: (key) =>
       call(z.array(RemoteLinkSchema), `issue/${encodeURIComponent(key)}/remotelink`),
     send: (req) =>

@@ -222,4 +222,14 @@ export const RemoteLinkSchema = z.object({
 });
 export type RemoteLink = z.infer<typeof RemoteLinkSchema>;
 
+/** `GET /project/{key}/statuses`: every issue type of a project with its statuses (DC and Cloud). */
+export const ProjectStatusesSchema = z.array(
+  z.object({
+    name: z.string(),
+    subtask: z.boolean().optional(),
+    statuses: z.array(z.object({ name: z.string() })),
+  }),
+);
+export type ProjectStatuses = z.infer<typeof ProjectStatusesSchema>;
+
 export const CreatedIssueSchema = z.object({ id: z.string(), key: z.string() });
