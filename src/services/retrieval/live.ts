@@ -19,7 +19,8 @@ import { Db, query } from "@/services/db";
 import { normalizeUsername } from "@/services/directory/schema";
 import { describePayload, ProposalPayloadSchema } from "@/services/proposals/schema";
 import { Settings } from "@/services/settings";
-import { getState, parseProjectMeta, SYNC_KEYS } from "@/services/sync/state";
+import { promptSprints } from "@/services/sprints/calendar";
+import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { BUDGETS, CANDIDATE_LIMIT, Retrieval, type SnapshotRequest } from ".";
 import {
   mergeCandidates,
@@ -346,6 +347,16 @@ const make = Effect.gen(function* () {
         BUDGETS.notes,
       );
 
+      // --- sprint calendar (D23) -----------------------------------------------
+      const sprintState = parseSprintState(
+        yield* Effect.provideService(getState(SYNC_KEYS.sprints), Db, db),
+      );
+      const sprints = promptSprints(sprintState, {
+        today: req.today,
+        fyStartMonth: settings?.general.fiscalYearStartMonth ?? 1,
+        projects: [...projects.keys()],
+      });
+
       return {
         promptVersion: CLASSIFY_PROMPT_VERSION,
         today: req.today,
@@ -391,6 +402,7 @@ const make = Effect.gen(function* () {
         memories: rules,
         examples,
         notes,
+        sprints,
       } satisfies ItemSnapshot;
     });
 

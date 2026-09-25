@@ -279,6 +279,39 @@ describe("prompt", () => {
   });
 });
 
+describe("sprint calendar in the prompt (D23)", () => {
+  test("lists sprints with quarter and position, and says how to use them", () => {
+    const { system, prompt } = buildClassifyPrompt({
+      ...snapshot,
+      sprints: [
+        {
+          board: "PAY board",
+          name: "Payments 15",
+          state: "active",
+          start: "2026-09-14",
+          end: "2026-09-28",
+          quarter: "Q3 2026 (Jul–Sep)",
+          position: 6,
+        },
+        {
+          board: "PAY board",
+          name: "projected 3 after Payments 15",
+          state: "projected",
+          start: "2026-10-26",
+          end: "2026-11-09",
+          quarter: "Q4 2026 (Oct–Dec)",
+          position: 2,
+        },
+      ],
+    });
+    expect(prompt).toContain(
+      '- PAY board: "projected 3 after Payments 15" projected, 2026-10-26 to 2026-11-09; Q4 2026 (Oct–Dec), sprint 2 of that quarter',
+    );
+    expect(system).toContain("whatever the sprints are called");
+    expect(buildClassifyPrompt(snapshot).system).not.toContain("Sprints list");
+  });
+});
+
 describe("validateSegments", () => {
   const text = "Please chase PAY-2.\n\nAlso, Tom now leads the network team.";
   test("quotes must be verbatim spans", () => {

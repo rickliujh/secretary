@@ -104,8 +104,10 @@ export const SettingsSchema = z.object({
   general: z
     .object({
       outputLanguage: z.string().trim().min(1).default("English"),
+      /** Month (1-12) the fiscal year starts; quarters in the sprint calendar follow it (D23). */
+      fiscalYearStartMonth: z.number().int().min(1).max(12).default(1),
     })
-    .default({ outputLanguage: "English" }),
+    .default({ outputLanguage: "English", fiscalYearStartMonth: 1 }),
   dependencies: z
     .object({
       /** Working days until the next follow-up after one is logged. */

@@ -136,3 +136,63 @@ export function buildCalendar(
   }
   return out;
 }
+
+/** One sprint as the classify prompt shows it. */
+export type PromptSprint = {
+  board: string;
+  name: string;
+  state: CalendarSprint["state"];
+  start: string;
+  end: string;
+  quarter: string;
+  position: number | null;
+};
+
+const MAX_PROMPT_BOARDS = 3;
+
+/**
+ * The calendar for one item: boards whose issues belong to the item's projects,
+ * or the busiest boards when none match, so the prompt stays small.
+ */
+export function promptSprints(
+  data: {
+    sprints: SprintInfo[];
+    completeBoards: number[];
+    boardProjects: Record<string, string[]>;
+  },
+  opts: { today: string; fyStartMonth: number; projects: readonly string[] },
+): PromptSprint[] {
+  const projectsOf = (board: number | null) =>
+    board === null ? [] : (data.boardProjects[String(board)] ?? []);
+  const counts = new Map<number | null, number>();
+  for (const s of data.sprints) counts.set(s.boardId, (counts.get(s.boardId) ?? 0) + 1);
+  const related = [...counts.keys()].filter((b) =>
+    projectsOf(b).some((p) => opts.projects.includes(p)),
+  );
+  const boards = new Set(
+    (related.length ? related : [...counts].sort((a, b) => b[1] - a[1]).map(([b]) => b)).slice(
+      0,
+      MAX_PROMPT_BOARDS,
+    ),
+  );
+  return buildCalendar(
+    data.sprints.filter((s) => boards.has(s.boardId)),
+    {
+      today: opts.today,
+      fyStartMonth: opts.fyStartMonth,
+      completeBoards: new Set(data.completeBoards),
+    },
+  ).map((s) => ({
+    board: projectsOf(s.boardId).length
+      ? `${projectsOf(s.boardId).join("/")} board`
+      : s.boardId === null
+        ? "unknown board"
+        : `board ${s.boardId}`,
+    name: s.name,
+    state: s.state,
+    start: s.start,
+    end: s.end,
+    quarter: s.quarter,
+    position: s.ordinal,
+  }));
+}

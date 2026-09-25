@@ -16,9 +16,10 @@ import {
   type ProposalPayload,
   ProposalPayloadSchema,
 } from "@/services/proposals/schema";
+import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 4;
+export const CLASSIFY_PROMPT_VERSION = 5;
 export const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -55,6 +56,8 @@ export type ThreadContext = {
 };
 
 export type ItemSnapshot = {
+  /** Sprint calendar around today (D23); absent in snapshots before prompt version 5. */
+  sprints?: PromptSprint[];
   promptVersion: number;
   today: string;
   me: { username: string } | null;
@@ -588,7 +591,12 @@ ${HARD_RULES}
 - Use remember for rules and preferences the user states about how to handle future work.
 - The user reviews and can edit every proposal before it runs, so a sensible proposal with a stated assumption beats a question. Decide details yourself: the priority (from urgency, deadlines, blocking and customer impact), wording, and which listed value fits. Say what you assumed in the rationale.
 - Ask a question only when you cannot tell which issue, person or kind of action the input is about. Never ask the user to pick a value you could reasonably choose, such as a priority.
-- If a date cannot be worked out from the input, still make the proposal: leave the date empty and quote what was said about timing in the rationale.
+${
+  s.sprints?.length
+    ? `- When the input refers to a sprint (by name, by number, as "next sprint", or as "the Nth sprint of a quarter"), use that sprint's end date from the Sprints list, whatever the sprints are called. The Nth sprint of a quarter is the one listed with that quarter and position. Say in the rationale which sprint you used, and that its dates are an estimate if it is projected.
+`
+    : ""
+}- If a date cannot be worked out from the input, still make the proposal: leave the date empty and quote what was said about timing in the rationale.
 - Set each confidence honestly: below 0.6 means the user should check that proposal closely. Low confidence is not a reason to leave a proposal out.${
     s.thread?.pending.length
       ? `
@@ -637,6 +645,16 @@ ${HARD_RULES}
   blocks.push(
     `## Projects\n${s.projects.map((p) => `- ${p.key}: issue types ${p.issueTypes.join(", ") || "unknown"}; statuses ${p.statuses.join(", ") || "unknown"}`).join("\n") || "- none"}\nPriorities (highest first): ${s.priorities.join(", ") || "unknown"}`,
   );
+  if (s.sprints?.length) {
+    blocks.push(
+      `## Sprints (dates from Jira; projected ones are estimated from the board's usual sprint length)\n${s.sprints
+        .map(
+          (x) =>
+            `- ${x.board}: "${x.name}" ${x.state}, ${x.start} to ${x.end}; ${x.quarter}${x.position ? `, sprint ${x.position} of that quarter` : ""}`,
+        )
+        .join("\n")}`,
+    );
+  }
   blocks.push(
     `## Candidate issues (the only existing issues you may reference)\n${
       s.candidates

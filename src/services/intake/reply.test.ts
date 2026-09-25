@@ -66,6 +66,7 @@ describe("Intake threads (D22)", () => {
             instruction: "only move it, no dependency",
             source: "teams",
             senderPersonId: null,
+            today: "2026-09-24",
           });
           return yield* readThread(res.inboxItemId);
         }),
@@ -86,6 +87,9 @@ describe("Intake threads (D22)", () => {
     expect(r.props[0]?.messageId).toBe(r.messages[1]?.id ?? "");
     const p = prompt(models.calls, 0);
     expect(p).toContain("Instructions from the user in this conversation (trusted)");
+    // The synced board's sprints, with positions and a projection (D23).
+    expect(p).toContain("active, 2026-09-14 to 2026-09-28; Q3 2026 (Jul–Sep), sprint 6");
+    expect(p).toContain("projected 1 after Payments 15");
     expect(p).toContain("1. only move it, no dependency");
     expect(p).toContain("<untrusted_input");
   });
