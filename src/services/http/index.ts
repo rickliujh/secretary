@@ -22,7 +22,7 @@ type ProxyConfig = {
 export const proxyFromSettings = Effect.gen(function* () {
   const settings = yield* (yield* Settings).get.pipe(Effect.orElseSucceed(() => undefined));
   const net = settings?.network;
-  if (!net || net.proxyMode !== "manual" || !net.proxyUrl) return undefined;
+  if (net?.proxyMode !== "manual" || !net.proxyUrl) return undefined;
   const password = net.proxyUsername
     ? Option.getOrUndefined(
         yield* (yield* Secrets)
