@@ -135,8 +135,8 @@ describe("Jira Cloud", () => {
     expect(searches[0]?.body).not.toHaveProperty("nextPageToken");
     expect(searches[1]?.body).toMatchObject({ nextPageToken: "tok-3" });
     // No Epic Link clause on Cloud; parent covers epics.
-    expect((searches[0]?.body as { jql: string }).jql).toContain("parent in (PAY-1)");
-    expect((searches[0]?.body as { jql: string }).jql).not.toContain("cf[");
+    expect((searches[0]?.body as { jql: string } | undefined)?.jql).toContain("parent in (PAY-1)");
+    expect((searches[0]?.body as { jql: string } | undefined)?.jql).not.toContain("cf[");
     expect(seen.some((x) => x.url.endsWith("/rest/api/2/search"))).toBe(false);
     expect(seen[0]?.headers.authorization).toBe(
       `Basic ${btoa("rick@example.com:api-token-000000")}`,
