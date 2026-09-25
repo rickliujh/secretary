@@ -41,7 +41,7 @@ export const FIELD_SPECS: Record<Exclude<ProposalKind, "needs_clarification">, F
     { path: "epic", label: "Epic", type: "text", mono: true },
     { path: "parent", label: "Parent (sub-tasks)", type: "text", mono: true },
     { path: "priority", label: "Priority", type: "text" },
-    { path: "assignee", label: "Assignee (Jira username)", type: "text", mono: true },
+    { path: "assignee", label: "Assignee (Jira user)", type: "text", mono: true },
     { path: "dueDate", label: "Due", type: "date" },
   ],
   update_issue: [
@@ -51,7 +51,7 @@ export const FIELD_SPECS: Record<Exclude<ProposalKind, "needs_clarification">, F
     { path: "changes.dueDate", label: "Due", type: "date", optionalChange: true },
     {
       path: "changes.assignee",
-      label: "Assignee (Jira username)",
+      label: "Assignee (Jira user)",
       type: "text",
       mono: true,
       optionalChange: true,

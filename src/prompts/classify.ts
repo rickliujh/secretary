@@ -103,7 +103,7 @@ export function buildItemSchema(s: ItemSnapshot) {
       summary: z.string().nullable(),
       priority: nullableEnum(s.priorities),
       dueDate: z.string().nullable().describe("YYYY-MM-DD"),
-      assignee: nullableEnum(users).describe("Jira username"),
+      assignee: nullableEnum(users).describe("Jira user id from the list"),
       ...common,
     }),
     z.object({
@@ -375,7 +375,7 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       if (!validDate(p[field])) errors.push(`${at}: ${field} must be YYYY-MM-DD or null.`);
     }
     if (typeof p.assignee === "string" && !knownUsers.has(p.assignee))
-      errors.push(`${at}: assignee ${p.assignee} is not a known Jira username.`);
+      errors.push(`${at}: assignee ${p.assignee} is not a known Jira user.`);
     if (!p.evidence?.trim()) errors.push(`${at}: evidence must quote the input.`);
 
     if (p.kind === "create_issue") {

@@ -177,7 +177,7 @@ describe("validateItemOutput", () => {
           ...base,
         },
       ]).join(),
-    ).toContain("not a known Jira username");
+    ).toContain("not a known Jira user");
     expect(check([{ ...good.proposals[1], externalRef: null }]).join()).toContain(
       "needs externalRef",
     );

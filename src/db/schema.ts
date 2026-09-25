@@ -34,7 +34,7 @@ export const jiraIssues = sqliteTable(
     status: text("status").notNull(),
     statusCategory: text("status_category", { enum: ["new", "indeterminate", "done"] }).notNull(),
     priority: text("priority"),
-    /** Jira username, used to match contacts. */
+    /** Jira user: username on Data Center, account ID on Cloud (D19). Used to match contacts. */
     assignee: text("assignee"),
     assigneeDisplay: text("assignee_display"),
     reporter: text("reporter"),
@@ -68,7 +68,7 @@ export const jiraComments = sqliteTable(
   {
     id: text("id").primaryKey(),
     issueKey: text("issue_key").notNull(),
-    /** Jira username. */
+    /** Jira user: username on Data Center, account ID on Cloud. */
     author: text("author"),
     authorDisplay: text("author_display"),
     body: text("body").notNull(),

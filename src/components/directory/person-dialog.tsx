@@ -214,9 +214,12 @@ export function PersonDialog({
                 <FieldError errors={[e.email]} />
               </Field>
               <Field>
-                <FieldLabel htmlFor="person-jira">Jira username</FieldLabel>
+                <FieldLabel htmlFor="person-jira">Jira user</FieldLabel>
                 <Input id="person-jira" className="font-mono" {...form.register("jiraUsername")} />
-                <FieldDescription>Links their Jira issues to this contact.</FieldDescription>
+                <FieldDescription>
+                  Username on Data Center, account ID on Cloud. Filled in when you add someone from
+                  Jira.
+                </FieldDescription>
               </Field>
               <EnumSelect
                 form={form}

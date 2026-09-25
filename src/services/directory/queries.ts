@@ -118,7 +118,7 @@ export const deletePerson = (id: string) =>
     yield* query((db) => db.delete(people).where(eq(people.id, id)));
   });
 
-/** Lower-cased Jira username -> contact, for linking assignees and reporters. */
+/** Lower-cased Jira user id (username or account ID) -> contact, for linking assignees and reporters. */
 export const contactsByUsername = Effect.map(
   query((db) =>
     db

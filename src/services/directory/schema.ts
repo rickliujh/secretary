@@ -70,5 +70,5 @@ export const NoteInputSchema = z.object({
 });
 export type NoteInput = z.input<typeof NoteInputSchema>;
 
-/** Jira usernames are case-insensitive. */
+/** Jira user ids compare case-insensitively (DC usernames are; Cloud account IDs are lower-case). */
 export const normalizeUsername = (u: string | null | undefined) => (u ?? "").trim().toLowerCase();
