@@ -7,6 +7,7 @@ import { HttpFailure, makeAtlassianClient, requestJson } from "@/services/http/j
 import { Secrets } from "@/services/secrets";
 import { Settings } from "@/services/settings";
 import {
+  BoardSprintPageSchema,
   CloudSearchPageSchema,
   CommentPageSchema,
   CreateMetaFieldsSchema,
@@ -48,9 +49,9 @@ const make = Effect.gen(function* () {
       Effect.mapError((e) => notConfigured(e.message)),
     );
 
-  const client = (overrides?: Credentials) =>
+  const client = (overrides?: Credentials, apiPrefix = "/rest/api/2") =>
     Effect.map(credentials(overrides), ({ apiBase, auth }) =>
-      makeAtlassianClient({ baseUrl: apiBase, apiPrefix: "/rest/api/2", auth, fetch }),
+      makeAtlassianClient({ baseUrl: apiBase, apiPrefix, auth, fetch }),
     );
 
   const call = <T>(
@@ -58,8 +59,9 @@ const make = Effect.gen(function* () {
     path: string,
     options?: Parameters<KyInstance>[1],
     overrides?: Credentials,
+    apiPrefix?: string,
   ) =>
-    Effect.flatMap(client(overrides), (http) =>
+    Effect.flatMap(client(overrides, apiPrefix), (http) =>
       Effect.tryPromise({
         try: (signal) => requestJson(http, path, schema, { ...options, signal }),
         catch: toJiraError,
@@ -166,6 +168,14 @@ const make = Effect.gen(function* () {
       ),
     projectStatuses: (projectKey) =>
       call(ProjectStatusesSchema, `project/${encodeURIComponent(projectKey)}/statuses`),
+    boardSprints: (boardId, startAt, states) =>
+      call(
+        BoardSprintPageSchema,
+        `board/${boardId}/sprint`,
+        { searchParams: { startAt, maxResults: 50, state: states.join(",") } },
+        undefined,
+        "/rest/agile/1.0",
+      ),
     remoteLinks: (key) =>
       call(z.array(RemoteLinkSchema), `issue/${encodeURIComponent(key)}/remotelink`),
     send: (req) =>

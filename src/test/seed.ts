@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import type { AppSettings } from "@/services/settings/schema";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
+import boardSprints from "@/test/fixtures/jira/board-7-sprints.json";
 import comments from "@/test/fixtures/jira/comments-PAY-2.json";
 import fields from "@/test/fixtures/jira/field.json";
 import myself from "@/test/fixtures/jira/myself.json";
@@ -19,6 +20,10 @@ export function syncedJiraLayer(extra: StubRoute[] = [], patch: Partial<AppSetti
     ...extra,
     { match: (u) => u.pathname.endsWith("/myself"), respond: () => json(myself) },
     { match: (u) => u.pathname.endsWith("/field"), respond: () => json(fields) },
+    {
+      match: (u) => u.pathname.endsWith("/rest/agile/1.0/board/7/sprint"),
+      respond: () => json(boardSprints),
+    },
     {
       match: (u, r) => u.pathname.endsWith("/comment") && r.method === "GET",
       respond: () => json(comments),

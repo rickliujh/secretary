@@ -229,3 +229,41 @@ function setupWithStatuses() {
     ),
   };
 }
+
+describe("sprints", () => {
+  test("sync stores sprint dates from issues and the board's history (D23)", async () => {
+    const { getState, parseSprintState, SYNC_KEYS } = await import("./state");
+    const { syncedJiraLayer } = await import("@/test/seed");
+    const { layer, seen } = syncedJiraLayer();
+    const state = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          return parseSprintState(yield* getState(SYNC_KEYS.sprints));
+        }),
+        layer,
+      ),
+    );
+    const payments = state.sprints.filter((s) => s.boardId === 7).map((s) => s.name);
+    expect(payments).toEqual([
+      "Payments 14",
+      "Payments 15",
+      "Payments 9",
+      "Payments 10",
+      "Payments 11",
+      "Payments 12",
+      "Payments 13",
+    ]);
+    expect(state.sprints.find((s) => s.name === "Payments 15")).toMatchObject({
+      state: "active",
+      start: "2026-09-14",
+      end: "2026-09-28",
+    });
+    expect(state.completeBoards).toContain(7);
+    expect(state.boardProjects["7"]).toEqual(["PAY"]);
+    const agile = seen.find((r) => r.url.includes("/rest/agile/1.0/board/7/sprint"));
+    expect(new URL(agile?.url ?? "http://x").searchParams.get("state")).toBe(
+      "closed,active,future",
+    );
+  });
+});

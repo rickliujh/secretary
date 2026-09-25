@@ -8,6 +8,7 @@ import { JiraClient, type JiraError, type RawIssue, type SearchResult } from "@/
 import { discoverFieldIds, effectiveFieldIds, type FieldIds } from "@/services/jira/fields";
 import { type CommentRow, issueFields, mapComment, mapIssue } from "@/services/jira/mapping";
 import { Settings } from "@/services/settings";
+import { datePart, type SprintInfo } from "@/services/sprints/calendar";
 import {
   type FieldInfo,
   FULL_RESYNC_MS,
@@ -17,11 +18,22 @@ import {
   type SyncStatus,
 } from ".";
 import { buildScopeJql, chunk, withUpdatedSince } from "./jql";
-import { getState, parseProjectMeta, SYNC_KEYS, setState } from "./state";
+import {
+  getState,
+  parseProjectMeta,
+  parseSprintState,
+  type SprintState,
+  SYNC_KEYS,
+  setState,
+} from "./state";
 import { replaceComments, upsertIssues } from "./upsert";
 
 const PAGE_SIZE = 100;
 const MAX_PROJECTS_WITH_META = 30;
+const MAX_SPRINT_BOARDS = 10;
+const MAX_SPRINT_PAGES = 20;
+/** Sprints that ended longer ago than this are dropped from the calendar store. */
+const SPRINT_KEEP_DAYS = 400;
 
 const SUBTASK_PARENTS_PER_QUERY = 100;
 
@@ -103,6 +115,9 @@ const make = Effect.gen(function* () {
     timeZone?: string;
     watermark?: string;
     syncedAt: string;
+    /** Sprints seen on synced issues, by id, and the projects on each board. */
+    sprints: Map<number, SprintInfo>;
+    boardProjects: Map<number, Set<string>>;
   };
 
   /** Pages through one JQL query, storing issues and comments. Returns max `updated`. */
@@ -130,6 +145,14 @@ const make = Effect.gen(function* () {
         );
         const comments: CommentRow[] = [];
         for (const m of mapped) {
+          for (const sprint of m.sprints) {
+            if (sprint.id) ctx.sprints.set(sprint.id, sprint);
+            if (sprint.boardId !== null)
+              ctx.boardProjects.set(
+                sprint.boardId,
+                new Set([...(ctx.boardProjects.get(sprint.boardId) ?? []), m.issue.projectKey]),
+              );
+          }
           comments.push(...(m.commentsComplete ? m.comments : yield* allComments(m.issue.key)));
           if (!maxUpdated || m.issue.updated > maxUpdated) maxUpdated = m.issue.updated;
         }
@@ -151,6 +174,62 @@ const make = Effect.gen(function* () {
         if (!cursor) break;
       }
       return { fetched, maxUpdated };
+    });
+
+  /**
+   * Sprint calendar data (design.md D23): sprints from synced issues, plus each
+   * board's sprints from the Agile API, the whole history on full syncs and for new
+   * boards. Boards without Jira Software or access just keep what issues showed.
+   */
+  const syncSprints = (ctx: RunCtx, full: boolean) =>
+    Effect.gen(function* () {
+      const stored = parseSprintState(yield* withDb(getState(SYNC_KEYS.sprints)));
+      const byId = new Map(stored.sprints.map((s) => [s.id, s]));
+      for (const s of ctx.sprints.values()) byId.set(s.id, s);
+      const boardProjects = new Map(
+        Object.entries(stored.boardProjects).map(([k, v]) => [Number(k), new Set(v)]),
+      );
+      for (const [board, keys] of ctx.boardProjects)
+        boardProjects.set(board, new Set([...(boardProjects.get(board) ?? []), ...keys]));
+      const complete = new Set(stored.completeBoards);
+      const boards = [
+        ...new Set([...byId.values()].map((s) => s.boardId).filter((b) => b !== null)),
+      ].slice(0, MAX_SPRINT_BOARDS);
+      for (const board of boards) {
+        const history = full || !complete.has(board);
+        const states = history ? ["closed", "active", "future"] : ["active", "future"];
+        let startAt = 0;
+        for (let page = 0; page < MAX_SPRINT_PAGES; page++) {
+          const r = yield* jira.boardSprints(board, startAt, states).pipe(Effect.option);
+          if (Option.isNone(r)) {
+            if (history) complete.delete(board);
+            break;
+          }
+          for (const v of r.value.values)
+            byId.set(v.id, {
+              id: v.id,
+              name: v.name,
+              state: v.state.toLowerCase(),
+              boardId: v.originBoardId ?? board,
+              start: datePart(v.startDate),
+              end: datePart(v.endDate),
+            });
+          if (r.value.isLast !== false || r.value.values.length === 0) {
+            if (history) complete.add(board);
+            break;
+          }
+          startAt += r.value.values.length;
+        }
+      }
+      const cutoff = new Date(Date.now() - SPRINT_KEEP_DAYS * 86_400_000).toISOString();
+      const state: SprintState = {
+        sprints: [...byId.values()].filter((s) => !s.end || s.end >= cutoff.slice(0, 10)),
+        completeBoards: [...complete],
+        boardProjects: Object.fromEntries(
+          [...boardProjects].map(([k, v]) => [String(k), [...v].sort()]),
+        ),
+      };
+      yield* withDb(setState(SYNC_KEYS.sprints, JSON.stringify(state)));
     });
 
   const runOnce = (opts: {
@@ -198,6 +277,8 @@ const make = Effect.gen(function* () {
         timeZone: me.timeZone,
         watermark: full ? undefined : yield* withDb(getState(SYNC_KEYS.watermark)),
         syncedAt: nowIso(),
+        sprints: new Map(),
+        boardProjects: new Map(),
       };
 
       const main = yield* syncQuery(
@@ -255,6 +336,9 @@ const make = Effect.gen(function* () {
         metaChanged = true;
       }
       if (metaChanged) yield* withDb(setState(SYNC_KEYS.projectMeta, JSON.stringify(meta)));
+
+      yield* patch({ phase: "Reading sprints" });
+      yield* syncSprints(ctx, full);
 
       // Tracked-epic flags follow settings even for issues not updated in this run.
       yield* query((d) =>

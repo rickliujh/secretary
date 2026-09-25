@@ -1,6 +1,7 @@
 import { Context, Data, type Effect } from "effect";
 import { z } from "zod";
 import type {
+  BoardSprintPage,
   CommentPage,
   CreateMetaField,
   CreateMetaIssueType,
@@ -99,6 +100,12 @@ export interface JiraClientShape {
   ) => Effect.Effect<readonly CreateMetaField[], JiraError>;
   readonly remoteLinks: (key: string) => Effect.Effect<readonly RemoteLink[], JiraError>;
   readonly projectStatuses: (projectKey: string) => Effect.Effect<ProjectStatuses, JiraError>;
+  /** One page of a board's sprints from the Agile API; `states` like ["active", "future"]. */
+  readonly boardSprints: (
+    boardId: number,
+    startAt: number,
+    states: readonly string[],
+  ) => Effect.Effect<BoardSprintPage, JiraError>;
   /**
    * Raw write. Only `Executor` may call this (CLAUDE.md hard rule): every
    * Jira write is an approved proposal or an explicit user action.

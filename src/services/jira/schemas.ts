@@ -232,4 +232,20 @@ export const ProjectStatusesSchema = z.array(
 );
 export type ProjectStatuses = z.infer<typeof ProjectStatusesSchema>;
 
+/** Agile `GET /rest/agile/1.0/board/{id}/sprint`: one page of a board's sprints (DC and Cloud). */
+export const BoardSprintPageSchema = z.object({
+  isLast: z.boolean().optional(),
+  values: z.array(
+    z.object({
+      id: z.number(),
+      name: z.string(),
+      state: z.string(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      originBoardId: z.number().optional(),
+    }),
+  ),
+});
+export type BoardSprintPage = z.infer<typeof BoardSprintPageSchema>;
+
 export const CreatedIssueSchema = z.object({ id: z.string(), key: z.string() });
