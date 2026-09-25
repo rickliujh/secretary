@@ -3,6 +3,7 @@
  */
 import { z } from "zod";
 import type { jiraComments, jiraIssues } from "@/db/schema";
+import { datePart, type SprintInfo } from "@/services/sprints/calendar";
 import { jiraDateToIso, jiraDateToIsoOrNull } from "./dates";
 import type { FieldIds } from "./fields";
 import {
@@ -24,6 +25,8 @@ export type MappedIssue = {
   comments: CommentRow[];
   /** False when Jira embedded fewer comments than the issue has. */
   commentsComplete: boolean;
+  /** Sprints on the issue with their boards and dates, for the sprint calendar (D23). */
+  sprints: SprintInfo[];
 };
 
 export type MapContext = {
@@ -64,21 +67,42 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T | undefined => {
 
 const STATUS_CATEGORIES = new Set(["new", "indeterminate", "done"]);
 
-type Sprint = { name: string; state: string };
+const legacy = (item: string, key: string) => {
+  const v = new RegExp(`[[,]${key}=([^,\\]]*)`).exec(item)?.[1];
+  return v && v !== "<null>" ? v : null;
+};
+const num = (v: unknown) => (typeof v === "number" ? v : v ? Number(v) || null : null);
 
-/** Parses the Sprint field: legacy `Sprint@...[name=..,state=..]` strings or objects. */
-export function parseSprints(value: unknown): Sprint[] {
+/**
+ * Parses the Sprint field: Data Center's legacy `Sprint@...[id=..,name=..]`
+ * strings, or objects (Cloud, newer Data Center).
+ */
+export function parseSprints(value: unknown): SprintInfo[] {
   if (!Array.isArray(value)) return [];
-  const out: Sprint[] = [];
+  const out: SprintInfo[] = [];
   for (const item of value) {
     if (typeof item === "string") {
-      const name = /[[,]name=([^,\]]*)/.exec(item)?.[1];
-      const state = /[[,]state=([^,\]]*)/.exec(item)?.[1];
-      if (name) out.push({ name, state: (state ?? "").toLowerCase() });
+      const name = legacy(item, "name");
+      if (name)
+        out.push({
+          id: num(legacy(item, "id")) ?? 0,
+          name,
+          state: (legacy(item, "state") ?? "").toLowerCase(),
+          boardId: num(legacy(item, "rapidViewId")),
+          start: datePart(legacy(item, "startDate")),
+          end: datePart(legacy(item, "endDate")),
+        });
     } else if (item && typeof item === "object" && "name" in item) {
-      const o = item as { name: unknown; state?: unknown };
+      const o = item as Record<string, unknown>;
       if (typeof o.name === "string")
-        out.push({ name: o.name, state: String(o.state ?? "").toLowerCase() });
+        out.push({
+          id: num(o.id) ?? 0,
+          name: o.name,
+          state: String(o.state ?? "").toLowerCase(),
+          boardId: num(o.boardId ?? o.originBoardId ?? o.rapidViewId),
+          start: datePart(typeof o.startDate === "string" ? o.startDate : null),
+          end: datePart(typeof o.endDate === "string" ? o.endDate : null),
+        });
     }
   }
   return out;
@@ -200,5 +224,6 @@ export function mapIssue(raw: RawIssue, ctx: MapContext): MappedIssue {
     },
     comments,
     commentsComplete: block ? block.total <= comments.length : true,
+    sprints: ctx.fieldIds.sprint ? parseSprints(f[ctx.fieldIds.sprint]) : [],
   };
 }

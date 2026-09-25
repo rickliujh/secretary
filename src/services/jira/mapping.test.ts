@@ -4,7 +4,7 @@ import page1 from "@/test/fixtures/jira/search-page-1.json";
 import page2 from "@/test/fixtures/jira/search-page-2.json";
 import { jiraDateToIso, toJqlDate } from "./dates";
 import { discoverFieldIds, effectiveFieldIds, jqlFieldRef } from "./fields";
-import { currentSprint, issueFields, mapIssue } from "./mapping";
+import { currentSprint, issueFields, mapIssue, parseSprints } from "./mapping";
 import { FieldSchema, SearchPageSchema } from "./schemas";
 
 const fieldIds = discoverFieldIds(fields.map((f) => FieldSchema.parse(f)));
@@ -121,6 +121,41 @@ describe("mapIssue", () => {
       ]),
     ).toBe("Next");
     expect(currentSprint(null)).toBeNull();
+  });
+
+  test("parseSprints reads ids, boards and dates from both field shapes", () => {
+    expect(
+      parseSprints([
+        "com.atlassian.greenhopper.service.sprint.Sprint@6b1c2e7[id=41,rapidViewId=7,state=CLOSED,name=Payments 14,startDate=2026-08-31T09:00:00.000+01:00,endDate=2026-09-14T17:00:00.000+01:00,completeDate=<null>,sequence=41,goal=]",
+        {
+          id: 50,
+          name: "Q4 Sprint 2",
+          state: "future",
+          boardId: 12,
+          startDate: "2026-10-12T08:00:00.000Z",
+          endDate: "2026-10-26T08:00:00.000Z",
+        },
+        { id: 51, name: "Undated", state: "future", originBoardId: 12 },
+      ]),
+    ).toEqual([
+      {
+        id: 41,
+        name: "Payments 14",
+        state: "closed",
+        boardId: 7,
+        start: "2026-08-31",
+        end: "2026-09-14",
+      },
+      {
+        id: 50,
+        name: "Q4 Sprint 2",
+        state: "future",
+        boardId: 12,
+        start: "2026-10-12",
+        end: "2026-10-26",
+      },
+      { id: 51, name: "Undated", state: "future", boardId: 12, start: null, end: null },
+    ]);
   });
 
   test("a parent that is an Epic is treated as the epic link", () => {
