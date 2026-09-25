@@ -1,5 +1,5 @@
 import { Context, type Effect } from "effect";
-import type { ItemSnapshot } from "@/prompts/classify";
+import type { ItemSnapshot, ThreadContext } from "@/prompts/classify";
 import type { DbError } from "@/services/db";
 import type { References } from "@/services/intake/preprocess";
 
@@ -10,6 +10,8 @@ export type SnapshotRequest = {
   references: References;
   today: string;
   clarification?: string | null;
+  /** Thread context for a follow-up (design.md D22). */
+  thread?: ThreadContext | null;
 };
 
 export interface RetrievalShape {

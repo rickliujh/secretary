@@ -4,6 +4,7 @@
  */
 import { z } from "zod";
 import { NEW_REF_RE, type ProposalPayload } from "@/services/proposals/schema";
+import { SOURCES } from ".";
 
 export const MessagePartSchema = z.object({
   /** typed: the user's own words (trusted). pasted: someone else's text (untrusted). */
@@ -12,7 +13,13 @@ export const MessagePartSchema = z.object({
 });
 export type MessagePart = z.infer<typeof MessagePartSchema>;
 
-export const UserContentSchema = z.object({ parts: z.array(MessagePartSchema) });
+export const UserContentSchema = z.object({
+  parts: z.array(MessagePartSchema),
+  /** Where pasted text came from. */
+  source: z.enum(SOURCES).optional(),
+  /** The question proposal this message answers. */
+  answers: z.string().nullable().optional(),
+});
 export type UserContent = z.infer<typeof UserContentSchema>;
 
 export const AssistantContentSchema = z.object({

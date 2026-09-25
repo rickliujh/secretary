@@ -6,7 +6,7 @@ import { useErrorToast } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { listPeople, listTeams } from "@/services/directory/queries";
-import { Intake, type TriageInput } from "@/services/intake";
+import { Intake, type ReplyInput, type TriageInput, type TriageResult } from "@/services/intake";
 import { type ProposalPayload, Proposals } from "@/services/proposals";
 import { listTicketRows } from "@/services/tickets/queries";
 
@@ -19,25 +19,38 @@ function useInvalidateAfterDecision() {
   };
 }
 
-export function useTriage(onDone?: (inboxItemId: string) => void) {
+const summarise = (r: TriageResult) =>
+  r.proposals || r.questions
+    ? `${r.proposals} proposal${r.proposals === 1 ? "" : "s"}${r.questions ? ` and ${r.questions} question${r.questions === 1 ? "" : "s"}` : ""} to review`
+    : "Nothing to do in that input";
+
+/** Runs one intake turn with progress messages and a cancel button. */
+function useIntakeTurn<I>(
+  f: (
+    intake: Intake["Type"],
+    input: I,
+    onProgress: (m: string) => void,
+  ) => Effect.Effect<TriageResult, unknown>,
+  onDone?: (inboxItemId: string) => void,
+) {
   const onError = useErrorToast();
   const invalidate = useInvalidateAfterDecision();
   const [progress, setProgress] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
   const mutation = useMutation({
-    mutationFn: (input: Omit<TriageInput, "onProgress">) => {
+    mutationFn: (input: I) => {
       controller.current = new AbortController();
       return run(
-        Effect.flatMap(Intake, (i) => i.triage({ ...input, onProgress: setProgress })),
+        Effect.flatMap(Intake, (i) => f(i, input, setProgress)) as Effect.Effect<
+          TriageResult,
+          unknown,
+          never
+        >,
         controller.current.signal,
       );
     },
     onSuccess: (r) => {
-      toast.success(
-        r.proposals || r.questions
-          ? `${r.proposals} proposal${r.proposals === 1 ? "" : "s"}${r.questions ? ` and ${r.questions} question${r.questions === 1 ? "" : "s"}` : ""} to review`
-          : "Nothing to do in that input",
-      );
+      toast.success(summarise(r));
       onDone?.(r.inboxItemId);
     },
     onError: (e) => {
@@ -50,6 +63,21 @@ export function useTriage(onDone?: (inboxItemId: string) => void) {
     },
   });
   return { ...mutation, progress, cancel: () => controller.current?.abort() };
+}
+
+/** Starts a thread (D22). */
+export function useTriage(onDone?: (inboxItemId: string) => void) {
+  return useIntakeTurn(
+    (i, input: Omit<TriageInput, "onProgress">, onProgress) => i.triage({ ...input, onProgress }),
+    onDone,
+  );
+}
+
+/** Replies in a thread: new input, an instruction or an answer (D22). */
+export function useReply() {
+  return useIntakeTurn((i, input: Omit<ReplyInput, "onProgress">, onProgress) =>
+    i.reply({ ...input, onProgress }),
+  );
 }
 
 function useProposalMutation<A, I>(

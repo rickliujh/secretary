@@ -1,8 +1,13 @@
 /** Read models for the Inbox page. */
 import { asc, desc, eq, like, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { inboxItems, intakeItems, people, proposals } from "@/db/schema";
+import { inboxItems, inboxMessages, intakeItems, people, proposals } from "@/db/schema";
 import { query } from "@/services/db";
+import {
+  AssistantContentSchema,
+  type MessagePart,
+  UserContentSchema,
+} from "@/services/intake/thread";
 import type { ProposalPayload } from "@/services/proposals/schema";
 
 export type InboxListItem = {
@@ -67,6 +72,39 @@ export type ProposalView = Omit<typeof proposals.$inferSelect, "payload" | "edit
   editedPayload: ProposalPayload | null;
 };
 
+/** One message of a thread (D22), with its content parsed. */
+export type ThreadMessage =
+  | {
+      id: string;
+      role: "user";
+      createdAt: string;
+      parts: MessagePart[];
+      source: string | null;
+      answers: string | null;
+    }
+  | { id: string; role: "assistant"; createdAt: string; summary: string | null };
+
+const toMessage = (m: typeof inboxMessages.$inferSelect): ThreadMessage => {
+  if (m.role === "user") {
+    const c = UserContentSchema.safeParse(m.content);
+    return {
+      id: m.id,
+      role: "user",
+      createdAt: m.createdAt,
+      parts: c.success ? c.data.parts : [],
+      source: c.success ? (c.data.source ?? null) : null,
+      answers: c.success ? (c.data.answers ?? null) : null,
+    };
+  }
+  const c = AssistantContentSchema.safeParse(m.content);
+  return {
+    id: m.id,
+    role: "assistant",
+    createdAt: m.createdAt,
+    summary: c.success ? c.data.summary : null,
+  };
+};
+
 export const inboxDetail = (id: string) =>
   Effect.gen(function* () {
     const item = yield* query((d) =>
@@ -114,10 +152,19 @@ export const inboxDetail = (id: string) =>
         .orderBy(asc(proposals.seq))
         .all(),
     )) as ProposalView[];
+    const messages = yield* query((d) =>
+      d
+        .select()
+        .from(inboxMessages)
+        .where(eq(inboxMessages.inboxItemId, id))
+        .orderBy(asc(inboxMessages.seq))
+        .all(),
+    );
     return {
       item: { ...item, error: (item.triage as { error?: string } | null)?.error ?? null },
       items,
       proposals: props,
+      messages: messages.map(toMessage),
     };
   });
 

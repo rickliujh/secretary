@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { queryKeys } from "@/app/query-client";
@@ -8,7 +8,7 @@ import { BriefPanel } from "@/components/dashboard/brief-panel";
 import { EpicHealth } from "@/components/dashboard/epic-health";
 import { FocusList } from "@/components/dashboard/focus-list";
 import { useDashboard } from "@/components/dashboard/use-dashboard";
-import { IntakeBox } from "@/components/inbox/intake-box";
+import { QuickThread } from "@/components/inbox/quick-thread";
 import { StatusBadge } from "@/components/tickets/status-badge";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -77,7 +77,6 @@ function IssueLine({
 }
 
 function Dashboard() {
-  const navigate = useNavigate();
   const { data, isPending, isError } = useDashboard();
   const pending = useQuery({
     queryKey: queryKeys.pendingCount,
@@ -91,7 +90,7 @@ function Dashboard() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4">
       <BriefPanel brief={data.brief} fresh={data.briefFresh} />
-      <IntakeBox compact onTriaged={(id) => navigate({ to: "/inbox", search: { item: id } })} />
+      <QuickThread />
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <Section

@@ -34,7 +34,9 @@ const RECENT_LIMIT = 5;
 const PEOPLE_ALL_THRESHOLD = 30;
 const NOTE_EXCERPT = 600;
 
-const describeExample = (value: unknown) => {
+const describeExample = (value: unknown): string => {
+  // Revisions store the before and after sets (D22).
+  if (Array.isArray(value)) return value.map(describeExample).join("; ") || "nothing";
   const r = ProposalPayloadSchema.safeParse(value);
   return r.success ? describePayload(r.data) : JSON.stringify(value);
 };
@@ -360,6 +362,7 @@ const make = Effect.gen(function* () {
           : null,
         quote: req.quote,
         clarification: req.clarification ?? null,
+        thread: req.thread ?? null,
         references: {
           issueKeys: req.references.issueKeys,
           tickets: req.references.tickets,

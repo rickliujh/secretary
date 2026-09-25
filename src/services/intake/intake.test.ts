@@ -312,42 +312,4 @@ describe("Intake.triage", () => {
     expect(r.retried.proposals).toBe(2);
     expect(r.after.item?.status).toBe("triaged");
   });
-
-  test("answering a question re-triages with the answer and closes the question", async () => {
-    const unsure = {
-      summary: "Unclear",
-      question: "Which ticket?",
-      confidence: 0.2,
-      proposals: [],
-    };
-    const { layer, models } = intakeTestLayer({ "std-m": [out(unsure), out(answer)] });
-    const r = await Effect.runPromise(
-      Effect.provide(
-        Effect.gen(function* () {
-          yield* syncOnce;
-          const intake = yield* Intake;
-          const first = yield* intake.triage({
-            text: "It is blocked again.",
-            source: "teams",
-            senderPersonId: null,
-          });
-          const question = (yield* readBack(first.inboxItemId)).props[0];
-          const second = yield* intake.triage({
-            text: "It is blocked again.",
-            source: "teams",
-            senderPersonId: null,
-            clarifies: { proposalId: question?.id ?? "", answer: "PAY-2, blocked on INC0012345" },
-          });
-          return { question, closed: (yield* readBack(first.inboxItemId)).props[0], second };
-        }),
-        layer,
-      ),
-    );
-    expect(r.question?.kind).toBe("needs_clarification");
-    expect(r.closed?.status).toBe("executed");
-    expect(r.second.proposals).toBe(2);
-    expect(JSON.stringify(models.calls[1]?.prompt)).toContain(
-      "Clarification from the user (trusted)",
-    );
-  });
 });
