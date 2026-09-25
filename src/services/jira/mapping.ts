@@ -129,7 +129,9 @@ export function mapIssue(raw: RawIssue, ctx: MapContext): MappedIssue {
   const assignee = parse(UserRefSchema, f.assignee);
   const reporter = parse(UserRefSchema, f.reporter);
   const epicLink = ctx.fieldIds.epicLink ? f[ctx.fieldIds.epicLink] : undefined;
-  const parentIsEpic = parent?.fields?.issuetype?.name === "Epic";
+  // Cloud links stories to epics through `parent`; hierarchyLevel 1 marks an epic.
+  const parentIsEpic =
+    parent?.fields?.issuetype?.hierarchyLevel === 1 || parent?.fields?.issuetype?.name === "Epic";
   const strings = (v: unknown) =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   const names = (v: unknown) =>
@@ -160,7 +162,7 @@ export function mapIssue(raw: RawIssue, ctx: MapContext): MappedIssue {
       id: raw.id,
       projectKey: project?.key ?? raw.key.split("-")[0] ?? "",
       issueType: issuetype.name,
-      isSubtask: issuetype.subtask,
+      isSubtask: issuetype.subtask || issuetype.hierarchyLevel === -1,
       summary: typeof f.summary === "string" ? f.summary : "",
       description: typeof f.description === "string" ? f.description : null,
       descriptionHtml: typeof renderedDescription === "string" ? renderedDescription : null,

@@ -35,6 +35,8 @@ export const IssueTypeSchema = z.object({
   id: z.string().optional(),
   name: z.string(),
   subtask: z.boolean().default(false),
+  /** Cloud: -1 sub-task, 0 standard, 1 epic (2+ on Premium hierarchies). */
+  hierarchyLevel: z.number().optional(),
 });
 
 export const ProjectRefSchema = z.object({
@@ -114,6 +116,7 @@ export const RawIssueSchema = z.object({
 });
 export type RawIssue = z.infer<typeof RawIssueSchema>;
 
+/** Data Center `POST /search`: offset paging with a total. */
 export const SearchPageSchema = z.object({
   startAt: z.number(),
   maxResults: z.number(),
@@ -121,6 +124,13 @@ export const SearchPageSchema = z.object({
   issues: z.array(RawIssueSchema),
 });
 export type SearchPage = z.infer<typeof SearchPageSchema>;
+
+/** Cloud `POST /search/jql`: token paging, no total (the old /search returns 410). */
+export const CloudSearchPageSchema = z.object({
+  issues: z.array(RawIssueSchema),
+  nextPageToken: z.string().nullish(),
+  isLast: z.boolean().optional(),
+});
 
 export const FieldSchema = z.object({
   id: z.string(),
@@ -151,6 +161,12 @@ export type Transition = z.infer<typeof TransitionsSchema>["transitions"][number
 export const PrioritySchema = z.object({ id: z.string(), name: z.string() });
 export type Priority = z.infer<typeof PrioritySchema>;
 
+/** Cloud `GET /priority/search` (plain `/priority` is deprecated there). */
+export const PrioritySearchSchema = z.object({
+  values: z.array(PrioritySchema),
+  isLast: z.boolean().optional(),
+});
+
 export const ProjectSchema = z.object({ id: z.string(), key: z.string(), name: z.string() });
 export type Project = z.infer<typeof ProjectSchema>;
 
@@ -166,19 +182,32 @@ const FieldMetaSchema = z.object({
 export const EditMetaSchema = z.object({ fields: z.record(z.string(), FieldMetaSchema) });
 export type EditMeta = z.infer<typeof EditMetaSchema>;
 
-/** `GET /issue/createmeta/{project}/issuetypes` (DC 8.4+). */
-export const CreateMetaIssueTypesSchema = z.object({
-  values: z.array(IssueTypeSchema.extend({ id: z.string() })),
-  isLast: z.boolean().optional(),
-});
-export type CreateMetaIssueType = z.infer<typeof CreateMetaIssueTypesSchema>["values"][number];
+const CreateMetaIssueTypeSchema = IssueTypeSchema.extend({ id: z.string() });
+export type CreateMetaIssueType = z.infer<typeof CreateMetaIssueTypeSchema>;
 
-/** `GET /issue/createmeta/{project}/issuetypes/{id}` (DC 8.4+). */
-export const CreateMetaFieldsSchema = z.object({
-  values: z.array(FieldMetaSchema.extend({ fieldId: z.string() })),
-  isLast: z.boolean().optional(),
-});
-export type CreateMetaField = z.infer<typeof CreateMetaFieldsSchema>["values"][number];
+/**
+ * `GET /issue/createmeta/{project}/issuetypes`: Data Center pages in `values`,
+ * Cloud in `issueTypes` (alias `createMetaIssueType`).
+ */
+export const CreateMetaIssueTypesSchema = z
+  .object({
+    values: z.array(CreateMetaIssueTypeSchema).optional(),
+    issueTypes: z.array(CreateMetaIssueTypeSchema).optional(),
+    createMetaIssueType: z.array(CreateMetaIssueTypeSchema).optional(),
+  })
+  .transform((r) => r.values ?? r.issueTypes ?? r.createMetaIssueType ?? []);
+
+const CreateMetaFieldSchema = FieldMetaSchema.extend({ fieldId: z.string() });
+export type CreateMetaField = z.infer<typeof CreateMetaFieldSchema>;
+
+/** `GET /issue/createmeta/{project}/issuetypes/{id}`: `values` on Data Center, `fields` (alias `results`) on Cloud. */
+export const CreateMetaFieldsSchema = z
+  .object({
+    values: z.array(CreateMetaFieldSchema).optional(),
+    fields: z.array(CreateMetaFieldSchema).optional(),
+    results: z.array(CreateMetaFieldSchema).optional(),
+  })
+  .transform((r) => r.values ?? r.fields ?? r.results ?? []);
 
 export const IssueLinkTypesSchema = z.object({
   issueLinkTypes: z.array(

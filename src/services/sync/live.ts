@@ -4,7 +4,7 @@ import { jiraIssues } from "@/db/schema";
 import { nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { Db, type DbError, query } from "@/services/db";
-import { JiraClient, type JiraError, type RawIssue } from "@/services/jira";
+import { JiraClient, type JiraError, type RawIssue, type SearchResult } from "@/services/jira";
 import { discoverFieldIds, effectiveFieldIds, type FieldIds } from "@/services/jira/fields";
 import { type CommentRow, issueFields, mapComment, mapIssue } from "@/services/jira/mapping";
 import { Settings } from "@/services/settings";
@@ -106,14 +106,14 @@ const make = Effect.gen(function* () {
   /** Pages through one JQL query, storing issues and comments. Returns max `updated`. */
   const syncQuery = (jql: string, ctx: RunCtx, phase: string) =>
     Effect.gen(function* () {
-      let startAt = 0;
+      let cursor: string | null = null;
       let fetched = 0;
       let maxUpdated: string | undefined;
       yield* patch({ phase });
       for (;;) {
-        const page = yield* jira.search({
+        const page: SearchResult = yield* jira.search({
           jql,
-          startAt,
+          cursor,
           maxResults: PAGE_SIZE,
           fields: ctx.fields,
           expand: ["renderedFields"],
@@ -139,13 +139,14 @@ const make = Effect.gen(function* () {
           ),
         );
         fetched += page.issues.length;
-        startAt += page.issues.length;
         yield* SubscriptionRef.update(status, (s) => ({
           ...s,
           fetched: s.fetched + page.issues.length,
+          // Cloud search reports no total; the status then shows a running count.
           total: page.total,
         }));
-        if (startAt >= page.total) break;
+        cursor = page.next;
+        if (!cursor) break;
       }
       return { fetched, maxUpdated };
     });
@@ -171,6 +172,7 @@ const make = Effect.gen(function* () {
       });
 
       const me = yield* jira.myself;
+      const deployment = yield* jira.deployment;
       if (me.timeZone) yield* withDb(setState(SYNC_KEYS.timeZone, me.timeZone));
       yield* withDb(setState(SYNC_KEYS.username, me.id));
       const { effective: fieldIds } = yield* discoverFields;
@@ -181,7 +183,8 @@ const make = Effect.gen(function* () {
           buildScopeJql({
             userJql: settings.jira.jql,
             trackedEpics: settings.jira.trackedEpics,
-            epicLinkFieldId: fieldIds.epicLink,
+            // Cloud retired the Epic Link JQL function; `parent in (...)` covers epics there.
+            epicLinkFieldId: deployment === "cloud" ? undefined : fieldIds.epicLink,
           }),
         catch: (e) =>
           new SyncError({ kind: "scope", message: e instanceof Error ? e.message : String(e) }),

@@ -7,6 +7,7 @@ import { HttpFailure, makeAtlassianClient, requestJson } from "@/services/http/j
 import { Secrets } from "@/services/secrets";
 import { Settings } from "@/services/settings";
 import {
+  CloudSearchPageSchema,
   CommentPageSchema,
   CreateMetaFieldsSchema,
   CreateMetaIssueTypesSchema,
@@ -17,10 +18,12 @@ import {
   JiraError,
   JiraUserSchema,
   PrioritySchema,
+  PrioritySearchSchema,
   ProjectSchema,
   RawIssueSchema,
   RemoteLinkSchema,
   SearchPageSchema,
+  type SearchResult,
   TransitionsSchema,
   UserRefSchema,
 } from ".";
@@ -63,25 +66,60 @@ const make = Effect.gen(function* () {
     );
 
   const csv = (values: readonly string[]) => values.join(",");
+  const deployment = Effect.map(credentials(), (c) => c.deployment);
 
   return JiraClient.of({
     testConnection: (overrides) => call(JiraUserSchema, "myself", undefined, overrides),
     myself: call(JiraUserSchema, "myself"),
     baseUrl: Effect.map(credentials(), (c) => c.apiBase),
-    deployment: Effect.map(credentials(), (c) => c.deployment),
+    deployment,
     fields: call(z.array(FieldSchema), "field"),
     search: (req) =>
-      call(SearchPageSchema, "search", {
-        method: "post",
-        json: {
-          jql: req.jql,
-          startAt: req.startAt,
-          maxResults: req.maxResults,
-          fields: req.fields,
-          expand: req.expand ?? [],
-          // "warn" so a mistyped tracked-epic key does not fail the whole sync.
-          validateQuery: "warn",
-        },
+      Effect.flatMap(deployment, (d): Effect.Effect<SearchResult, JiraError> => {
+        // Search only reads, so retrying a rate-limited POST is safe.
+        const retry = { limit: 3, methods: ["post" as const], statusCodes: [429, 503] };
+        if (d === "cloud") {
+          return call(CloudSearchPageSchema, "search/jql", {
+            method: "post",
+            retry,
+            json: {
+              jql: req.jql,
+              ...(req.cursor ? { nextPageToken: req.cursor } : {}),
+              maxResults: req.maxResults,
+              fields: req.fields,
+              expand: (req.expand ?? []).join(","),
+            },
+          }).pipe(
+            Effect.map((r) => ({
+              issues: r.issues,
+              next: r.isLast || !r.nextPageToken ? null : r.nextPageToken,
+              total: null,
+            })),
+          );
+        }
+        const startAt = req.cursor ? Number(req.cursor) : 0;
+        return call(SearchPageSchema, "search", {
+          method: "post",
+          retry,
+          json: {
+            jql: req.jql,
+            startAt,
+            maxResults: req.maxResults,
+            fields: req.fields,
+            expand: req.expand ?? [],
+            // "warn" so a mistyped tracked-epic key does not fail the whole sync.
+            validateQuery: "warn",
+          },
+        }).pipe(
+          Effect.map((r) => {
+            const nextStart = startAt + r.issues.length;
+            return {
+              issues: r.issues,
+              next: r.issues.length && nextStart < r.total ? String(nextStart) : null,
+              total: r.total,
+            };
+          }),
+        );
       }),
     getIssue: (key, opts) =>
       call(RawIssueSchema, `issue/${encodeURIComponent(key)}`, {
@@ -96,12 +134,21 @@ const make = Effect.gen(function* () {
         Effect.map((r) => r.transitions),
       ),
     getEditMeta: (key) => call(EditMetaSchema, `issue/${encodeURIComponent(key)}/editmeta`),
-    priorities: call(z.array(PrioritySchema), "priority"),
+    priorities: Effect.flatMap(deployment, (d) =>
+      d === "cloud"
+        ? call(PrioritySearchSchema, "priority/search", { searchParams: { maxResults: 100 } }).pipe(
+            Effect.map((r) => r.values),
+          )
+        : call(z.array(PrioritySchema), "priority"),
+    ),
     projects: call(z.array(ProjectSchema), "project"),
-    assignableUsers: (issueKey, query) =>
-      call(z.array(UserRefSchema), "user/assignable/search", {
-        searchParams: { issueKey, username: query, maxResults: 20 },
-      }),
+    assignableUsers: (issueKey, text) =>
+      Effect.flatMap(deployment, (d) =>
+        call(z.array(UserRefSchema), "user/assignable/search", {
+          // Cloud dropped `username` for `query`.
+          searchParams: { issueKey, [d === "cloud" ? "query" : "username"]: text, maxResults: 20 },
+        }),
+      ),
     createMetaIssueTypes: (projectKey) =>
       call(
         CreateMetaIssueTypesSchema,
@@ -109,13 +156,13 @@ const make = Effect.gen(function* () {
         {
           searchParams: { maxResults: 100 },
         },
-      ).pipe(Effect.map((r) => r.values)),
+      ),
     createMetaFields: (projectKey, issueTypeId) =>
       call(
         CreateMetaFieldsSchema,
         `issue/createmeta/${encodeURIComponent(projectKey)}/issuetypes/${encodeURIComponent(issueTypeId)}`,
         { searchParams: { maxResults: 200 } },
-      ).pipe(Effect.map((r) => r.values)),
+      ),
     remoteLinks: (key) =>
       call(z.array(RemoteLinkSchema), `issue/${encodeURIComponent(key)}/remotelink`),
     send: (req) =>

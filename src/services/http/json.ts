@@ -39,7 +39,13 @@ export function makeAtlassianClient(opts: {
       "X-Atlassian-Token": "no-check",
     },
     timeout: opts.timeoutMs ?? 30_000,
-    retry: { limit: 1, methods: ["get"], statusCodes: [408, 429, 500, 502, 503, 504] },
+    // Cloud rate limits answer 429 with Retry-After, which ky honours between attempts.
+    retry: {
+      limit: 3,
+      methods: ["get"],
+      statusCodes: [408, 429, 500, 502, 503, 504],
+      backoffLimit: 30_000,
+    },
     fetch: opts.fetch as typeof globalThis.fetch,
   });
 }

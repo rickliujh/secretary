@@ -10,7 +10,6 @@ import type {
   Project,
   RawIssue,
   RemoteLink,
-  SearchPage,
   Transition,
   UserRef,
 } from "./schemas";
@@ -47,11 +46,15 @@ import type { Deployment } from "@/services/atlassian/deployment";
 
 export type SearchRequest = {
   jql: string;
-  startAt: number;
+  /** Null for the first page, then the `next` of the previous result. */
+  cursor: string | null;
   maxResults: number;
   fields: readonly string[];
   expand?: readonly string[];
 };
+
+/** One page of search results; `next` is null on the last page. `total` is unknown on Cloud. */
+export type SearchResult = { issues: RawIssue[]; next: string | null; total: number | null };
 
 /** A write request built by `executor/jira-mapping.ts`. */
 export type JiraWrite = {
@@ -72,7 +75,7 @@ export interface JiraClientShape {
   readonly baseUrl: Effect.Effect<string, JiraError>;
   readonly deployment: Effect.Effect<Deployment, JiraError>;
   readonly fields: Effect.Effect<readonly JiraField[], JiraError>;
-  readonly search: (req: SearchRequest) => Effect.Effect<SearchPage, JiraError>;
+  readonly search: (req: SearchRequest) => Effect.Effect<SearchResult, JiraError>;
   readonly getIssue: (
     key: string,
     opts: { fields: readonly string[]; expand?: readonly string[] },

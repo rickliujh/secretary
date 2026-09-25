@@ -60,7 +60,8 @@ export const loadDashboardInputs = (now = new Date()) =>
     }));
 
     const since = new Date(now.getTime() - COMMENT_WINDOW_DAYS * 86_400_000).toISOString();
-    const mention = me ? `[~${me}]` : null;
+    // Wiki mentions: `[~username]` on Data Center, `[~accountid:ID]` on Cloud.
+    const mentions = me ? [`[~${me}]`, `[~accountid:${me}]`] : [];
     const comments = yield* query((d) =>
       d
         .select({
@@ -68,8 +69,8 @@ export const loadDashboardInputs = (now = new Date()) =>
           author: jiraComments.author,
           authorDisplay: jiraComments.authorDisplay,
           created: jiraComments.created,
-          mentionsMe: mention
-            ? sql<number>`instr(lower(${jiraComments.body}), lower(${mention})) > 0`
+          mentionsMe: mentions.length
+            ? sql<number>`(instr(lower(${jiraComments.body}), lower(${mentions[0]})) > 0 OR instr(lower(${jiraComments.body}), lower(${mentions[1]})) > 0)`
             : sql<number>`0`,
         })
         .from(jiraComments)

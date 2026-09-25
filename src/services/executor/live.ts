@@ -68,10 +68,13 @@ const make = Effect.gen(function* () {
       }
       const action = parsed.data;
       const { effective: fieldIds } = yield* sync.fieldInfo;
+      const deployment = yield* jira.deployment;
       const editMeta =
-        action.kind === "set_epic" ? yield* jira.getEditMeta(action.issueKey) : undefined;
+        action.kind === "set_epic" && deployment === "datacenter"
+          ? yield* jira.getEditMeta(action.issueKey)
+          : undefined;
       const request = yield* Effect.try({
-        try: () => buildJiraWrite(action, { fieldIds, editMeta }),
+        try: () => buildJiraWrite(action, { deployment, fieldIds, editMeta }),
         catch: (e) =>
           new ExecutorError({
             kind: e instanceof MappingError ? "unsupported" : "invalid",
@@ -131,6 +134,7 @@ const make = Effect.gen(function* () {
         );
       }
       const fields = yield* jira.createMetaFields(p.projectKey, type.id);
+      const deployment = yield* jira.deployment;
       const plan = yield* Effect.try({
         try: () =>
           buildCreateIssue(
@@ -146,7 +150,7 @@ const make = Effect.gen(function* () {
               assignee: p.assignee,
               dueDate: p.dueDate,
             },
-            { fieldIds, fields },
+            { deployment, fieldIds, fields },
           ),
         catch: (e) => fail("unsupported", e instanceof Error ? e.message : String(e)),
       });

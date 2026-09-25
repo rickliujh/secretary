@@ -2,11 +2,14 @@
  * Pure mapping from actions to Jira DC REST v2 write requests (design.md 7.3).
  */
 import { markdownToWiki } from "@/lib/wiki";
+import type { Deployment } from "@/services/atlassian/deployment";
 import type { EditMeta, JiraWrite } from "@/services/jira";
 import type { FieldIds } from "@/services/jira/fields";
 import type { JiraAction } from "./actions";
 
 export type MappingContext = {
+  /** Cloud identifies users by accountId and links epics with `parent` (D19). Defaults to Data Center. */
+  deployment?: Deployment;
   fieldIds: FieldIds;
   /** Needed for `set_epic` to pick Epic Link vs parent. */
   editMeta?: EditMeta;
@@ -43,9 +46,20 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
       return {
         method: "PUT",
         path: issuePath(action.issueKey, "/assignee"),
-        body: { name: action.username },
+        body:
+          ctx.deployment === "cloud" ? { accountId: action.username } : { name: action.username },
       };
     case "set_epic": {
+      if (ctx.deployment === "cloud") {
+        // Cloud retired Epic Link for the system `parent` field; removal uses the documented update form.
+        return {
+          method: "PUT",
+          path: issuePath(action.issueKey),
+          body: action.epicKey
+            ? { fields: { parent: { key: action.epicKey } } }
+            : { update: { parent: [{ set: { none: true } }] } },
+        };
+      }
       const editable = ctx.editMeta?.fields ?? {};
       const epicLink = ctx.fieldIds.epicLink;
       if (epicLink && (!ctx.editMeta || epicLink in editable)) {
@@ -108,6 +122,7 @@ export type CreateIssueInput = {
 };
 
 export type CreateContext = {
+  deployment?: Deployment;
   fieldIds: FieldIds;
   /** Create metadata for the project and issue type. */
   fields: readonly {
@@ -139,7 +154,8 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
   };
   if (input.descriptionMd) set("description", markdownToWiki(input.descriptionMd));
   if (input.priority) set("priority", { name: input.priority });
-  if (input.assignee) set("assignee", { name: input.assignee });
+  if (input.assignee)
+    set("assignee", ctx.deployment === "cloud" ? { id: input.assignee } : { name: input.assignee });
   if (input.dueDate) set("duedate", input.dueDate);
 
   const isSubtask = /sub-?task/i.test(input.issueTypeName);
@@ -150,7 +166,7 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
 
   let epicAfterCreate: string | null = null;
   if (input.epic && !isSubtask) {
-    const epicLink = ctx.fieldIds.epicLink;
+    const epicLink = ctx.deployment === "cloud" ? undefined : ctx.fieldIds.epicLink;
     if (epicLink && allowed.has(epicLink)) fields[epicLink] = input.epic;
     else if (allowed.has("parent")) fields.parent = { key: input.epic };
     else epicAfterCreate = input.epic;
