@@ -11,8 +11,11 @@ import {
   ConfluenceError,
   ConfluenceUserSchema,
   type Credentials,
+  type Page,
   PageSchema,
   SearchResultSchema,
+  V2PageSchema,
+  V2SpaceSchema,
 } from ".";
 
 const toConfluenceError = (e: unknown) =>
@@ -34,17 +37,19 @@ const make = Effect.gen(function* () {
       Effect.mapError((e) => notConfigured(e.message)),
     );
 
+  /** `prefix` is "/rest/api" (v1, both deployments) or "/api/v2" (Cloud only). */
   const call = <T>(
     schema: z.ZodType<T>,
     path: string,
     options?: Parameters<KyInstance>[1],
     overrides?: Credentials,
+    prefix = "/rest/api",
   ) =>
     Effect.flatMap(credentials(overrides), ({ apiBase, auth }) =>
       Effect.tryPromise({
         try: (signal) =>
           requestJson(
-            makeAtlassianClient({ baseUrl: apiBase, apiPrefix: "/rest/api", auth, fetch }),
+            makeAtlassianClient({ baseUrl: apiBase, apiPrefix: prefix, auth, fetch }),
             path,
             schema,
             {
@@ -56,6 +61,39 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /** Cloud: v2 page plus a space lookup, mapped to the v1 page shape the importer uses. */
+  const getCloudPage = (id: string, apiBase: string) =>
+    Effect.gen(function* () {
+      const page = yield* call(
+        V2PageSchema,
+        `pages/${encodeURIComponent(id)}`,
+        { searchParams: { "body-format": "storage" } },
+        undefined,
+        "/api/v2",
+      );
+      const space = yield* call(
+        V2SpaceSchema,
+        `spaces/${encodeURIComponent(page.spaceId)}`,
+        undefined,
+        undefined,
+        "/api/v2",
+      ).pipe(
+        Effect.map((sp): { key: string; name?: string } | undefined => sp),
+        // The page is still usable without its space name.
+        Effect.orElseSucceed(() => undefined),
+      );
+      return {
+        id: page.id,
+        type: "page",
+        title: page.title,
+        space,
+        version: { number: page.version.number, when: page.version.createdAt },
+        ancestors: [],
+        body: { storage: { value: page.body.storage.value } },
+        _links: { webui: page._links.webui, base: page._links.base ?? apiBase },
+      } satisfies Page;
+    });
+
   return ConfluenceClient.of({
     testConnection: (overrides) =>
       call(ConfluenceUserSchema, "user/current", undefined, overrides).pipe(
@@ -64,7 +102,7 @@ const make = Effect.gen(function* () {
           () =>
             new ConfluenceError({
               kind: "auth",
-              message: "Confluence treated the request as anonymous. Check the PAT.",
+              message: "Confluence treated the request as anonymous. Check the email and token.",
             }),
         ),
       ),
@@ -79,9 +117,13 @@ const make = Effect.gen(function* () {
         },
       }),
     getPage: (id) =>
-      call(PageSchema, `content/${encodeURIComponent(id)}`, {
-        searchParams: { expand: "body.storage,version,space,ancestors" },
-      }),
+      Effect.flatMap(credentials(), ({ deployment, apiBase }) =>
+        deployment === "cloud"
+          ? getCloudPage(id, apiBase)
+          : call(PageSchema, `content/${encodeURIComponent(id)}`, {
+              searchParams: { expand: "body.storage,version,space,ancestors" },
+            }),
+      ),
   });
 });
 

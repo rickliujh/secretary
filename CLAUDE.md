@@ -45,7 +45,7 @@ bun test                    # unit and service tests
 bun run lint                # biome/eslint
 bun run db:generate         # drizzle-kit migrations from src/db/schema.ts
 bun run mock:jira           # fake Jira DC on :8089 for UI work (--issues N)
-bun run mock:confluence     # fake Confluence DC on :8090
+bun run mock:confluence     # fake Confluence DC on :8090 (--cloud for Cloud shape)
 bun run tauri build         # release bundle
 ```
 

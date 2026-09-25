@@ -189,6 +189,21 @@ Sync algorithm:
    `jira.watermark`, `jira.lastSyncAt`, `jira.lastFullSyncAt`, `jira.fields`,
    `jira.timeZone`.
 
+Jira Cloud (D19) differs only inside the client and payload mapping:
+
+| Concern | Data Center | Cloud |
+|---|---|---|
+| Auth | `Bearer <PAT>` | `Basic base64(email:api_token)` |
+| API root | configured URL incl. context path | site origin (`https://<site>.atlassian.net`) |
+| Search | `POST /search` (`startAt`, `total`) | `POST /search/jql` (`nextPageToken`, `isLast`, no total; `expand` is a comma string); old `/search` returns 410 |
+| Users | `name` | `accountId` (stored in the same columns) |
+| Assign | `{name}` | `{accountId}`; create/edit field `{id}` |
+| Epics | Epic Link field, else `parent` | `parent` only; remove with `update.parent[{set:{none:true}}]`; `hierarchyLevel` 1 = epic |
+| Create metadata | `values` | `issueTypes` / `fields` |
+| Priorities | `/priority` | `/priority/search` |
+| Mentions | `[~username]` | `[~accountid:ID]` |
+| Rate limits | - | 429 + `Retry-After`, retried up to three times (search included) |
+
 Manual actions from the ticket view (comment, transition, edit fields, assign,
 set epic) are user-initiated writes. They go through `Executor.run(action)`, the
 same path approved proposals use in Phase 3: payload building in
@@ -209,6 +224,12 @@ re-fetched and upserted so the UI shows Jira's truth.
 | Test | `GET /rest/api/user/current` |
 | Search | `GET /rest/api/content/search?cql=...&limit=25&expand=space,version`. Free text becomes `type = page AND (title ~ "q" OR text ~ "q")` (not `siteSearch`, which older DC versions lack); raw CQL is available as a toggle |
 | Page body | `GET /rest/api/content/{id}?expand=body.storage,version,space,ancestors` |
+
+Confluence Cloud (D19): base `https://<site>.atlassian.net/wiki`, Basic auth with the same
+Atlassian API token as Jira (reused when both share the site). CQL search and the
+current-user test stay on v1; pages are fetched with v2
+`GET /wiki/api/v2/pages/{id}?body-format=storage` plus `GET /wiki/api/v2/spaces/{id}`,
+because v1 get-content-by-id is deprecated on Cloud.
 
 Imported pages: storage XHTML -> Markdown via turndown (+ `@joplin/turndown-plugin-gfm`)
 in `src/lib/confluence-md.ts` -> `context_notes`. A pre-pass handles what HTML parsers

@@ -90,7 +90,7 @@ async function describeHttpError(error: HTTPError): Promise<HttpFailure> {
   if (status === 401 || status === 403) {
     return new HttpFailure(
       "auth",
-      `The server rejected the token (${status}). Check the PAT and that it has not expired.`,
+      `The server rejected the credentials (${status}). Check the token (and on Cloud the account email) and that the token has not expired.`,
       status,
     );
   }

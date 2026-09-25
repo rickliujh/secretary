@@ -4,6 +4,7 @@
  *
  *   bun run mock:confluence            # http://localhost:8090
  *   bun run mock:confluence --port 9001
+ *   bun run mock:confluence --cloud    # Cloud shape: /wiki prefix, Basic auth, v2 pages
  *
  * In Settings > Confluence use base URL http://localhost:8090 and any token.
  * CQL support is minimal: `title ~ "x"`, `text ~ "x"` and `space = "KEY"` are
@@ -95,20 +96,39 @@ const plain = (storage: string) =>
     .replace(/<[^>]+>/g, " ")
     .toLowerCase();
 
-export function createHandler(pages: Page[] = PAGES) {
+const SPACE_IDS: Record<string, string> = { PAY: "98305", PLAT: "98306", NET: "98307" };
+
+const cloudWebui = (p: Page) =>
+  `/spaces/${p.space.key}/pages/${p.id}/${encodeURIComponent(p.title).replace(/%20/g, "+")}`;
+
+export function createHandler(pages: Page[] = PAGES, opts: { cloud?: boolean } = {}) {
+  const cloud = !!opts.cloud;
   return (req: Request): Response => {
     const url = new URL(req.url);
-    const base = url.origin;
-    if (!req.headers.get("authorization")?.startsWith("Bearer "))
-      return new Response("", { status: 401 });
-    if (url.pathname === "/rest/api/user/current")
-      return json({
-        type: "known",
-        username: "me",
-        userKey: "8a8b8c8d0001",
-        displayName: "Me Myself",
-      });
-    if (url.pathname === "/rest/api/content/search") {
+    const auth = req.headers.get("authorization") ?? "";
+    if (!auth.startsWith(cloud ? "Basic " : "Bearer ")) return new Response("", { status: 401 });
+    // Cloud serves Confluence under /wiki; the rest of the handler sees DC-style paths.
+    if (cloud && !url.pathname.startsWith("/wiki/")) return json({ message: "Not found" }, 404);
+    const path = cloud ? url.pathname.slice("/wiki".length) : url.pathname;
+    const base = cloud ? `${url.origin}/wiki` : url.origin;
+    const describe = (p: Page) =>
+      cloud
+        ? { ...summary(p, base), _links: { ...summary(p, base)._links, webui: cloudWebui(p) } }
+        : summary(p, base);
+    if (cloud && path.startsWith("/api/v2/")) return v2(path, base, pages);
+    if (path === "/rest/api/user/current")
+      return json(
+        cloud
+          ? {
+              type: "known",
+              accountId: "acc-me",
+              accountType: "atlassian",
+              displayName: "Me Myself",
+              email: "",
+            }
+          : { type: "known", username: "me", userKey: "8a8b8c8d0001", displayName: "Me Myself" },
+      );
+    if (path === "/rest/api/content/search") {
       const cql = url.searchParams.get("cql") ?? "";
       const terms = [...cql.matchAll(/(?:title|text) ~ "((?:[^"\\]|\\.)*)"/g)].map((m) =>
         (m[1] ?? "").replace(/\\(.)/g, "$1").toLowerCase(),
@@ -125,7 +145,7 @@ export function createHandler(pages: Page[] = PAGES) {
                 .every((w) => `${p.title.toLowerCase()} ${plain(p.storage)}`.includes(w)),
             )),
       );
-      const results = found.slice(0, limit).map((p) => summary(p, base));
+      const results = found.slice(0, limit).map(describe);
       return json({
         results,
         start: 0,
@@ -134,7 +154,10 @@ export function createHandler(pages: Page[] = PAGES) {
         _links: { base, context: "" },
       });
     }
-    const m = /^\/rest\/api\/content\/(\d+)$/.exec(url.pathname);
+    const m = /^\/rest\/api\/content\/(\d+)$/.exec(path);
+    // Deprecated on Cloud (CHANGE-864); the app must use v2 there.
+    if (m && cloud)
+      return json({ statusCode: 410, message: "Deprecated: use /wiki/api/v2/pages/{id}" }, 410);
     if (m) {
       const p = pages.find((x) => x.id === m[1]);
       if (!p) return json({ statusCode: 404, message: `No content found with id: ${m[1]}` }, 404);
@@ -151,7 +174,38 @@ export function createHandler(pages: Page[] = PAGES) {
   };
 }
 
+function v2(path: string, base: string, pages: Page[]): Response {
+  const page = /^\/api\/v2\/pages\/(\d+)$/.exec(path);
+  if (page) {
+    const p = pages.find((x) => x.id === page[1]);
+    if (!p) return json({ errors: [{ status: 404, title: "Not Found" }] }, 404);
+    return json({
+      id: p.id,
+      status: "current",
+      title: p.title,
+      spaceId: SPACE_IDS[p.space.key] ?? "1",
+      version: { number: p.version, createdAt: p.when, authorId: "acc-ana" },
+      body: { storage: { representation: "storage", value: p.storage } },
+      _links: { webui: cloudWebui(p), base },
+    });
+  }
+  const space = /^\/api\/v2\/spaces\/(\d+)$/.exec(path);
+  if (space) {
+    const entry = Object.entries(SPACE_IDS).find(([, id]) => id === space[1]);
+    const name = pages.find((p) => p.space.key === entry?.[0])?.space.name;
+    return entry
+      ? json({ id: space[1], key: entry[0], name, type: "global", status: "current" })
+      : json({ errors: [] }, 404);
+  }
+  return json({ errors: [{ status: 404, title: `Mock does not implement ${path}` }] }, 404);
+}
+
 if (import.meta.main) {
-  Bun.serve({ port: PORT, fetch: createHandler() });
-  console.log(`Mock Confluence DC on http://localhost:${PORT} with ${PAGES.length} pages`);
+  const cloud = args.includes("--cloud");
+  Bun.serve({ port: PORT, fetch: createHandler(PAGES, { cloud }) });
+  console.log(
+    cloud
+      ? `Mock Confluence Cloud on http://localhost:${PORT}/wiki with ${PAGES.length} pages (any email and token)`
+      : `Mock Confluence DC on http://localhost:${PORT} with ${PAGES.length} pages`,
+  );
 }

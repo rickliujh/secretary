@@ -58,6 +58,23 @@ export const PageSchema = ContentSummarySchema.extend({
 });
 export type Page = z.infer<typeof PageSchema>;
 
+/** Cloud v2 `GET /api/v2/pages/{id}?body-format=storage` (v1 get-content-by-id is deprecated there). */
+export const V2PageSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  spaceId: z.string(),
+  version: z.object({ number: z.number(), createdAt: z.string().optional() }),
+  body: z.object({ storage: z.object({ value: z.string() }) }),
+  _links: z.object({ webui: z.string().optional(), base: z.string().optional() }).default({}),
+});
+
+/** Cloud v2 `GET /api/v2/spaces/{id}`. */
+export const V2SpaceSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  name: z.string().optional(),
+});
+
 export type { Credentials } from "@/services/atlassian/credentials";
 
 import type { Credentials } from "@/services/atlassian/credentials";

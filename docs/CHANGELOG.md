@@ -244,3 +244,28 @@ Checks
 
 Not verified yet
 - The brief with a real model, and the dashboard in the running app.
+
+## Atlassian Cloud support and network (2026-09-25)
+
+Why: the user's Jira and Confluence are Cloud only (design.md D19), and the company
+network uses a PAC-configured proxy with TLS inspection (D20).
+
+Built
+- Deployment detection (`*.atlassian.net` is Cloud) with an override, account email and
+  API token for Cloud, a shared credential resolver, and Confluence reusing the Jira
+  token on the same site.
+- Jira Cloud: `search/jql` with page tokens, account IDs for users, assignment by
+  accountId, epics through `parent`, create metadata in both shapes, `/priority/search`,
+  `[~accountid:…]` mentions, 429 retries honouring `Retry-After`.
+- Confluence Cloud: `/wiki` base, v2 page fetch with the space key, v1 CQL search.
+- Network: OS trust store in addition to bundled roots, manual proxy with bypass list
+  and optional login (password in the keychain), request failures written to the log.
+- `mock:confluence --cloud`; tests for Jira Cloud sync and writes against a stubbed
+  Cloud, and for Confluence Cloud import end to end.
+
+Verified by the user
+- Test connection and sync against the real Jira Cloud site through the manual proxy.
+
+Not verified yet
+- Confluence Cloud on the real site; Cloud issue creation and epic changes on the real
+  site; whether `search/jql` returns wiki strings rather than ADF for descriptions.
