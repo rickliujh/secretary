@@ -368,6 +368,26 @@ Implementation notes (Phase 3):
   inbox item; a proposal whose create failed or is still pending fails with a clear
   message instead of running.
 
+**Threads** (D22, `Intake.reply`)
+- A message holds typed text and pasted blocks. The composer turns every paste into
+  a pasted block (untrusted, labelled by source); the user can convert a block to
+  their own words. In the first message, pasted blocks are the input and typed text
+  is a trusted instruction; with no pasted block, the typed text is the input, as
+  before.
+- A reply with pasted blocks adds new items (segmented if long) that the reply's
+  typed text instructs; existing items are untouched. A reply with only typed text
+  revises existing items: an answer to a question goes to the item that asked; with
+  one item it goes to that item; otherwise `route_reply` (fast, enum of item indices)
+  picks the items, falling back to all of them. Items whose pending proposals use a
+  `$new` ref created by a revised item are revised too.
+- A revised item is classified again with a thread block: every instruction so far
+  (trusted), its pending proposals in the output schema's shape, and decided
+  proposals (done or rejected; not to repeat). The model returns the complete
+  pending set. The old pending proposals become `superseded`, and one correction
+  example records the instruction with the before and after sets.
+- New `$new` refs are numbered after refs used by decided creates in the thread;
+  issues created earlier in the thread are candidates by key.
+
 **Executor** (`services/executor`)
 Approve -> `edited_payload ?? payload` -> Jira/DB action -> re-fetch -> `actions_log`.
 Rejection and edits both create `memories` of kind `example` (FR-7.2). Executes
@@ -427,7 +447,7 @@ proposals. Step limit 8.
 | Route | Content |
 |---|---|
 | `/` Dashboard | Sections from FR-5.1, brief panel, quick intake box |
-| `/inbox` | Intake box, pending proposal cards, history |
+| `/inbox` | Threads (D22): thread list with pending counts; a thread shows messages, proposal cards and questions inline, and a composer for replies |
 | `/tickets` | Tree table with filters; detail drawer with tabs: fields, description, comments, dependencies, notes, activity |
 | `/waiting` | Open dependencies grouped by owner, overdue first, chase button |
 | `/people`, `/teams` | Directory with profile editor, context notes, Confluence import |
@@ -499,6 +519,7 @@ No silent fallbacks between providers; the user chooses the model.
 | D19 | Support Atlassian Cloud as well as Data Center. The deployment is detected from the URL (`*.atlassian.net` is Cloud) with a manual override in settings. Cloud uses Basic auth with account email and API token, the site root for Jira and `/wiki` for Confluence, account IDs instead of usernames, cursor-paged enhanced search, and `parent` for epics. Everything above the clients (sync, intake, dashboard) is unchanged | 2026-09-25: the user's company runs Jira and Confluence Cloud only; D7's provider seam made this a client-level change |
 | D20 | The HTTP plugin trusts the OS certificate store as well as its bundled roots, and a manual proxy (with bypass list and optional login) can be set; PAC files are not evaluated | Company networks inspect TLS with a locally installed root and publish proxies through PAC files, which reqwest does not read |
 | D21 | Supersedes part of D16. The model sees a portable schema: no `anyOf`, `oneOf`, `const` or `null`, every property required, "" for "none" in nullable strings and enums. Replies are mapped back ("" to null) and parsed with the real zod schema (`services/llm/portable.ts`, applied to every object call). `classify_item` proposals are one flat object with a `kind` enum and nullable fields; the fields each kind needs are checked in code | 2026-09-25: Gemini through the user's OpenAI-compatible proxy collapsed the proposal union to its first branch, so every proposal came back as `create_issue` and the eval scored 25% on three Gemini models |
+| D22 | The inbox is a set of threads. An inbox item is a thread: the first message is the input, later messages revise it, and proposals and questions appear inline under the turn that produced them. Replies run the same schema-bound classify step (not a free-form tool loop) with the thread's instructions and earlier proposals as context. Typed text is a trusted instruction; pasted text stays untrusted input. Replaced proposals are kept as `superseded` for history and recorded as correction examples | 2026-09-25: the user wanted to ask for changes to a proposal in conversation instead of editing fields or rejecting; the constrained pipeline is what made weaker models reliable (D21), so the chat is a front end to it |
 
 ## 13. References
 
