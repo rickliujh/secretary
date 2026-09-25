@@ -154,6 +154,8 @@ const make = Effect.gen(function* () {
             epicKey: row.epicKey,
             parentKey: row.parentKey,
             assignee: row.assignee,
+            priority: row.priority,
+            dueDate: row.dueDate,
             updated: row.updated,
             reasons,
           })),

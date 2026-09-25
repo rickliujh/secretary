@@ -282,3 +282,8 @@ Built
   in `validateItemOutput`. Prompt version 2.
 - Intake validation checks a project's issue types and statuses only when Jira's
   project metadata was fetched at sync, not from the cache alone.
+- Fewer questions (prompt version 3): the model decides details it can reasonably
+  pick, such as a priority, and states its assumption; it asks only when the issue,
+  person or kind of action is unclear. An undecidable date leaves the date empty
+  instead of blocking the proposal. Candidates show their priority and due date.
+  Low confidence alone no longer adds a generic question when there are proposals.

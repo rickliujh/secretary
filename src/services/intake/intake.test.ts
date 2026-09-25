@@ -185,6 +185,29 @@ describe("Intake.triage", () => {
     expect(r.items[0]?.lowConfidence).toBe(true);
   });
 
+  test("low confidence alone keeps the proposals and does not ask", async () => {
+    const run = (value: unknown) => {
+      const { layer } = intakeTestLayer({ "std-m": [out(value)] });
+      return Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            yield* syncOnce;
+            const res = yield* (yield* Intake).triage({
+              text,
+              source: "teams",
+              senderPersonId: null,
+            });
+            return yield* readBack(res.inboxItemId);
+          }),
+          layer,
+        ),
+      );
+    };
+    const withProposals = await run({ ...answer, confidence: 0.3, question: null });
+    expect(withProposals.props.map((p) => p.kind)).toEqual(["transition_issue", "link_dependency"]);
+    expect(withProposals.items[0]?.lowConfidence).toBe(true);
+  });
+
   test("long input is segmented; $new refs from different items are renumbered", async () => {
     const long = [
       "Meeting notes from the payments sync, 24 September.",

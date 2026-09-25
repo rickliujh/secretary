@@ -18,7 +18,7 @@ import {
 } from "@/services/proposals/schema";
 import { HARD_RULES, untrusted } from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 2;
+export const CLASSIFY_PROMPT_VERSION = 3;
 export const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -31,6 +31,9 @@ export type CandidateIssue = {
   epicKey: string | null;
   parentKey: string | null;
   assignee: string | null;
+  /** Optional so snapshots stored before prompt version 3 still load. */
+  priority?: string | null;
+  dueDate?: string | null;
   updated: string;
   /** Why retrieval picked it: "mentioned", "search", "recent", "sender". */
   reasons: string[];
@@ -476,7 +479,10 @@ ${HARD_RULES}
 - Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
 - Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
 - Use remember for rules and preferences the user states about how to handle future work.
-- Set each confidence honestly; below 0.6 means you are guessing, so ask a question instead.`;
+- The user reviews and can edit every proposal before it runs, so a sensible proposal with a stated assumption beats a question. Decide details yourself: the priority (from urgency, deadlines, blocking and customer impact), wording, and which listed value fits. Say what you assumed in the rationale.
+- Ask a question only when you cannot tell which issue, person or kind of action the input is about. Never ask the user to pick a value you could reasonably choose, such as a priority.
+- If a date cannot be worked out from the input, still make the proposal: leave the date empty and quote what was said about timing in the rationale.
+- Set each confidence honestly: below 0.6 means the user should check that proposal closely. Low confidence is not a reason to leave a proposal out.`;
 
   const blocks: string[] = [];
   if (s.memories.length) {
@@ -517,14 +523,14 @@ ${HARD_RULES}
     );
   }
   blocks.push(
-    `## Projects\n${s.projects.map((p) => `- ${p.key}: issue types ${p.issueTypes.join(", ") || "unknown"}; statuses ${p.statuses.join(", ") || "unknown"}`).join("\n") || "- none"}\nPriorities: ${s.priorities.join(", ") || "unknown"}`,
+    `## Projects\n${s.projects.map((p) => `- ${p.key}: issue types ${p.issueTypes.join(", ") || "unknown"}; statuses ${p.statuses.join(", ") || "unknown"}`).join("\n") || "- none"}\nPriorities (highest first): ${s.priorities.join(", ") || "unknown"}`,
   );
   blocks.push(
     `## Candidate issues (the only existing issues you may reference)\n${
       s.candidates
         .map(
           (c) =>
-            `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}] ${c.summary} (${c.reasons.join(", ")})`,
+            `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}${c.priority ? `, priority ${c.priority}` : ""}${c.dueDate ? `, due ${c.dueDate}` : ""}] ${c.summary} (${c.reasons.join(", ")})`,
         )
         .join("\n") || "- none found"
     }${s.dependencies.length ? `\nOpen dependencies:\n${s.dependencies.map((d) => `- ${d.issueKey} waits on ${d.label} (${d.status})`).join("\n")}` : ""}`,
@@ -536,7 +542,9 @@ ${HARD_RULES}
     })}\nReferences found by code: issues ${s.references.issueKeys.join(", ") || "none"}; tickets ${s.references.tickets.join(", ") || "none"}.`,
   );
   if (s.clarification) {
-    blocks.push(`## Clarification from the user (trusted)\n${s.clarification}`);
+    blocks.push(
+      `## Clarification from the user (trusted)\n${s.clarification}\nAct on this answer. Do not ask again about anything it covers or anything you can decide yourself.`,
+    );
   }
 
   return { system, prompt: blocks.join("\n\n") };

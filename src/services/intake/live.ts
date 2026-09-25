@@ -156,8 +156,9 @@ const make = Effect.gen(function* () {
           }),
         );
         perItem.push(mapItemOutput(value));
-        // Unsure: ask rather than guess (FR-2.5). Proposals stay, marked by their confidence.
-        if (value.question?.trim() || lowConfidence) {
+        // Ask when the model asks, or when it is unsure and has nothing to propose.
+        // Low-confidence proposals stay and show their confidence in review.
+        if (value.question?.trim() || (lowConfidence && value.proposals.length === 0)) {
           questions.push({ question: value.question?.trim() || UNSURE_QUESTION, evidence: quote });
         }
       }
