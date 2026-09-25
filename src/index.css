@@ -127,6 +127,12 @@
   html {
     @apply font-sans;
     }
+  /* A desktop window, not a web page: only the app's own panes scroll, and the
+     WebView's rubber-band overscroll never moves the whole layout. */
+  html,
+  body {
+    @apply h-full overflow-hidden overscroll-none;
+    }
 }
 /* Rendered rich text: Jira HTML and Markdown notes. Theme only. */
 .rich-content {
