@@ -198,7 +198,8 @@ export function ThreadView({ id }: { id: string }) {
       text: m.pasted.join("\n\n"),
       instruction: m.typed || null,
       source: m.pasted.length ? m.source : undefined,
-      answers: answering && m.typed ? answering.id : null,
+      // Only a typed reply answers; pasted text starts new items instead.
+      answers: answering && m.typed && m.pasted.length === 0 ? answering.id : null,
     });
   const sending = reply.isPending ? reply.variables : null;
 
