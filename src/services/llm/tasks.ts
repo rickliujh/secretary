@@ -10,6 +10,7 @@ export const TASK_TYPES = [
   "segment_input",
   "rerank_candidates",
   "classify_item",
+  "route_reply",
   "extract_profile_facts",
   "summarize",
   "draft_message",
@@ -56,6 +57,14 @@ export const TASK_DEFAULTS: Record<TaskType, TaskDefaults> = {
     timeoutMs: 120_000,
     label: "Classify item",
     description: "Turn one item into candidate-constrained proposals",
+  },
+  route_reply: {
+    tier: "fast",
+    escalate: false,
+    confidenceThreshold: 0,
+    timeoutMs: 45_000,
+    label: "Route reply",
+    description: "Pick which items of a thread a follow-up is about",
   },
   extract_profile_facts: {
     tier: "fast",

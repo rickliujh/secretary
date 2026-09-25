@@ -41,6 +41,28 @@ describe("mergeItemProposals", () => {
     expect(merged.map((x) => x.itemIndex)).toEqual([0, 1, 1]);
   });
 
+  test("new refs skip the ones already used in the thread", () => {
+    const merged = mergeItemProposals(
+      [
+        [
+          m({
+            kind: "create_issue",
+            ref: "$new:1",
+            projectKey: "PAY",
+            issueType: "Task",
+            summary: "Backfill",
+          }),
+          m({ kind: "add_comment", target: "$new:1", bodyMd: "context" }),
+        ],
+      ],
+      new Set(["$new:1", "$new:2"]),
+    );
+    expect(merged.map((x) => x.payload)).toMatchObject([
+      { kind: "create_issue", ref: "$new:3" },
+      { kind: "add_comment", target: "$new:3" },
+    ]);
+  });
+
   test("the same new issue in two items is created once and both items point at it", () => {
     const merged = mergeItemProposals([
       [

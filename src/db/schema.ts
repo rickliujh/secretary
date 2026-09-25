@@ -268,6 +268,26 @@ export const inboxItems = sqliteTable(
 );
 
 /**
+ * Messages of an inbox thread (design.md D22). User messages hold typed text
+ * (trusted instructions) and pasted blocks (untrusted input); assistant messages
+ * mark one triage turn, and the proposals it produced point at them.
+ */
+export const inboxMessages = sqliteTable(
+  "inbox_messages",
+  {
+    id: text("id").primaryKey(),
+    inboxItemId: text("inbox_item_id")
+      .notNull()
+      .references(() => inboxItems.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    role: text("role", { enum: ["user", "assistant"] }).notNull(),
+    content: text("content", { mode: "json" }).$type<unknown>().notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("inbox_messages_thread_idx").on(t.inboxItemId, t.seq)],
+);
+
+/**
  * Atomic items an inbox item was split into, each classified separately
  * (design.md 7.3). The retrieval snapshot makes evaluation replays compare
  * models, not data drift.
@@ -301,6 +321,8 @@ export const proposals = sqliteTable(
     id: text("id").primaryKey(),
     inboxItemId: text("inbox_item_id").references(() => inboxItems.id, { onDelete: "cascade" }),
     intakeItemId: text("intake_item_id").references(() => intakeItems.id, { onDelete: "cascade" }),
+    /** The assistant turn that proposed it (D22); null for rows made before threads. */
+    messageId: text("message_id").references(() => inboxMessages.id, { onDelete: "set null" }),
     /** Execution order within the inbox item; `$new` references point backwards. */
     seq: integer("seq").notNull().default(0),
     kind: text("kind").notNull(),
@@ -310,7 +332,8 @@ export const proposals = sqliteTable(
     evidence: text("evidence"),
     confidence: real("confidence"),
     status: text("status", {
-      enum: ["pending", "approved", "rejected", "executed", "failed"],
+      // superseded: replaced by a later turn of the thread before it was decided (D22).
+      enum: ["pending", "approved", "rejected", "executed", "failed", "superseded"],
     })
       .notNull()
       .default("pending"),

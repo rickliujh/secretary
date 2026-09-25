@@ -24,10 +24,21 @@ function identity(p: ProposalPayload): string {
   return JSON.stringify(p);
 }
 
-export function mergeItemProposals(items: readonly MappedProposal[][]): MergedProposal[] {
+/**
+ * `reserved` holds refs already used in the thread (decided creates, and pending
+ * proposals of items not being revised); new refs are numbered around them.
+ */
+export function mergeItemProposals(
+  items: readonly MappedProposal[][],
+  reserved: ReadonlySet<string> = new Set(),
+): MergedProposal[] {
   const out: MergedProposal[] = [];
   const seen = new Map<string, MergedProposal>();
-  let next = 1;
+  let n = 1;
+  const nextRef = () => {
+    while (reserved.has(`$new:${n}`)) n++;
+    return `$new:${n++}`;
+  };
   items.forEach((proposals, itemIndex) => {
     // Local $new:n -> global ref (or the ref of an equivalent earlier create).
     const local = new Map<string, string>();
@@ -36,7 +47,7 @@ export function mergeItemProposals(items: readonly MappedProposal[][]): MergedPr
       const dup = seen.get(identity(m.payload));
       local.set(
         m.payload.ref,
-        dup && dup.payload.kind === "create_issue" ? dup.payload.ref : `$new:${next++}`,
+        dup && dup.payload.kind === "create_issue" ? dup.payload.ref : nextRef(),
       );
     }
     for (const m of proposals) {

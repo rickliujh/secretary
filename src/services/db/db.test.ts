@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
@@ -78,6 +79,43 @@ describe("migrator", () => {
 });
 
 describe("drizzle over the proxy", () => {
+  test("threads migration turns existing inbox items into one-turn threads", async () => {
+    const sqlite = new Database(":memory:");
+    sqlite.run("PRAGMA foreign_keys = ON;");
+    const target = {
+      execScript: async (sql: string) => {
+        sqlite.run(sql);
+      },
+      appliedTags: async () =>
+        (sqlite.query(`SELECT tag FROM ${MIGRATIONS_TABLE}`).all() as { tag: string }[]).map(
+          (r) => r.tag,
+        ),
+    };
+    const all = loadMigrationsFromDisk();
+    const at = all.findIndex((m) => m.tag.startsWith("0007_"));
+    await migrate(target, all.slice(0, at));
+    sqlite.run(
+      "INSERT INTO inbox_items (id, source, raw_text, received_at, status, summary) VALUES ('i1', 'teams', 'PAY-2 is blocked', '2026-09-24T10:00:00Z', 'triaged', 'PAY-2 blocked'), ('i2', 'email', 'hello', '2026-09-24T11:00:00Z', 'new', NULL)",
+    );
+    sqlite.run(
+      "INSERT INTO proposals (id, inbox_item_id, kind, payload, created_at) VALUES ('p1', 'i1', 'add_comment', '{}', '2026-09-24T10:00:01Z')",
+    );
+    await migrate(target, all);
+    const messages = sqlite
+      .query("SELECT id, inbox_item_id, seq, role, content FROM inbox_messages ORDER BY id")
+      .all() as { id: string; seq: number; role: string; content: string }[];
+    expect(messages.map((m) => [m.id, m.seq, m.role])).toEqual([
+      ["a1-i1", 1, "assistant"],
+      ["u0-i1", 0, "user"],
+      ["u0-i2", 0, "user"],
+    ]);
+    expect(JSON.parse(messages[1]?.content ?? "")).toEqual({
+      parts: [{ type: "pasted", text: "PAY-2 is blocked" }],
+    });
+    expect(JSON.parse(messages[0]?.content ?? "")).toEqual({ summary: "PAY-2 blocked" });
+    expect(sqlite.query("SELECT message_id FROM proposals").get()).toEqual({ message_id: "a1-i1" });
+  });
+
   test("insert, select, get, update and json/boolean columns round-trip", async () => {
     const program = Effect.gen(function* () {
       const teamId = newId();
