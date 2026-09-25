@@ -118,6 +118,29 @@ describe("item schema", () => {
     expect(errors).toContain("Proposal 1 (add_comment): add_comment needs body.");
     expect(errors).toContain("Proposal 2 (link_dependency): link_dependency needs label.");
   });
+
+  test("leftovers in fields a kind does not use are ignored", () => {
+    const out = {
+      ...good,
+      proposals: [
+        {
+          kind: "remember",
+          memoryKind: "rule",
+          content: "Chase Platform daily",
+          target: "$new:1",
+          dueDate: "Friday",
+          ...base,
+        },
+      ],
+    };
+    const parsed = schema.parse(out) as ItemOutput;
+    expect(validateItemOutput(parsed, snapshot)).toEqual([]);
+    expect(mapItemOutput(parsed)[0]?.payload).toMatchObject({
+      kind: "remember",
+      memoryKind: "rule",
+      content: "Chase Platform daily",
+    });
+  });
 });
 
 describe("validateItemOutput", () => {

@@ -147,11 +147,20 @@ const runCases = (cases: EvalCase[]) =>
     const senders = { ana, tom };
     const out: { c: EvalCase; payloads: ProposalPayload[]; errors: string[] }[] = [];
     for (const c of cases) {
-      const r = yield* (yield* Intake).triage({
-        text: c.text,
-        source: c.source,
-        senderPersonId: c.sender ? senders[c.sender] : null,
-      });
+      // A provider error (timeout, rate limit) fails this case, not the whole run.
+      const attempt = yield* Effect.either(
+        (yield* Intake).triage({
+          text: c.text,
+          source: c.source,
+          senderPersonId: c.sender ? senders[c.sender] : null,
+        }),
+      );
+      if (attempt._tag === "Left") {
+        const e = attempt.left;
+        out.push({ c, payloads: [], errors: [`${e._tag}: ${e.message}`] });
+        continue;
+      }
+      const r = attempt.right;
       const rows = yield* query((d) =>
         d
           .select()

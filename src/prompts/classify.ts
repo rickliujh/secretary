@@ -90,6 +90,16 @@ export const REQUIRED_FIELDS: Record<string, readonly string[]> = {
   draft_message: ["channel", "intent", "notes"],
 };
 
+/** Kinds that read each field the generic checks in `validateItemOutput` look at. */
+const FIELD_KINDS: Record<string, readonly string[]> = {
+  target: ["add_comment", "update_issue", "transition_issue", "link_dependency"],
+  parent: ["create_issue"],
+  epic: ["create_issue"],
+  dueDate: ["create_issue", "update_issue"],
+  expectedAt: ["link_dependency"],
+  assignee: ["create_issue", "update_issue"],
+};
+
 /**
  * Builds the per-item output schema from the snapshot's candidates. Each
  * proposal is one flat object: `kind` picks the action and every other field is
@@ -362,17 +372,20 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       return v === null || v === undefined || (typeof v === "string" && !v.trim());
     });
     if (missing.length) errors.push(`${at}: ${p.kind} needs ${missing.join(", ")}.`);
-    for (const field of ["target", "parent", "epic"]) {
+    // Fields a kind does not use are ignored: in the flat schema a model may fill them
+    // with leftovers, and toPayload never reads them.
+    const used = (field: string) => FIELD_KINDS[field]?.includes(p.kind) ?? false;
+    for (const field of ["target", "parent", "epic"].filter(used)) {
       const v = p[field];
       if (typeof v === "string" && NEW_REF_RE.test(v) && !created.has(v))
         errors.push(`${at}: ${field} ${v} is not created by any create_issue in this answer.`);
       if (typeof v === "string" && !NEW_REF_RE.test(v) && !candidates.has(v))
         errors.push(`${at}: ${field} ${v} is not one of the candidate issues.`);
     }
-    for (const field of ["dueDate", "expectedAt"]) {
+    for (const field of ["dueDate", "expectedAt"].filter(used)) {
       if (!validDate(p[field])) errors.push(`${at}: ${field} must be YYYY-MM-DD or null.`);
     }
-    if (typeof p.assignee === "string" && !knownUsers.has(p.assignee))
+    if (used("assignee") && typeof p.assignee === "string" && !knownUsers.has(p.assignee))
       errors.push(`${at}: assignee ${p.assignee} is not a known Jira user.`);
     if (!p.evidence?.trim()) errors.push(`${at}: evidence must quote the input.`);
 
