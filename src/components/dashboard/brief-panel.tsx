@@ -61,7 +61,7 @@ export function BriefPanel({ brief, fresh }: { brief: CachedBrief | null; fresh:
           {SECTIONS.map(([key, title]) => (
             <section key={key}>
               <h3 className="mb-1 text-sm font-medium">{title}</h3>
-              <Markdown>{brief.sections[key]}</Markdown>
+              <Markdown linkTickets>{brief.sections[key]}</Markdown>
             </section>
           ))}
         </CardContent>

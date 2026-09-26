@@ -97,7 +97,7 @@ function Thread({ id, stored }: { id: string; stored: Parameters<typeof chatFor>
                 {m.parts.map((p, i) =>
                   p.type === "text" ? (
                     // biome-ignore lint/suspicious/noArrayIndexKey: parts only append.
-                    <Markdown key={i} className="text-sm">
+                    <Markdown key={i} className="text-sm" linkTickets>
                       {p.text}
                     </Markdown>
                   ) : isToolUIPart(p) ? (
