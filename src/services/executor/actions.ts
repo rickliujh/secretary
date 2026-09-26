@@ -1,6 +1,6 @@
 /**
- * Jira actions the Executor can perform. Phase 1 uses them for explicit user
- * actions in the ticket view; Phase 3 proposals map onto the same shapes.
+ * Jira actions the Executor can perform: explicit user actions in the ticket
+ * view, and approved proposals mapped onto the same shapes.
  */
 import { z } from "zod";
 import { IsoDate, IssueKey } from "@/services/proposals/schema";

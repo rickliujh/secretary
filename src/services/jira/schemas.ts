@@ -1,5 +1,5 @@
 /**
- * zod schemas for the Jira Data Center REST v2 responses the app uses
+ * zod schemas for the Jira REST v2 responses the app uses, Cloud and Data Center
  * (design.md section 5). Issue `fields` stay an open record so custom fields
  * survive; typed field schemas are applied during mapping.
  */

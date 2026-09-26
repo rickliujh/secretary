@@ -1,5 +1,5 @@
 /**
- * Scoring for the intake eval set and, later, evaluation replay (FR-9.4).
+ * Scoring for the intake eval set and for evaluation replay (FR-9.4).
  * Compares proposal kinds and targets, not wording.
  */
 import type { ProposalKind, ProposalPayload } from "@/services/proposals/schema";

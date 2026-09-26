@@ -297,7 +297,7 @@ export const logFollowup = (id: string, input: FollowupInput, today = localDate(
   });
 
 /**
- * Saves a chase request for the Drafts page (the composer arrives in Phase 6),
+ * Saves a chase request for the Drafts page, where the composer writes it,
  * grounded in the dependency: incident number, ask and first request date.
  */
 export const requestChaseDraft = (id: string) =>

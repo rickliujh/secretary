@@ -105,7 +105,7 @@ export const importConfluencePage = (pageId: string, subject: Subject) =>
     } satisfies ImportResult;
   });
 
-/** Note ids matching free text, via the FTS index (used by retrieval in Phase 3). */
+/** Note ids matching free text, via the FTS index (the chat tools search notes with it). */
 export const searchNoteIds = (match: string) =>
   query((db) =>
     db
