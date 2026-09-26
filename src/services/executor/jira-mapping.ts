@@ -1,5 +1,5 @@
 /**
- * Pure mapping from actions to Jira DC REST v2 write requests (design.md 7.3).
+ * Pure mapping from actions to Jira REST v2 write requests (design.md 7.3).
  */
 import { markdownToWiki } from "@/lib/wiki";
 import type { Deployment } from "@/services/atlassian/deployment";

@@ -2,18 +2,12 @@
  * Outbound request guard (design.md D27): only configured hosts, and a clear
  * failure straight away when the OS reports no network.
  */
+import { parseUrl } from "@/lib/url";
 
 export const OFFLINE_MESSAGE =
   "No network connection. Cached data is still available; try again when you are back online.";
 
-const hostOf = (url: string | null | undefined) => {
-  if (!url) return null;
-  try {
-    return new URL(url).host.toLowerCase();
-  } catch {
-    return null;
-  }
-};
+const hostOf = (url: string | null | undefined) => parseUrl(url)?.host.toLowerCase() ?? null;
 
 /** Hosts typed into a settings form and tested before saving. */
 const pending = new Set<string>();

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { asc, eq, sql } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Clock, Effect, Layer } from "effect";
 import { jiraComments, jiraIssues } from "@/db/schema";
 import { query } from "@/services/db";
 import { SearchPageSchema } from "@/services/jira";
@@ -230,29 +230,51 @@ function setupWithStatuses() {
   };
 }
 
+/** A clock stopped at `iso`; sleeps still take real time. */
+const clockAt = (iso: string): Clock.Clock => {
+  const ms = Date.parse(iso);
+  const real = Clock.make();
+  return {
+    [Clock.ClockTypeId]: Clock.ClockTypeId,
+    unsafeCurrentTimeMillis: () => ms,
+    currentTimeMillis: Effect.succeed(ms),
+    unsafeCurrentTimeNanos: () => BigInt(ms) * 1_000_000n,
+    currentTimeNanos: Effect.succeed(BigInt(ms) * 1_000_000n),
+    sleep: (d) => real.sleep(d),
+  };
+};
+
+const syncSprintsAt = async (iso: string) => {
+  const { getState, parseSprintState, SYNC_KEYS } = await import("./state");
+  const { syncedJiraLayer } = await import("@/test/seed");
+  const { layer, seen } = syncedJiraLayer();
+  const state = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        yield* (yield* Sync).run();
+        return parseSprintState(yield* getState(SYNC_KEYS.sprints));
+      }).pipe(Effect.withClock(clockAt(iso))),
+      layer,
+    ),
+  );
+  const names = state.sprints
+    .filter((s) => s.boardId === 7)
+    .map((s) => s.name)
+    .sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+  return { state, seen, names };
+};
+
 describe("sprints", () => {
   test("sync stores sprint dates from issues and the board's history (D23)", async () => {
-    const { getState, parseSprintState, SYNC_KEYS } = await import("./state");
-    const { syncedJiraLayer } = await import("@/test/seed");
-    const { layer, seen } = syncedJiraLayer();
-    const state = await Effect.runPromise(
-      Effect.provide(
-        Effect.gen(function* () {
-          yield* (yield* Sync).run();
-          return parseSprintState(yield* getState(SYNC_KEYS.sprints));
-        }),
-        layer,
-      ),
-    );
-    const payments = state.sprints.filter((s) => s.boardId === 7).map((s) => s.name);
-    expect(payments).toEqual([
-      "Payments 14",
-      "Payments 15",
+    const { state, seen, names } = await syncSprintsAt("2026-09-26T12:00:00Z");
+    expect(names).toEqual([
       "Payments 9",
       "Payments 10",
       "Payments 11",
       "Payments 12",
       "Payments 13",
+      "Payments 14",
+      "Payments 15",
     ]);
     expect(state.sprints.find((s) => s.name === "Payments 15")).toMatchObject({
       state: "active",
@@ -265,5 +287,12 @@ describe("sprints", () => {
     expect(new URL(agile?.url ?? "http://x").searchParams.get("state")).toBe(
       "closed,active,future",
     );
+  });
+
+  test("sprints that ended more than 400 days ago are dropped", async () => {
+    // Payments 9 ended 2026-07-06, Payments 10 on 2026-07-20.
+    const { names } = await syncSprintsAt("2027-08-15T12:00:00Z");
+    expect(names[0]).toBe("Payments 10");
+    expect(names).toHaveLength(6);
   });
 });

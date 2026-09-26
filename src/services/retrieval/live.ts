@@ -16,14 +16,10 @@ import {
   type ItemSnapshot,
 } from "@/prompts/classify";
 import { takeWithinBudget } from "@/prompts/common";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { normalizeUsername } from "@/services/directory/schema";
-import {
-  describePayload,
-  ProposalPayloadSchema,
-  payloadChanges,
-} from "@/services/proposals/schema";
-import { Settings } from "@/services/settings";
+import { describeCorrection, describeStoredPayload } from "@/services/proposals/schema";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { promptSprints } from "@/services/sprints/calendar";
 import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { BUDGETS, CANDIDATE_LIMIT, Retrieval, type SnapshotRequest } from ".";
@@ -41,33 +37,14 @@ const RECENT_LIMIT = 5;
 const PEOPLE_ALL_THRESHOLD = 30;
 const NOTE_EXCERPT = 600;
 
-const describeExample = (value: unknown): string => {
-  // Revisions store the before and after sets (D22).
-  if (Array.isArray(value)) return value.map(describeExample).join("; ") || "nothing";
-  const r = ProposalPayloadSchema.safeParse(value);
-  return r.success ? describePayload(r.data) : JSON.stringify(value);
-};
-
-/** The corrected version plus exactly what changed, so an edited field is not lost. */
-const describeCorrection = (before: unknown, after: unknown): string => {
-  const b = ProposalPayloadSchema.safeParse(before);
-  const a = ProposalPayloadSchema.safeParse(after);
-  if (!b.success || !a.success) return describeExample(after);
-  const changes = payloadChanges(b.data, a.data);
-  return changes.length
-    ? `${describePayload(a.data)} (changed ${changes.join("; ")})`
-    : describePayload(a.data);
-};
-
 const make = Effect.gen(function* () {
-  const db = yield* Db;
   const settingsSvc = yield* Settings;
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const { q, withDb } = bindDb(yield* Db);
 
   const snapshot = (req: SnapshotRequest) =>
     Effect.gen(function* () {
-      const settings = yield* settingsSvc.get.pipe(Effect.orElseSucceed(() => undefined));
-      const me = yield* Effect.provideService(getState(SYNC_KEYS.username), Db, db);
+      const settings = yield* settingsOrDefault(settingsSvc);
+      const me = yield* withDb(getState(SYNC_KEYS.username));
       const allPeople = yield* q((d) => d.select().from(people).all());
       const allTeams = yield* q((d) => d.select().from(teams).all());
       const teamName = new Map(allTeams.map((t) => [t.id, t.name]));
@@ -196,9 +173,7 @@ const make = Effect.gen(function* () {
       >();
       // Jira's project metadata (read at sync) is authoritative; the cache only adds
       // projects it does not cover.
-      const projectMeta = parseProjectMeta(
-        yield* Effect.provideService(getState(SYNC_KEYS.projectMeta), Db, db),
-      );
+      const projectMeta = parseProjectMeta(yield* withDb(getState(SYNC_KEYS.projectMeta)));
       for (const [key, type, status] of projectRows) {
         const p = projects.get(key) ?? { key, issueTypes: new Set(), statuses: new Set() };
         p.issueTypes.add(type);
@@ -327,7 +302,7 @@ const make = Effect.gen(function* () {
       const rules = pickedRules.map((m) => ({ kind: m.kind, content: m.content }));
       const examples = pickedExamples.map((m) => ({
         input: (m.exampleInput ?? "").slice(0, 300),
-        proposed: describeExample(m.exampleBefore),
+        proposed: describeStoredPayload(m.exampleBefore),
         corrected: m.exampleAfter ? describeCorrection(m.exampleBefore, m.exampleAfter) : null,
       }));
       const used = [...pickedRules, ...pickedExamples].map((m) => m.id);
@@ -383,12 +358,10 @@ const make = Effect.gen(function* () {
       );
 
       // --- sprint calendar (D23) -----------------------------------------------
-      const sprintState = parseSprintState(
-        yield* Effect.provideService(getState(SYNC_KEYS.sprints), Db, db),
-      );
+      const sprintState = parseSprintState(yield* withDb(getState(SYNC_KEYS.sprints)));
       const sprints = promptSprints(sprintState, {
         today: req.today,
-        fyStartMonth: settings?.general.fiscalYearStartMonth ?? 1,
+        fyStartMonth: settings.general.fiscalYearStartMonth,
         projects: [...projects.keys()],
       });
 
@@ -396,7 +369,7 @@ const make = Effect.gen(function* () {
         promptVersion: CLASSIFY_PROMPT_VERSION,
         today: req.today,
         me: me ? { username: me } : null,
-        outputLanguage: settings?.general.outputLanguage ?? "English",
+        outputLanguage: settings.general.outputLanguage,
         source: req.source,
         sender: sender
           ? {
@@ -407,7 +380,6 @@ const make = Effect.gen(function* () {
             }
           : null,
         quote: req.quote,
-        clarification: req.clarification ?? null,
         thread: req.thread ?? null,
         references: {
           issueKeys: req.references.issueKeys,

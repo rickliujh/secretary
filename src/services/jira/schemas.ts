@@ -1,5 +1,5 @@
 /**
- * zod schemas for the Jira Data Center REST v2 responses the app uses
+ * zod schemas for the Jira REST v2 responses the app uses, Cloud and Data Center
  * (design.md section 5). Issue `fields` stay an open record so custom fields
  * survive; typed field schemas are applied during mapping.
  */
@@ -10,18 +10,28 @@ import { z } from "zod";
  * `name` and uses `accountId` (design.md D19). `id` is whichever applies, and is
  * what the app stores as "the Jira user" (assignee, reporter, contacts).
  */
-export const UserRefSchema = z
-  .object({
-    name: z.string().optional(),
-    accountId: z.string().optional(),
-    key: z.string().optional(),
-    displayName: z.string(),
-    emailAddress: z.string().optional(),
-    active: z.boolean().optional(),
-  })
-  .transform((u) => ({ ...u, id: u.accountId ?? u.name ?? "" }))
-  .refine((u) => u.id !== "", "User has neither accountId nor name");
+const UserFieldsSchema = z.object({
+  name: z.string().optional(),
+  accountId: z.string().optional(),
+  key: z.string().optional(),
+  displayName: z.string(),
+  emailAddress: z.string().optional(),
+  active: z.boolean().optional(),
+});
+
+const withUserId = <S extends z.ZodType<z.infer<typeof UserFieldsSchema>>>(schema: S) =>
+  schema
+    .transform((u: z.output<S>) => ({ ...u, id: u.accountId ?? u.name ?? "" }))
+    .refine((u) => u.id !== "", "User has neither accountId nor name");
+
+export const UserRefSchema = withUserId(UserFieldsSchema);
 export type UserRef = z.infer<typeof UserRefSchema>;
+
+/** `GET /rest/api/2/myself`: a user plus their Jira time zone. */
+export const JiraUserSchema = withUserId(
+  UserFieldsSchema.extend({ timeZone: z.string().optional() }),
+);
+export type JiraUser = z.infer<typeof JiraUserSchema>;
 
 export const StatusSchema = z.object({
   id: z.string().optional(),
@@ -208,12 +218,6 @@ export const CreateMetaFieldsSchema = z
     results: z.array(CreateMetaFieldSchema).optional(),
   })
   .transform((r) => r.values ?? r.fields ?? r.results ?? []);
-
-export const IssueLinkTypesSchema = z.object({
-  issueLinkTypes: z.array(
-    z.object({ id: z.string(), name: z.string(), inward: z.string(), outward: z.string() }),
-  ),
-});
 
 export const RemoteLinkSchema = z.object({
   id: z.number(),

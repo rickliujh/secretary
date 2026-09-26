@@ -9,6 +9,7 @@ import {
   people,
   teams,
 } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { nowIso } from "@/lib/ids";
 import {
   buildDraftPrompt,
@@ -17,21 +18,19 @@ import {
   DraftOutputSchema,
   validateDraft,
 } from "@/prompts/draft";
-import { Db, query } from "@/services/db";
-import { localDate } from "@/services/intake";
+import { bindDb, Db } from "@/services/db";
 import { Llm } from "@/services/llm";
 import type { MESSAGE_INTENTS } from "@/services/proposals/schema";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { Comms, CommsError } from ".";
 
 const RECENT_MESSAGES = 3;
 const MAX_MEMORIES = 10;
 
 const make = Effect.gen(function* () {
-  const db = yield* Db;
   const llm = yield* Llm;
   const settings = yield* Settings;
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const { q } = bindDb(yield* Db);
 
   /** Everything the model may use, gathered from local data (design.md D24). */
   const context = (
@@ -107,11 +106,11 @@ const make = Effect.gen(function* () {
               .all(),
           )
         : [];
-      const s = yield* settings.get.pipe(Effect.orElseSucceed(() => undefined));
+      const s = yield* settingsOrDefault(settings);
 
       return {
         today,
-        language: person?.profile.language || s?.general.outputLanguage || "English",
+        language: person?.profile.language || s.general.outputLanguage,
         channel: row.kind,
         intent: row.intent as (typeof MESSAGE_INTENTS)[number],
         recipient: person

@@ -1,5 +1,5 @@
 /**
- * Pure mapping from Jira DC issue JSON to cache rows (design.md section 4).
+ * Pure mapping from Jira issue JSON to cache rows (design.md section 4).
  */
 import { z } from "zod";
 import type { jiraComments, jiraIssues } from "@/db/schema";

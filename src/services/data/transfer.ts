@@ -32,10 +32,10 @@ import { query } from "@/services/db";
 import { Settings } from "@/services/settings";
 import { SettingsSchema } from "@/services/settings/schema";
 
-export const EXPORT_VERSION = 1;
+const EXPORT_VERSION = 1;
 
 /** In foreign-key order: parents first. Import inserts in this order and deletes in reverse. */
-export const EXPORTED_TABLES = [
+const EXPORTED_TABLES = [
   teams,
   people,
   contextNotes,
@@ -58,7 +58,7 @@ export class TransferError extends Data.TaggedError("TransferError")<{
 }> {}
 
 const Row = z.record(z.string(), z.unknown());
-export const ExportFileSchema = z.object({
+const ExportFileSchema = z.object({
   app: z.literal("secretary"),
   version: z.literal(EXPORT_VERSION),
   exportedAt: z.string(),
@@ -85,7 +85,7 @@ export const exportAll = Effect.gen(function* () {
  * Checks every row against its table: only known columns, and every required
  * column present. Returns the problems, empty when the file can be imported.
  */
-export function checkRows(file: ExportFile): string[] {
+function checkRows(file: ExportFile): string[] {
   const problems: string[] = [];
   const known = new Set<string>(EXPORTED_TABLES.map((t) => getTableName(t)));
   for (const name of Object.keys(file.tables))

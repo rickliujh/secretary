@@ -1,5 +1,5 @@
 /**
- * Jira DC timestamps look like `2026-09-21T16:40:12.000+0100`. The offset has
+ * Jira timestamps look like `2026-09-21T16:40:12.000+0100`. The offset has
  * no colon, which WebKit's Date parser rejects, so normalise before parsing.
  */
 export function jiraDateToIso(value: string): string {

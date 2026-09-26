@@ -29,7 +29,7 @@ export const ProviderSchema = z.object({
 });
 export type Provider = z.infer<typeof ProviderSchema>;
 
-export const TierBindingSchema = z.object({
+const TierBindingSchema = z.object({
   providerId: z.string().min(1),
   model: z.string().trim().min(1),
 });
@@ -37,7 +37,7 @@ export type TierBinding = z.infer<typeof TierBindingSchema>;
 
 const TierEnum = z.enum(TIERS);
 
-export const TaskOverrideSchema = z.object({
+const TaskOverrideSchema = z.object({
   tier: TierEnum.optional(),
   escalate: z.boolean().optional(),
 });
@@ -65,7 +65,7 @@ const JiraSettingsSchema = z.object({
       epicName: z.string().optional(),
       sprint: z.string().optional(),
     })
-    .default({}),
+    .prefault({}),
 });
 
 const ConfluenceSettingsSchema = z.object({
@@ -97,17 +97,17 @@ export const SettingsSchema = z.object({
       standard: TierBindingSchema.nullable().default(null),
       strong: TierBindingSchema.nullable().default(null),
     })
-    .default({ fast: null, standard: null, strong: null }),
+    .prefault({}),
   taskOverrides: z.partialRecord(z.enum(TASK_TYPES), TaskOverrideSchema).default({}),
-  jira: JiraSettingsSchema.default(JiraSettingsSchema.parse({})),
-  confluence: ConfluenceSettingsSchema.default(ConfluenceSettingsSchema.parse({})),
+  jira: JiraSettingsSchema.prefault({}),
+  confluence: ConfluenceSettingsSchema.prefault({}),
   general: z
     .object({
       outputLanguage: z.string().trim().min(1).default("English"),
       /** Month (1-12) the fiscal year starts; quarters in the sprint calendar follow it (D23). */
       fiscalYearStartMonth: z.number().int().min(1).max(12).default(1),
     })
-    .default({ outputLanguage: "English", fiscalYearStartMonth: 1 }),
+    .prefault({}),
   dependencies: z
     .object({
       /** Working days until the next follow-up after one is logged. */
@@ -115,8 +115,8 @@ export const SettingsSchema = z.object({
       /** OS notifications when a follow-up is due (FR-3.5). */
       reminders: z.boolean().default(true),
     })
-    .default({ followupDays: 3, reminders: true }),
-  scoring: ScoringWeightsSchema.default(DEFAULT_WEIGHTS),
+    .prefault({}),
+  scoring: ScoringWeightsSchema.prefault({}),
   network: z
     .object({
       /**
@@ -131,12 +131,7 @@ export const SettingsSchema = z.object({
       /** Proxy login; the password is in the keychain. */
       proxyUsername: z.string().default(""),
     })
-    .default({
-      proxyMode: "system",
-      proxyUrl: "",
-      noProxy: "localhost,127.0.0.1",
-      proxyUsername: "",
-    }),
+    .prefault({}),
 });
 
 export type AppSettings = z.infer<typeof SettingsSchema>;

@@ -4,7 +4,7 @@
  * them. `$new:n` refers to an issue created earlier in the same inbox item.
  */
 import { z } from "zod";
-import { CHANNELS, DETAIL, FORMALITY, RESPONSIVENESS } from "@/services/directory/schema";
+import { ProfileSchema, SUBJECT_TYPES } from "@/services/directory/schema";
 
 export const ISSUE_KEY_RE = /^[A-Z][A-Z0-9_]+-\d+$/;
 export const NEW_REF_RE = /^\$new:\d+$/;
@@ -12,7 +12,8 @@ export const NEW_REF_RE = /^\$new:\d+$/;
 export const IssueKey = z.string().regex(ISSUE_KEY_RE, "Invalid issue key");
 export const NewRef = z.string().regex(NEW_REF_RE, "Invalid $new reference");
 export const IssueRef = z.union([IssueKey, NewRef]);
-export const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
+export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+export const IsoDate = z.string().regex(ISO_DATE_RE, "Use YYYY-MM-DD");
 
 export const ISSUE_TYPES = ["Epic", "Story", "Task", "Sub-task", "Bug"] as const;
 export const DEPENDENCY_KINDS = ["person", "team", "incident", "external"] as const;
@@ -78,15 +79,6 @@ export const LinkDependency = z.object({
   nextFollowupAt: IsoDate.nullable().default(null),
 });
 
-export const ProfileChanges = z.object({
-  tone: z.string().max(200).optional(),
-  formality: z.enum(FORMALITY).optional(),
-  detail: z.enum(DETAIL).optional(),
-  responsiveness: z.enum(RESPONSIVENESS).optional(),
-  preferredChannel: z.enum(CHANNELS).optional(),
-  language: z.string().max(50).optional(),
-});
-
 export const UpdatePerson = z.object({
   kind: z.literal("update_person"),
   personId: z.string().min(1),
@@ -94,7 +86,7 @@ export const UpdatePerson = z.object({
     .object({
       title: z.string().trim().min(1).max(200).optional(),
       responsibilities: z.string().trim().min(1).max(2000).optional(),
-      profile: ProfileChanges.optional(),
+      profile: ProfileSchema.optional(),
     })
     .default({}),
   noteAppend: z.string().trim().min(1).nullable().default(null),
@@ -118,7 +110,7 @@ export const Remember = z.object({
   kind: z.literal("remember"),
   memoryKind: z.enum(MEMORY_KINDS),
   content: z.string().trim().min(1).max(2000),
-  subjectType: z.enum(["team", "person", "issue"]).nullable().default(null),
+  subjectType: z.enum(SUBJECT_TYPES).nullable().default(null),
   subjectId: z.string().nullable().default(null),
 });
 
@@ -166,21 +158,47 @@ export const PROPOSAL_LABELS: Record<ProposalKind, string> = {
   needs_clarification: "Question",
 };
 
-/** Issue references a payload depends on, for ordering and failure propagation. */
-export function issueRefs(p: ProposalPayload): string[] {
+/** The payload that runs: the user's edit when there is one, else the proposal as made. */
+export const effectivePayload = (row: {
+  readonly payload: unknown;
+  readonly editedPayload: unknown;
+}): ProposalPayload => (row.editedPayload ?? row.payload) as ProposalPayload;
+
+export type IssueRefsOptions = {
+  /** `"new"` keeps only `$new:n` refs, `"keys"` only real issue keys. */
+  only?: "new" | "keys";
+  /** Include the `$new` ref a create_issue defines, not just the ones it points at. */
+  includeOwn?: boolean;
+};
+
+/**
+ * Issue references a payload points at: for ordering and failure propagation,
+ * for linking thread items through `$new` refs, and for keeping real keys as
+ * retrieval candidates.
+ */
+export function issueRefs(p: ProposalPayload, opts: IssueRefsOptions = {}): string[] {
+  const values: (string | null)[] = [];
   switch (p.kind) {
     case "create_issue":
-      return [p.parent, p.epic].filter((x): x is string => !!x);
+      if (opts.includeOwn) values.push(p.ref);
+      values.push(p.parent, p.epic);
+      break;
     case "update_issue":
     case "add_comment":
     case "transition_issue":
     case "link_dependency":
-      return [p.target];
+      values.push(p.target);
+      break;
     case "draft_message":
-      return p.issueKeys;
+      values.push(...p.issueKeys);
+      break;
     default:
-      return [];
+      break;
   }
+  return values.filter(
+    (v): v is string =>
+      !!v && (opts.only === undefined || NEW_REF_RE.test(v) === (opts.only === "new")),
+  );
 }
 
 /** Replaces `$new:n` references with created keys. Unknown refs are left as they are. */
@@ -263,4 +281,25 @@ export function payloadChanges(before: ProposalPayload, after: ProposalPayload):
   return [...new Set([...Object.keys(a), ...Object.keys(b)])]
     .filter((k) => k !== "ref" && JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null))
     .map((k) => `${k}: ${shown(a[k])} -> ${shown(b[k])}`);
+}
+
+/**
+ * Describes one side of a stored correction example: a payload, or the list of
+ * payloads a revision replaced (D22). Values that no longer parse are shown as JSON.
+ */
+export function describeStoredPayload(value: unknown): string {
+  if (Array.isArray(value)) return value.map(describeStoredPayload).join("; ") || "nothing";
+  const r = ProposalPayloadSchema.safeParse(value);
+  return r.success ? describePayload(r.data) : JSON.stringify(value);
+}
+
+/** The corrected version plus exactly what changed, so an edited field is not lost. */
+export function describeCorrection(before: unknown, after: unknown): string {
+  const b = ProposalPayloadSchema.safeParse(before);
+  const a = ProposalPayloadSchema.safeParse(after);
+  if (!b.success || !a.success) return describeStoredPayload(after);
+  const changes = payloadChanges(b.data, a.data);
+  return changes.length
+    ? `${describePayload(a.data)} (changed ${changes.join("; ")})`
+    : describePayload(a.data);
 }

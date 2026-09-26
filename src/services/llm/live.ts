@@ -4,7 +4,7 @@ import { llmCalls } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redact } from "@/lib/redact";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { Fetcher } from "@/services/http";
 import { getHeaders, Secrets, secretNames } from "@/services/secrets";
 import { type AppSettings, type Provider, Settings } from "@/services/settings";
@@ -17,6 +17,8 @@ import {
   type ObjectResult,
   type StreamRequest,
   type TestResult,
+  type TestTarget,
+  type TextRequest,
   toLlmError,
   type Usage,
 } from ".";
@@ -66,11 +68,11 @@ const REPAIR_INSTRUCTION = (issues: readonly string[]) =>
     "Choose only from the options given in the original request. Do not add commentary.",
   ].join("\n");
 
-export const makeLlm = Effect.gen(function* () {
+const makeLlm = Effect.gen(function* () {
   const settingsSvc = yield* Settings;
   const secrets = yield* Secrets;
   const factory = yield* ModelFactory;
-  const db = yield* Db;
+  const { q } = bindDb(yield* Db);
 
   const record = (
     target: Target,
@@ -83,7 +85,7 @@ export const makeLlm = Effect.gen(function* () {
       errorKind?: string;
     },
   ) =>
-    query((d) =>
+    q((d) =>
       d.insert(llmCalls).values({
         id: newId(),
         task: meta.task,
@@ -101,7 +103,6 @@ export const makeLlm = Effect.gen(function* () {
         at: nowIso(),
       }),
     ).pipe(
-      Effect.provideService(Db, db),
       // Accounting must never break a call.
       Effect.catchAll((e) => Effect.sync(() => logger.warn("llm_calls insert failed", e.message))),
     );
@@ -256,6 +257,11 @@ export const makeLlm = Effect.gen(function* () {
       return { attempt: repaired, repaired: true };
     });
 
+  /** Settings read failures are configuration errors for the caller to fix. */
+  const loadSettings = settingsSvc.get.pipe(
+    Effect.mapError((e) => new LlmError({ kind: "config", message: e.message })),
+  );
+
   const targetOf = (r: ResolvedTier): Target => ({
     tier: r.tier,
     providerId: r.binding.providerId,
@@ -272,27 +278,21 @@ export const makeLlm = Effect.gen(function* () {
   });
 
   /** The target for an explicit tier or provider/model. */
-  const explicit = (
-    settings: AppSettings,
-    target: { tier: Tier } | { providerId: string; model: string },
-  ) =>
+  const explicit = (settings: AppSettings, target: TestTarget) =>
     Effect.gen(function* () {
-      if (!("tier" in target))
-        return { tier: null, providerId: target.providerId, model: target.model } as Target;
+      if (!("tier" in target)) return { tier: null, ...target } satisfies Target;
       const binding = settings.tiers[target.tier];
       if (!binding)
         return yield* new LlmError({
           kind: "config",
           message: `The ${target.tier} tier is not bound to a model.`,
         });
-      return { tier: target.tier, providerId: binding.providerId, model: binding.model } as Target;
+      return targetOf({ tier: target.tier, binding });
     });
 
   const object = <T>(task: TaskType, req: ObjectRequest<T>) =>
     Effect.gen(function* () {
-      const settings = yield* settingsSvc.get.pipe(
-        Effect.mapError((e) => new LlmError({ kind: "config", message: e.message })),
-      );
+      const settings = yield* loadSettings;
       const route = resolveTask(settings, task);
       if (req.target) {
         const p = yield* prepare(settings, yield* explicit(settings, req.target));
@@ -374,11 +374,9 @@ export const makeLlm = Effect.gen(function* () {
       ),
     );
 
-  const text = (task: TaskType, req: { system?: string; prompt: string }) =>
+  const text = (task: TaskType, req: TextRequest) =>
     Effect.gen(function* () {
-      const settings = yield* settingsSvc.get.pipe(
-        Effect.mapError((e) => new LlmError({ kind: "config", message: e.message })),
-      );
+      const settings = yield* loadSettings;
       const route = resolveTask(settings, task);
       if (!route.resolved) return yield* noTier();
       const p = yield* prepare(settings, targetOf(route.resolved));
@@ -391,11 +389,9 @@ export const makeLlm = Effect.gen(function* () {
       return { ...info(p, false, false, r.usage), text: r.text };
     });
 
-  const test = (target: { tier: Tier } | { providerId: string; model: string }) =>
+  const test = (target: TestTarget) =>
     Effect.gen(function* () {
-      const settings = yield* settingsSvc.get.pipe(
-        Effect.mapError((e) => new LlmError({ kind: "config", message: e.message })),
-      );
+      const settings = yield* loadSettings;
       const p = yield* prepare(settings, yield* explicit(settings, target));
       const started = Date.now();
       const r = yield* runText(
@@ -415,9 +411,7 @@ export const makeLlm = Effect.gen(function* () {
 
   const stream = (task: TaskType, req: StreamRequest) =>
     Effect.gen(function* () {
-      const settings = yield* settingsSvc.get.pipe(
-        Effect.mapError((e) => new LlmError({ kind: "config", message: e.message })),
-      );
+      const settings = yield* loadSettings;
       const routed = resolveTask(settings, task);
       let target: Target;
       if (req.tier) target = yield* explicit(settings, { tier: req.tier });
@@ -449,11 +443,7 @@ export const makeLlm = Effect.gen(function* () {
       });
     });
 
-  const route = (task: TaskType) =>
-    settingsSvc.get.pipe(
-      Effect.mapError((e) => new LlmError({ kind: "config", message: e.message })),
-      Effect.map((s) => resolveTask(s, task)),
-    );
+  const route = (task: TaskType) => Effect.map(loadSettings, (s) => resolveTask(s, task));
 
   return Llm.of({ object, text, stream, test, route });
 });

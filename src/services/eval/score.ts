@@ -1,5 +1,5 @@
 /**
- * Scoring for the intake eval set and, later, evaluation replay (FR-9.4).
+ * Scoring for the intake eval set and for evaluation replay (FR-9.4).
  * Compares proposal kinds and targets, not wording.
  */
 import type { ProposalKind, ProposalPayload } from "@/services/proposals/schema";
@@ -33,7 +33,7 @@ export type EvalExpectation = {
 };
 
 /** The issue a payload acts on, or its main subject, for matching. */
-export function payloadTarget(p: ProposalPayload): string | undefined {
+function payloadTarget(p: ProposalPayload): string | undefined {
   switch (p.kind) {
     case "update_issue":
     case "add_comment":

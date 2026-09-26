@@ -31,7 +31,7 @@ const LinksSchema = z
 const SpaceSchema = z.object({ key: z.string(), name: z.string().optional() });
 const VersionSchema = z.object({ number: z.number(), when: z.string().optional() });
 
-export const ContentSummarySchema = z.object({
+const ContentSummarySchema = z.object({
   id: z.string(),
   type: z.string(),
   title: z.string(),

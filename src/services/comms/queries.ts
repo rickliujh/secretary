@@ -2,10 +2,10 @@
 import { and, desc, eq, ne } from "drizzle-orm";
 import { Effect } from "effect";
 import { communications, dependencies, people, teams } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
 import { logFollowup } from "@/services/dependencies/queries";
-import { localDate } from "@/services/intake";
 import {
   CommsError,
   type DraftEdit,

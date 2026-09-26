@@ -2,7 +2,6 @@
 import { z } from "zod";
 import { HARD_RULES, untrusted } from "./common";
 
-export const SEGMENT_PROMPT_VERSION = 1;
 export const MAX_SEGMENTS = 10;
 
 export const SegmentOutputSchema = z.object({

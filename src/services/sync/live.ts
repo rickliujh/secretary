@@ -1,13 +1,13 @@
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
-import { Effect, Layer, Option, SubscriptionRef } from "effect";
+import { Clock, Effect, Layer, Option, SubscriptionRef } from "effect";
 import { jiraIssues } from "@/db/schema";
 import { nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
-import { Db, type DbError, query } from "@/services/db";
+import { bindDb, Db, type DbError } from "@/services/db";
 import { JiraClient, type JiraError, type RawIssue, type SearchResult } from "@/services/jira";
 import { discoverFieldIds, effectiveFieldIds, type FieldIds } from "@/services/jira/fields";
 import { type CommentRow, issueFields, mapComment, mapIssue } from "@/services/jira/mapping";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { datePart, type SprintInfo } from "@/services/sprints/calendar";
 import {
   type FieldInfo,
@@ -20,6 +20,7 @@ import {
 import { buildScopeJql, chunk, withUpdatedSince } from "./jql";
 import {
   getState,
+  parseFieldIds,
   parseProjectMeta,
   parseSprintState,
   type SprintState,
@@ -49,23 +50,13 @@ const initialStatus: SyncStatus = {
   lastResult: null,
 };
 
-const parseFieldIds = (value: string | undefined): FieldIds => {
-  if (!value) return {};
-  try {
-    return JSON.parse(value) as FieldIds;
-  } catch {
-    return {};
-  }
-};
-
 const make = Effect.gen(function* () {
   const settingsSvc = yield* Settings;
   const jira = yield* JiraClient;
-  const db = yield* Db;
+  const { q, withDb } = bindDb(yield* Db);
   const lock = yield* Effect.makeSemaphore(1);
   const status = yield* SubscriptionRef.make(initialStatus);
 
-  const withDb = <A, E>(e: Effect.Effect<A, E, Db>) => Effect.provideService(e, Db, db);
   const patch = (p: Partial<SyncStatus>) => SubscriptionRef.update(status, (s) => ({ ...s, ...p }));
 
   // Seed timestamps from the database so the UI shows them after a restart.
@@ -78,11 +69,11 @@ const make = Effect.gen(function* () {
   );
 
   const fieldInfo = Effect.gen(function* () {
-    const settings = yield* settingsSvc.get.pipe(Effect.orElseSucceed(() => undefined));
+    const settings = yield* settingsOrDefault(settingsSvc);
     const discovered = parseFieldIds(yield* withDb(getState(SYNC_KEYS.fields)));
     return {
       discovered,
-      effective: effectiveFieldIds(discovered, settings?.jira.fields ?? {}),
+      effective: effectiveFieldIds(discovered, settings.jira.fields),
     } satisfies FieldInfo;
   });
 
@@ -221,9 +212,10 @@ const make = Effect.gen(function* () {
           startAt += r.value.values.length;
         }
       }
-      const cutoff = new Date(Date.now() - SPRINT_KEEP_DAYS * 86_400_000).toISOString();
+      const now = yield* Clock.currentTimeMillis;
+      const cutoff = new Date(now - SPRINT_KEEP_DAYS * 86_400_000).toISOString().slice(0, 10);
       const state: SprintState = {
-        sprints: [...byId.values()].filter((s) => !s.end || s.end >= cutoff.slice(0, 10)),
+        sprints: [...byId.values()].filter((s) => !s.end || s.end >= cutoff),
         completeBoards: [...complete],
         boardProjects: Object.fromEntries(
           [...boardProjects].map(([k, v]) => [String(k), [...v].sort()]),
@@ -291,13 +283,13 @@ const make = Effect.gen(function* () {
 
       // Sub-tasks of stories under tracked epics carry no Epic Link (design.md section 5, step 6).
       if (tracked.size > 0) {
-        const parents = yield* query((d) =>
+        const parents = yield* q((d) =>
           d
             .select({ key: jiraIssues.key })
             .from(jiraIssues)
             .where(and(inArray(jiraIssues.epicKey, [...tracked]), eq(jiraIssues.isSubtask, false)))
             .all(),
-        ).pipe(withDb);
+        );
         for (const keys of chunk(
           parents.map((p) => p.key),
           SUBTASK_PARENTS_PER_QUERY,
@@ -316,13 +308,13 @@ const make = Effect.gen(function* () {
       // depend on which tickets happen to be cached. Refreshed on full syncs and
       // for projects seen for the first time; failures just keep the old data.
       yield* patch({ phase: "Reading project metadata" });
-      const projectKeys = (yield* query((d) =>
+      const projectKeys = (yield* q((d) =>
         d
           .selectDistinct({ key: jiraIssues.projectKey })
           .from(jiraIssues)
           .where(eq(jiraIssues.stale, false))
           .all(),
-      ).pipe(withDb)).map((r) => r.key);
+      )).map((r) => r.key);
       const meta = parseProjectMeta(yield* withDb(getState(SYNC_KEYS.projectMeta)));
       let metaChanged = false;
       for (const key of projectKeys.slice(0, MAX_PROJECTS_WITH_META)) {
@@ -341,21 +333,21 @@ const make = Effect.gen(function* () {
       yield* syncSprints(ctx, full);
 
       // Tracked-epic flags follow settings even for issues not updated in this run.
-      yield* query((d) =>
+      yield* q((d) =>
         d.update(jiraIssues).set({
           isTrackedEpic: tracked.size > 0 ? inArray(jiraIssues.key, [...tracked]) : sql`0`,
         }),
-      ).pipe(withDb);
+      );
 
       let staleMarked = 0;
       if (full) {
-        const stale = yield* query((d) =>
+        const stale = yield* q((d) =>
           d
             .update(jiraIssues)
             .set({ stale: true })
             .where(and(lt(jiraIssues.syncedAt, ctx.syncedAt), eq(jiraIssues.stale, false)))
             .returning({ key: jiraIssues.key }),
-        ).pipe(withDb);
+        );
         staleMarked = stale.length;
       }
 
@@ -391,7 +383,7 @@ const make = Effect.gen(function* () {
 
   const refreshIssue = (key: string) =>
     Effect.gen(function* () {
-      const settings = yield* settingsSvc.get.pipe(Effect.orElseSucceed(() => undefined));
+      const settings = yield* settingsOrDefault(settingsSvc);
       const { effective: fieldIds } = yield* withDb(fieldInfo);
       const raw = yield* jira.getIssue(key, {
         fields: issueFields(fieldIds),
@@ -399,7 +391,7 @@ const make = Effect.gen(function* () {
       });
       const m = mapIssue(raw, {
         fieldIds,
-        trackedEpics: new Set(settings?.jira.trackedEpics ?? []),
+        trackedEpics: new Set(settings.jira.trackedEpics),
         syncedAt: nowIso(),
       });
       const comments = m.commentsComplete ? m.comments : yield* allComments(key);

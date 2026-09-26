@@ -39,7 +39,7 @@ const NoteRow = z.object({
   importedAt: z.string(),
 });
 
-export const DirectoryExportSchema = z.object({
+const DirectoryExportSchema = z.object({
   format: z.literal("secretary.directory"),
   version: z.literal(1),
   exportedAt: z.string(),

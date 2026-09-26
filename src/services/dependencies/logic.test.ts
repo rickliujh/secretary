@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { addBusinessDays, chaseNotes, daysBetween, groupByOwner, mirrorUrl, timing } from "./logic";
+import { chaseNotes, groupByOwner, mirrorUrl, timing } from "./logic";
 
 describe("dependency timing", () => {
   test("a dependency expected yesterday is one day overdue (FR-3 AC)", () => {
@@ -29,13 +29,6 @@ describe("dependency timing", () => {
         "2026-09-25",
       ).overdueDays,
     ).toBe(0);
-  });
-
-  test("business days skip weekends", () => {
-    // 2026-09-25 is a Friday.
-    expect(addBusinessDays("2026-09-25", 1)).toBe("2026-09-28");
-    expect(addBusinessDays("2026-09-25", 3)).toBe("2026-09-30");
-    expect(daysBetween("2026-09-20", "2026-09-25")).toBe(5);
   });
 });
 

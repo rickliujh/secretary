@@ -4,7 +4,10 @@
  */
 import { and, count, eq, gt } from "drizzle-orm";
 import { Effect } from "effect";
+import { z } from "zod";
 import { jiraComments, jiraIssues, proposals } from "@/db/schema";
+import { localDate } from "@/lib/dates";
+import { readJson } from "@/lib/json";
 import {
   type BriefFacts,
   BriefOutputSchema,
@@ -13,10 +16,8 @@ import {
   validateBrief,
 } from "@/prompts/brief";
 import { query } from "@/services/db";
-import { localDate } from "@/services/intake";
 import { Llm } from "@/services/llm";
-import { Settings } from "@/services/settings";
-import { DEFAULT_WEIGHTS } from "@/services/settings/schema";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, setState } from "@/services/sync/state";
 import { loadDashboardInputs } from "./data";
 import { buildDashboard, type Dashboard } from "./sections";
@@ -24,16 +25,21 @@ import { buildDashboard, type Dashboard } from "./sections";
 const CACHE_KEY = "brief.cache";
 const CHANGE_LIMIT = 15;
 
-export type CachedBrief = {
-  hash: string;
-  generatedAt: string;
-  sections: { changed: string; doFirst: string; chase: string };
-  model: string | null;
-  tier: string | null;
-};
+const CachedBriefSchema = z.object({
+  hash: z.string(),
+  generatedAt: z.string(),
+  sections: z.object({
+    changed: z.string().default(""),
+    doFirst: z.string().default(""),
+    chase: z.string().default(""),
+  }),
+  model: z.string().nullable().default(null),
+  tier: z.string().nullable().default(null),
+});
+export type CachedBrief = z.infer<typeof CachedBriefSchema>;
 
 /** FNV-1a; enough to tell whether the facts changed. */
-export function hashFacts(value: unknown): string {
+function hashFacts(value: unknown): string {
   let h = 0x811c9dc5;
   const s = JSON.stringify(value);
   for (let i = 0; i < s.length; i++) {
@@ -46,16 +52,11 @@ export function hashFacts(value: unknown): string {
 /** The "since" window moves with each brief, so it is not part of the identity. */
 const briefHash = (facts: BriefFacts) => hashFacts({ ...facts, since: null });
 
-const readCache = Effect.map(getState(CACHE_KEY), (v): CachedBrief | null => {
-  if (!v) return null;
-  try {
-    return JSON.parse(v) as CachedBrief;
-  } catch {
-    return null;
-  }
-});
+const readCache = Effect.map(getState(CACHE_KEY), (v) =>
+  readJson(v, CachedBriefSchema.nullable(), null),
+);
 
-export const collectFacts = (
+const collectFacts = (
   dashboard: Dashboard,
   since: string | null,
   today: string,
@@ -144,15 +145,10 @@ export const collectFacts = (
 /** Current dashboard, and the cached brief with whether it still matches the data. */
 export const dashboardWithBrief = (now = new Date()) =>
   Effect.gen(function* () {
-    const settings = yield* (yield* Settings).get.pipe(Effect.orElseSucceed(() => undefined));
+    const settings = yield* settingsOrDefault(yield* Settings);
     const today = localDate(now);
     const inputs = yield* loadDashboardInputs(now);
-    const dashboard = buildDashboard(
-      inputs,
-      settings?.scoring ?? DEFAULT_WEIGHTS,
-      today,
-      now.toISOString(),
-    );
+    const dashboard = buildDashboard(inputs, settings.scoring, today, now.toISOString());
     const cached = yield* readCache;
     if (!cached) return { dashboard, brief: null, briefFresh: false };
     // Fresh while nothing changed since the brief and the other facts still match.
@@ -160,7 +156,7 @@ export const dashboardWithBrief = (now = new Date()) =>
       dashboard,
       cached.generatedAt,
       today,
-      settings?.general.outputLanguage ?? "English",
+      settings.general.outputLanguage,
     );
     return { dashboard, brief: cached, briefFresh: cached.hash === briefHash(facts) };
   });
@@ -168,22 +164,17 @@ export const dashboardWithBrief = (now = new Date()) =>
 /** Generates and caches a new brief. With nothing to report, no model call is made. */
 export const generateBrief = (now = new Date()) =>
   Effect.gen(function* () {
-    const settings = yield* (yield* Settings).get.pipe(Effect.orElseSucceed(() => undefined));
+    const settings = yield* settingsOrDefault(yield* Settings);
     const today = localDate(now);
     const dashboard = buildDashboard(
       yield* loadDashboardInputs(now),
-      settings?.scoring ?? DEFAULT_WEIGHTS,
+      settings.scoring,
       today,
       now.toISOString(),
     );
     const previous = yield* readCache;
     const since = previous?.generatedAt ?? new Date(now.getTime() - 24 * 3_600_000).toISOString();
-    const facts = yield* collectFacts(
-      dashboard,
-      since,
-      today,
-      settings?.general.outputLanguage ?? "English",
-    );
+    const facts = yield* collectFacts(dashboard, since, today, settings.general.outputLanguage);
     let sections: CachedBrief["sections"];
     let model: string | null = null;
     let tier: string | null = null;

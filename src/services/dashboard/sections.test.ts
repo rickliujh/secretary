@@ -26,11 +26,11 @@ const issue = (key: string, p: Partial<DashIssue> = {}): DashIssue => ({
   ...p,
 });
 
+const blocksType = { name: "Blocks", inward: "is blocked by", outward: "blocks" };
+const inCategory = (key: string) => ({ status: { name: key, statusCategory: { key } } });
+
 const blockedByOps7 = [
-  {
-    type: { name: "Blocks", inward: "is blocked by", outward: "blocks" },
-    inwardIssue: { key: "OPS-7", fields: { status: { statusCategory: { key: "new" } } } },
-  },
+  { type: blocksType, inwardIssue: { key: "OPS-7", fields: inCategory("new") } },
 ];
 
 const inputs = (p: Partial<DashboardInputs> = {}): DashboardInputs => ({
@@ -47,12 +47,12 @@ describe("blockInfo", () => {
     expect(
       blockInfo([
         ...blockedByOps7,
+        { type: blocksType, outwardIssue: { key: "B-2", fields: inCategory("done") } },
+        { type: blocksType, outwardIssue: { key: "B-3" } },
         {
-          type: { name: "Blocks" },
-          outwardIssue: { key: "B-2", fields: { status: { statusCategory: { key: "done" } } } },
+          type: { name: "Relates", inward: "relates to", outward: "relates to" },
+          inwardIssue: { key: "R-1" },
         },
-        { type: { name: "Blocks" }, outwardIssue: { key: "B-3" } },
-        { type: { name: "Relates" }, inwardIssue: { key: "R-1" } },
       ]),
     ).toEqual({ blockedBy: ["OPS-7"], blocks: ["B-3"] });
   });

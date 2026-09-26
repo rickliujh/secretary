@@ -1,12 +1,13 @@
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { actionsLog, communications, dependencies, memories, people, teams } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redactValue } from "@/lib/redact";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { CreatedIssueSchema, JiraClient } from "@/services/jira";
-import { issueRefs, NEW_REF_RE, type ProposalPayload } from "@/services/proposals/schema";
+import { issueRefs, type ProposalPayload } from "@/services/proposals/schema";
 import { Sync } from "@/services/sync";
 import {
   describeAction,
@@ -21,12 +22,12 @@ import { buildCreateIssue, buildJiraWrite, MappingError } from "./jira-mapping";
 const make = Effect.gen(function* () {
   const jira = yield* JiraClient;
   const sync = yield* Sync;
-  const db = yield* Db;
+  const { q } = bindDb(yield* Db);
 
   const log = (row: Omit<typeof actionsLog.$inferInsert, "id" | "at">) =>
     Effect.gen(function* () {
       const id = newId();
-      yield* query((d) =>
+      yield* q((d) =>
         d.insert(actionsLog).values({
           ...row,
           id,
@@ -34,11 +35,10 @@ const make = Effect.gen(function* () {
           response: redactValue(row.response),
           at: nowIso(),
         }),
-      ).pipe(Effect.provideService(Db, db));
+      );
       return id;
     });
 
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
   const fail = (kind: "invalid" | "unsupported", message: string) =>
     new ExecutorError({ kind, message });
 
@@ -52,9 +52,7 @@ const make = Effect.gen(function* () {
   ) => log({ proposalId, action, target, request, response, ok: true });
 
   const appendNote = (existing: string | null, note: string | null) =>
-    note
-      ? `${existing ? `${existing.trimEnd()}\n\n` : ""}- ${nowIso().slice(0, 10)}: ${note}`
-      : existing;
+    note ? `${existing ? `${existing.trimEnd()}\n\n` : ""}- ${localDate()}: ${note}` : existing;
 
   /** A single user-initiated or approved Jira write: validate, send, log, re-fetch. */
   const run = (input: JiraAction, opts: { proposalId?: string } = {}) =>
@@ -218,7 +216,7 @@ const make = Effect.gen(function* () {
     opts: { proposalId: string; inboxItemId: string | null },
   ) =>
     Effect.gen(function* () {
-      const unresolved = issueRefs(payload).filter((r) => NEW_REF_RE.test(r));
+      const unresolved = issueRefs(payload, { only: "new" });
       if (unresolved.length) {
         return yield* fail(
           "invalid",

@@ -16,11 +16,11 @@ import {
   type ConsolidateOutput,
   validateConsolidation,
 } from "@/prompts/consolidate";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { replayAgreement } from "@/services/eval/score";
 import { Llm } from "@/services/llm";
 import { listMemories } from "@/services/memory/queries";
-import type { ProposalPayload } from "@/services/proposals/schema";
+import { effectivePayload, type ProposalPayload } from "@/services/proposals/schema";
 import { Learning, LearningError } from ".";
 
 /** Corrections considered at once; the newest first. */
@@ -28,12 +28,11 @@ const MAX_CORRECTIONS = 40;
 const DEFAULT_REPLAY = 30;
 
 const make = Effect.gen(function* () {
-  const db = yield* Db;
   const llm = yield* Llm;
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const { q, withDb } = bindDb(yield* Db);
 
   const consolidate = Effect.gen(function* () {
-    const all = yield* Effect.provideService(listMemories, Db, db);
+    const all = yield* withDb(listMemories);
     const examples = all.filter((m) => m.kind === "example" && m.example).slice(0, MAX_CORRECTIONS);
     if (examples.length < 2)
       return yield* new LearningError({
@@ -185,8 +184,6 @@ const make = Effect.gen(function* () {
         onProgress?.(i, items.length);
         const snapshot = item.snapshot as ItemSnapshot;
         const ps = byItem.get(item.id) ?? [];
-        const payload = (p: (typeof ps)[number]) =>
-          (p.editedPayload ?? p.payload) as ProposalPayload;
         const r = yield* llm
           .object<ItemOutput>("classify_item", {
             schema: buildItemSchema(snapshot) as never,
@@ -210,8 +207,8 @@ const make = Effect.gen(function* () {
         scored.push({
           done: ps
             .filter((p) => ["executed", "approved", "failed"].includes(p.status))
-            .map(payload),
-          rejected: ps.filter((p) => p.status === "rejected").map(payload),
+            .map(effectivePayload),
+          rejected: ps.filter((p) => p.status === "rejected").map(effectivePayload),
           got: r,
         });
       }

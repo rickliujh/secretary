@@ -1,4 +1,5 @@
 /** Pure CQL helpers (design.md section 6). */
+import { trimBaseUrl } from "@/lib/url";
 
 const quote = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
@@ -20,5 +21,5 @@ export function webUrl(
 ): string | null {
   if (!links.webui) return null;
   if (/^https?:/.test(links.webui)) return links.webui;
-  return `${(links.base || fallbackBase).replace(/\/+$/, "")}${links.webui}`;
+  return `${trimBaseUrl(links.base || fallbackBase)}${links.webui}`;
 }

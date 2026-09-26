@@ -5,13 +5,12 @@
 import { and, asc, desc, eq, inArray, isNotNull, lte, ne, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { communications, dependencies, followups, jiraIssues, people, teams } from "@/db/schema";
+import { addBusinessDays, localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
 import { Executor, ExecutorError } from "@/services/executor";
-import { localDate } from "@/services/intake";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import {
-  addBusinessDays,
   chaseNotes,
   type DependencyStatus,
   mirrorGlobalId,
@@ -138,25 +137,17 @@ const notFound = () =>
   new ExecutorError({ kind: "invalid", message: "That dependency no longer exists." });
 
 /**
- * Pushes the current state of a mirrored dependency to its Jira remote link.
- * Does nothing for dependencies that are not mirrored.
+ * Turns Jira mirroring on or off for one dependency (FR-3.4). `"refresh"` pushes
+ * the current state of a mirrored dependency to its remote link and does nothing
+ * for one that is not mirrored.
  */
-export const refreshMirror = (id: string) =>
-  Effect.gen(function* () {
-    const dep = yield* query((d) =>
-      d.select().from(dependencies).where(eq(dependencies.id, id)).get(),
-    );
-    if (!dep?.mirrorRemoteLinkId) return;
-    yield* mirror(id, true);
-  });
-
-/** Turns Jira mirroring on or off for one dependency (FR-3.4). */
-export const mirror = (id: string, on: boolean) =>
+export const mirror = (id: string, on: boolean | "refresh") =>
   Effect.gen(function* () {
     const executor = yield* Executor;
     const dep = yield* query((d) =>
       d.select().from(dependencies).where(eq(dependencies.id, id)).get(),
     );
+    if (on === "refresh" && !dep?.mirrorRemoteLinkId) return null;
     if (!dep) return yield* notFound();
     if (!on) {
       if (dep.mirrorRemoteLinkId) {
@@ -246,7 +237,7 @@ export const updateDependency = (id: string, input: DependencyInput) =>
         .set({ ...v, resolvedAt })
         .where(eq(dependencies.id, id)),
     );
-    yield* refreshMirror(id);
+    yield* mirror(id, "refresh");
   });
 
 export const setStatus = (id: string, status: DependencyStatus) =>
@@ -257,7 +248,7 @@ export const setStatus = (id: string, status: DependencyStatus) =>
         .set({ status, resolvedAt: status === "resolved" ? nowIso() : null })
         .where(eq(dependencies.id, id)),
     );
-    yield* refreshMirror(id);
+    yield* mirror(id, "refresh");
   });
 
 export const deleteDependency = (id: string) =>
@@ -275,10 +266,7 @@ export const deleteDependency = (id: string) =>
 export const logFollowup = (id: string, input: FollowupInput, today = localDate()) =>
   Effect.gen(function* () {
     const v = FollowupInputSchema.parse(input);
-    const settings = yield* Settings;
-    const days =
-      (yield* settings.get.pipe(Effect.orElseSucceed(() => undefined)))?.dependencies
-        .followupDays ?? 3;
+    const days = (yield* settingsOrDefault(yield* Settings)).dependencies.followupDays;
     const dep = yield* query((d) =>
       d.select().from(dependencies).where(eq(dependencies.id, id)).get(),
     );
@@ -309,7 +297,7 @@ export const logFollowup = (id: string, input: FollowupInput, today = localDate(
   });
 
 /**
- * Saves a chase request for the Drafts page (the composer arrives in Phase 6),
+ * Saves a chase request for the Drafts page, where the composer writes it,
  * grounded in the dependency: incident number, ask and first request date.
  */
 export const requestChaseDraft = (id: string) =>

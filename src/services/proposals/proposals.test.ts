@@ -328,6 +328,38 @@ describe("Proposals", () => {
     });
   });
 
+  test("retrying a failed edited proposal runs the edit again", async () => {
+    const { layer, seen } = setup({ createStatus: 400 });
+    const edited: ProposalPayload = { ...create, summary: "Backfill refund totals for August" };
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const { ids, inboxItemId } = yield* seed([create]);
+          const proposalsSvc = yield* Proposals;
+          const first = yield* proposalsSvc.approve(ids[0] ?? "", edited);
+          const retry = yield* proposalsSvc.approve(ids[0] ?? "");
+          return {
+            first,
+            retry,
+            rows: yield* rowsOf(inboxItemId),
+            mems: yield* query((d) => d.select().from(memories).all()),
+          };
+        }),
+        layer,
+      ),
+    );
+    expect([r.first.status, r.retry.status]).toEqual(["failed", "failed"]);
+    const posts = seen.filter((s) => s.method === "POST" && s.url.endsWith("/rest/api/2/issue"));
+    expect(posts.map((s) => (s.body as { fields: { summary: string } }).fields.summary)).toEqual([
+      "Backfill refund totals for August",
+      "Backfill refund totals for August",
+    ]);
+    expect(r.rows[0]?.editedPayload).toEqual(edited);
+    // The edit is one correction, not one per attempt.
+    expect(r.mems.filter((m) => m.kind === "example")).toHaveLength(1);
+  });
+
   test("missing required create fields fail before anything is sent", async () => {
     const { layer, seen } = setup({ requiredExtra: true });
     const r = await Effect.runPromise(

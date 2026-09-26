@@ -2,31 +2,12 @@
  * Pure dependency logic (FR-3): overdue days, follow-up dates, grouping and
  * ordering for the Waiting page. Dates are local calendar dates (YYYY-MM-DD).
  */
+import { daysBetween, localDateOf } from "@/lib/dates";
+
+/** Kept here for the components that schedule follow-ups. */
+export { addBusinessDays } from "@/lib/dates";
 
 export type DependencyStatus = "open" | "waiting" | "blocked" | "resolved";
-
-const DAY_MS = 86_400_000;
-const toUtc = (d: string) => Date.parse(`${d}T00:00:00Z`);
-const fromUtc = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-
-/** Whole days from `a` to `b` (positive when `b` is later). */
-export const daysBetween = (a: string, b: string) => Math.round((toUtc(b) - toUtc(a)) / DAY_MS);
-
-/** Adds working days (Monday to Friday). */
-export function addBusinessDays(date: string, n: number): string {
-  let ms = toUtc(date);
-  let left = n;
-  while (left > 0) {
-    ms += DAY_MS;
-    const day = new Date(ms).getUTCDay();
-    if (day !== 0 && day !== 6) left--;
-  }
-  return fromUtc(ms);
-}
-
-/** ISO timestamp or YYYY-MM-DD -> YYYY-MM-DD in local time. */
-export const localDay = (value: string) =>
-  value.length === 10 ? value : new Date(value).toLocaleDateString("en-CA");
 
 export type DependencyTiming = {
   /** Days past the expected date; 0 when not overdue or resolved. */
@@ -120,7 +101,7 @@ export function chaseNotes(dep: {
 }): string {
   return [
     `Chase ${dep.label}${dep.externalRef ? ` (${dep.externalRef})` : ""} for ${dep.issueKey}.`,
-    dep.requestedAt ? `First requested on ${localDay(dep.requestedAt)}.` : null,
+    dep.requestedAt ? `First requested on ${localDateOf(dep.requestedAt)}.` : null,
     dep.expectedAt ? `Was expected by ${dep.expectedAt}.` : null,
   ]
     .filter(Boolean)

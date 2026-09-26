@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect, Either, Layer } from "effect";
 import { inboxItems, inboxMessages, intakeItems, memories, people, proposals } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import {
@@ -25,14 +26,13 @@ import {
   SegmentOutputSchema,
   validateSegments,
 } from "@/prompts/segment";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { Llm } from "@/services/llm";
-import { describePayload, type ProposalPayload } from "@/services/proposals/schema";
+import { describePayload, effectivePayload, issueRefs } from "@/services/proposals/schema";
 import { Retrieval } from "@/services/retrieval";
 import {
   Intake,
   IntakeError,
-  localDate,
   type ReplyInput,
   type Source,
   type TriageInput,
@@ -40,7 +40,7 @@ import {
 } from ".";
 import { mergeItemProposals } from "./merge";
 import { cleanInput, extractReferences, needsSegmentation, type References } from "./preprocess";
-import { partsOf, refsOf, splitMessage, UserContentSchema, withLinkedItems } from "./thread";
+import { partsOf, splitMessage, UserContentSchema, withLinkedItems } from "./thread";
 
 const UNSURE_QUESTION =
   "I am not sure what should happen here. What would you like me to do with this?";
@@ -55,8 +55,6 @@ const DECIDED = {
 type ProposalRow = typeof proposals.$inferSelect;
 type ItemRow = typeof intakeItems.$inferSelect;
 type Progress = (message: string) => void;
-
-const payloadOf = (r: ProposalRow) => (r.editedPayload ?? r.payload) as ProposalPayload;
 
 /** One item to classify in this turn. */
 type Job = {
@@ -84,20 +82,10 @@ const mergeRefs = (a: References, b: References): References => ({
   contactIds: [...new Set([...a.contactIds, ...b.contactIds])],
 });
 
-/** Real issue keys a payload points at, so revisions keep them as candidates. */
-const keysOf = (p: ProposalPayload) => {
-  const values: (string | null)[] = [];
-  if (p.kind === "create_issue") values.push(p.parent, p.epic);
-  else if ("target" in p) values.push(p.target);
-  if (p.kind === "draft_message") values.push(...p.issueKeys);
-  return values.filter((v): v is string => !!v && !v.startsWith("$new:"));
-};
-
 const make = Effect.gen(function* () {
-  const db = yield* Db;
   const llm = yield* Llm;
   const retrieval = yield* Retrieval;
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const { q } = bindDb(yield* Db);
 
   const contactsQuery = q((d) =>
     d
@@ -179,7 +167,7 @@ const make = Effect.gen(function* () {
         .filter((r) => r.kind !== "needs_clarification" && r.status in DECIDED)
         .map((r) => ({
           outcome: DECIDED[r.status as keyof typeof DECIDED],
-          description: describePayload(payloadOf(r)),
+          description: describePayload(effectivePayload(r)),
         }));
       const createdKeys = rows
         .filter((r) => r.kind === "create_issue" && r.status === "executed")
@@ -214,13 +202,13 @@ const make = Effect.gen(function* () {
       // Stored refs -> $new:1.. for the model; the merge renumbers them afterwards.
       const local = new Map<string, string>();
       for (const r of job.revising) {
-        const p = payloadOf(r);
+        const p = effectivePayload(r);
         if (p.kind === "create_issue" && !local.has(p.ref))
           local.set(p.ref, `$new:${local.size + 1}`);
       }
       const pending = job.revising.flatMap((r) => {
         if (r.kind === "needs_clarification") return [];
-        const shape = fromPayload(payloadOf(r), local);
+        const shape = fromPayload(effectivePayload(r), local);
         return shape
           ? [
               {
@@ -242,7 +230,7 @@ const make = Effect.gen(function* () {
         {
           ...noRefs,
           issueKeys: [
-            ...job.revising.flatMap((r) => keysOf(payloadOf(r))),
+            ...job.revising.flatMap((r) => issueRefs(effectivePayload(r), { only: "keys" })),
             ...ctx.thread.createdKeys,
           ],
         },
@@ -339,7 +327,7 @@ const make = Effect.gen(function* () {
       const reserved = new Set(
         thread.rows
           .filter((r) => r.status !== "superseded" && !superseded.has(r.id))
-          .map(payloadOf)
+          .map(effectivePayload)
           .flatMap((p) => (p.kind === "create_issue" ? [p.ref] : [])),
       );
       const merged = mergeItemProposals(
@@ -401,7 +389,9 @@ const make = Effect.gen(function* () {
         );
       }
       // FR-7.2: a requested change is a correction worth learning from.
-      const before = opts.supersede.filter((r) => r.kind !== "needs_clarification").map(payloadOf);
+      const before = opts.supersede
+        .filter((r) => r.kind !== "needs_clarification")
+        .map(effectivePayload);
       if (opts.instruction && before.length) {
         const after = merged.map((m) => m.payload);
         yield* q((d) =>
@@ -511,7 +501,7 @@ const make = Effect.gen(function* () {
         quote: thread.current.get(idx)?.quote ?? "",
         proposals: (thread.pendingByIdx.get(idx) ?? [])
           .filter((r) => r.kind !== "needs_clarification")
-          .map((r) => describePayload(payloadOf(r))),
+          .map((r) => describePayload(effectivePayload(r))),
       }));
       return yield* llm
         .object<RouteReplyOutput>("route_reply", {
@@ -543,7 +533,7 @@ const make = Effect.gen(function* () {
       const pendingPayloads = new Map(
         [...thread.pendingByIdx].map(([idx, rows]) => [
           idx,
-          rows.filter((r) => r.kind !== "needs_clarification").map(payloadOf),
+          rows.filter((r) => r.kind !== "needs_clarification").map(effectivePayload),
         ]),
       );
       const affected = withLinkedItems(chosen, pendingPayloads).filter((idx) =>
@@ -553,12 +543,14 @@ const make = Effect.gen(function* () {
         const own = thread.pendingByIdx.get(idx) ?? [];
         // A create from another item that this item points at comes along, so the
         // model can keep the reference.
-        const used = new Set(own.map(payloadOf).flatMap(refsOf));
+        const used = new Set(
+          own.map(effectivePayload).flatMap((p) => issueRefs(p, { only: "new", includeOwn: true })),
+        );
         const borrowed = affected
           .filter((other) => other !== idx)
           .flatMap((other) => thread.pendingByIdx.get(other) ?? [])
           .filter((r) => {
-            const p = payloadOf(r);
+            const p = effectivePayload(r);
             return p.kind === "create_issue" && used.has(p.ref);
           });
         return {

@@ -1,6 +1,7 @@
 /**
  * Cloud vs Data Center (design.md D19): detection, API base URLs and auth.
  */
+import { trimBaseUrl } from "@/lib/url";
 import type { DeploymentSetting } from "@/services/settings/schema";
 
 export type Deployment = "cloud" | "datacenter";
@@ -23,20 +24,18 @@ export function resolveDeployment(
   }
 }
 
-const trimSlashes = (url: string) => url.trim().replace(/\/+$/, "");
-
 /**
  * Jira's REST root. On Cloud the API lives at the site root, so a pasted UI
  * address such as https://site.atlassian.net/jira/... is reduced to the origin.
  * Data Center keeps any context path (https://host/jira).
  */
 export function jiraApiBase(baseUrl: string, deployment: Deployment): string {
-  return deployment === "cloud" ? new URL(baseUrl).origin : trimSlashes(baseUrl);
+  return deployment === "cloud" ? new URL(baseUrl).origin : trimBaseUrl(baseUrl);
 }
 
 /** Confluence's REST root: `/wiki` on Cloud, the configured context path on Data Center. */
 export function confluenceApiBase(baseUrl: string, deployment: Deployment): string {
-  return deployment === "cloud" ? `${new URL(baseUrl).origin}/wiki` : trimSlashes(baseUrl);
+  return deployment === "cloud" ? `${new URL(baseUrl).origin}/wiki` : trimBaseUrl(baseUrl);
 }
 
 const base64 = (text: string) => {

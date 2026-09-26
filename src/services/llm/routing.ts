@@ -45,7 +45,7 @@ export function resolveTask(
   };
 }
 
-export const sameBinding = (a: TierBinding, b: TierBinding) =>
+const sameBinding = (a: TierBinding, b: TierBinding) =>
   a.providerId === b.providerId && a.model === b.model;
 
 /** Next stronger configured tier that uses a different model, if any. */

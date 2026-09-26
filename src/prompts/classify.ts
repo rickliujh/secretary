@@ -10,17 +10,19 @@ import { CHANNELS, DETAIL, FORMALITY, RESPONSIVENESS } from "@/services/director
 import { NONE } from "@/services/llm/portable";
 import {
   DEPENDENCY_KINDS,
+  ISO_DATE_RE,
   MEMORY_KINDS,
   MESSAGE_INTENTS,
   NEW_REF_RE,
   type ProposalPayload,
   ProposalPayloadSchema,
 } from "@/services/proposals/schema";
+import type { Reason } from "@/services/retrieval/ranking";
 import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
 
 export const CLASSIFY_PROMPT_VERSION = 5;
-export const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
+const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
   key: string;
@@ -36,11 +38,10 @@ export type CandidateIssue = {
   priority?: string | null;
   dueDate?: string | null;
   updated: string;
-  /** Why retrieval picked it: "mentioned", "search", "recent", "sender". */
-  reasons: string[];
+  /** Why retrieval picked it. */
+  reasons: Reason[];
 };
 
-/** Everything the model sees for one item, stored on the item for replay. */
 /**
  * A thread's context for one item (design.md D22). Only `instructions` is the
  * user's own words; `decided` and `pending` were derived from the input, so the
@@ -55,6 +56,7 @@ export type ThreadContext = {
   pending: Record<string, unknown>[];
 };
 
+/** Everything the model sees for one item, stored on the item for replay. */
 export type ItemSnapshot = {
   /** Sprint calendar around today (D23); absent in snapshots before prompt version 5. */
   sprints?: PromptSprint[];
@@ -65,9 +67,11 @@ export type ItemSnapshot = {
   source: string;
   sender: { id: string; displayName: string; title: string | null; team: string | null } | null;
   quote: string;
-  /** The user's own answer to an earlier question about this input (trusted). */
-  /** Answer to a question, from snapshots made before threads (prompt version < 4). */
-  clarification: string | null;
+  /**
+   * The user's answer to an earlier question (trusted). Only in snapshots made
+   * before threads (prompt version < 4); kept so they replay as they ran.
+   */
+  clarification?: string | null;
   thread?: ThreadContext | null;
   references: { issueKeys: string[]; tickets: string[]; urls: string[]; contactIds: string[] };
   candidates: CandidateIssue[];
@@ -101,7 +105,7 @@ const nullableText = (description?: string) =>
   description ? z.string().nullish().describe(description) : z.string().nullish();
 
 /** Fields each proposal kind must fill; the rest stay null (checked in `validateItemOutput`). */
-export const REQUIRED_FIELDS: Record<string, readonly string[]> = {
+const REQUIRED_FIELDS: Record<string, readonly string[]> = {
   create_issue: ["ref", "projectKey", "issueType", "summary"],
   update_issue: ["target"],
   add_comment: ["target", "body"],
@@ -259,7 +263,7 @@ const defined = <T extends Record<string, unknown>>(o: T) =>
   ) as Partial<T>;
 
 /** Maps one model proposal to a canonical payload (throws on shapes the schema should have prevented). */
-export function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
+function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
   const g = (k: string) => p[k];
   switch (p.kind) {
     case "create_issue":
@@ -363,11 +367,10 @@ export function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
   }
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const validDate = (v: unknown) =>
   v === null ||
   v === undefined ||
-  (typeof v === "string" && ISO_DATE.test(v) && !Number.isNaN(Date.parse(v)));
+  (typeof v === "string" && ISO_DATE_RE.test(v) && !Number.isNaN(Date.parse(v)));
 
 /**
  * Business-rule checks the schema cannot express (design.md 7.0 rule 4).

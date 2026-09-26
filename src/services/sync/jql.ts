@@ -1,8 +1,10 @@
 /** Pure JQL construction for sync (design.md section 5). */
 import { toJqlDate } from "@/services/jira/dates";
 import { jqlFieldRef } from "@/services/jira/fields";
+import { ISSUE_KEY_RE } from "@/services/proposals/schema";
 
-export const ISSUE_KEY = /^[A-Z][A-Z0-9_]+-\d+$/;
+/** Kept under this name for the settings form. */
+export const ISSUE_KEY = ISSUE_KEY_RE;
 
 /** Removes a trailing ORDER BY so the clause can be combined with others. */
 export function stripOrderBy(jql: string): string {
@@ -17,7 +19,7 @@ export function buildScopeJql(opts: {
   const parts: string[] = [];
   const user = stripOrderBy(opts.userJql);
   if (user) parts.push(`(${user})`);
-  const epics = opts.trackedEpics.filter((k) => ISSUE_KEY.test(k));
+  const epics = opts.trackedEpics.filter((k) => ISSUE_KEY_RE.test(k));
   if (epics.length > 0) {
     const list = epics.join(", ");
     parts.push(`key in (${list})`);
@@ -29,7 +31,7 @@ export function buildScopeJql(opts: {
 }
 
 /** Overlap applied to the watermark so clock skew and same-minute updates are not missed. */
-export const WATERMARK_OVERLAP_MS = 5 * 60 * 1000;
+const WATERMARK_OVERLAP_MS = 5 * 60 * 1000;
 
 export function withUpdatedSince(
   scope: string,

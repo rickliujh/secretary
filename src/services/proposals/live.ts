@@ -4,11 +4,12 @@ import { inboxItems, intakeItems, memories, proposals } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redact } from "@/lib/redact";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { Executor } from "@/services/executor";
 import {
   type DecisionResult,
   describePayload,
+  effectivePayload,
   ProposalError,
   type ProposalPayload,
   ProposalPayloadSchema,
@@ -21,9 +22,8 @@ type Row = typeof proposals.$inferSelect;
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 const make = Effect.gen(function* () {
-  const db = yield* Db;
   const executor = yield* Executor;
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const { q } = bindDb(yield* Db);
 
   const load = (id: string) =>
     Effect.flatMap(
@@ -97,7 +97,7 @@ const make = Effect.gen(function* () {
           .all(),
       );
       for (const r of rows) {
-        const payload = (r.editedPayload ?? r.payload) as ProposalPayload;
+        const payload = effectivePayload(r);
         const key = (r.result as { issueKey?: string } | null)?.issueKey;
         if (payload.kind === "create_issue" && key) map.set(payload.ref, key);
       }
@@ -136,7 +136,8 @@ const make = Effect.gen(function* () {
           message: "Answer the question instead of approving it.",
         });
       }
-      let payload = row.payload as ProposalPayload;
+      // A retry of a failed proposal keeps the edit it was first approved with.
+      let payload = effectivePayload(row);
       if (edited) {
         const parsed = ProposalPayloadSchema.safeParse(edited);
         if (!parsed.success || parsed.data.kind !== row.kind) {
@@ -147,8 +148,10 @@ const make = Effect.gen(function* () {
               : parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
           });
         }
+        // An edit already recorded on an earlier attempt is not recorded again.
+        if (!same(parsed.data, row.payload) && !same(parsed.data, payload))
+          yield* captureCorrection(row, parsed.data);
         payload = parsed.data;
-        if (!same(payload, row.payload)) yield* captureCorrection(row, payload);
       }
       yield* q((d) =>
         d
@@ -156,7 +159,7 @@ const make = Effect.gen(function* () {
           .set({
             status: "approved",
             decidedAt: nowIso(),
-            editedPayload: edited && !same(payload, row.payload) ? payload : null,
+            editedPayload: same(payload, row.payload) ? null : payload,
           })
           .where(eq(proposals.id, id)),
       );
