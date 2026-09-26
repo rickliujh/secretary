@@ -9,8 +9,19 @@ import { type AppServices, run } from "@/app/runtime";
 import { Intake, type ReplyInput, type TriageInput, type TriageResult } from "@/services/intake";
 import { type ProposalPayload, Proposals } from "@/services/proposals";
 
-/** Everything a decision can change: inbox, tickets, directory, memories. */
-const DECISION_KEYS = [queryKeys.inbox, queryKeys.tickets, queryKeys.directory];
+/**
+ * Everything a decision can change: the thread, tickets, contacts, and what
+ * approved proposals create (dependencies, drafts, memories). Edits and
+ * rejections are also kept as corrections on the Memory page.
+ */
+const DECISION_KEYS = [
+  queryKeys.inbox,
+  queryKeys.tickets,
+  queryKeys.directory,
+  queryKeys.dependencies,
+  queryKeys.drafts,
+  queryKeys.memories,
+];
 
 function useInvalidateAfterDecision() {
   const client = useQueryClient();
