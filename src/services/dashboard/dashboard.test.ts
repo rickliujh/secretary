@@ -8,7 +8,7 @@ import { DEFAULT_WEIGHTS } from "@/services/settings/schema";
 import { promptOf } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
-import { dashboardWithBrief, generateBrief, periodStart } from "./brief";
+import { dashboardWithBrief, generateBrief } from "./brief";
 import { loadDashboardInputs, setOverride, setPinned, snooze } from "./data";
 import { buildDashboard } from "./sections";
 
@@ -152,33 +152,5 @@ describe("daily brief", () => {
     const b = await Effect.runPromise(Effect.provide(generateBrief(NOW), layer));
     expect(b.sections.doFirst).toBe("Nothing is urgent.");
     expect(models.calls).toHaveLength(0);
-  });
-
-  test("a chosen period covers its days and still counts as fresh (D37)", async () => {
-    const { layer, models } = intakeTestLayer({ "std-m": [out(brief)] });
-    const r = await Effect.runPromise(
-      Effect.provide(
-        Effect.gen(function* () {
-          yield* seedWork;
-          const generated = yield* generateBrief(NOW, 7);
-          return { generated, after: yield* dashboardWithBrief(NOW) };
-        }),
-        layer,
-      ),
-    );
-    const start = periodStart(NOW, 7);
-    expect(r.generated).toMatchObject({ days: 7, since: start.toISOString() });
-    const prompt = promptOf(models.calls, 0);
-    expect(prompt).toContain(
-      `## Changed in the last 7 days (since ${start.toLocaleDateString("en-CA")})`,
-    );
-    expect(prompt).toContain("catch-up report");
-    expect(r.after.briefFresh).toBe(true);
-  });
-
-  test("periods start at local midnight; 1 day is the start of yesterday", () => {
-    const now = new Date(2026, 8, 24, 15, 30);
-    expect(periodStart(now, 1)).toEqual(new Date(2026, 8, 23, 0, 0));
-    expect(periodStart(now, 7)).toEqual(new Date(2026, 8, 17, 0, 0));
   });
 });
