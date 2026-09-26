@@ -427,7 +427,6 @@ Built
 - Chats stay in memory while the app runs, so leaving the Chat page and coming back
   shows the same conversation, even mid-answer; the page reopens the last one.
 - Chat page: a list of past conversations with delete, and "New chat".
-||||||| 7e19e3b
 
 ## Cleanup: tests, tooling, docs (2026-09-26)
 
@@ -454,3 +453,24 @@ Changed
   where D19–D28 overtook it, plus a corrected data model, endpoint list, task table,
   error types and testing section; the implementation plan is marked as history;
   README lists install caveats for the unsigned bundles.
+
+## Sprint planner groundwork (2026-09-26)
+
+Why: the sprint planner (design.md D30) needs story points and a way to move issues
+into a sprint as approved proposals.
+
+Built
+- Story points: sync discovers the field (Cloud's "Story point estimate" type first,
+  then a field named "Story Points" or "Story point estimate"), with an override in
+  Settings > Jira > Custom fields, and stores `jira_issues.story_points`
+  (migration 0010). Numeric strings count; anything else is null.
+- `move_to_sprint` proposal: the executor posts the issue to
+  `/rest/agile/1.0/sprint/{id}/issue` (`JiraWrite.api: "agile"`), re-fetches it and
+  writes the audit log; an issue already in that sprint needs no write. Intake never
+  proposes it, it has no edit form, and its rejections are not kept as intake
+  correction examples.
+- `bun run mock:jira` serves story points (1 to 13, some unestimated) and accepts
+  moves into a sprint.
+
+Fixed
+- A stray merge marker line in this changelog.
