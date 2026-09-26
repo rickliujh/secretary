@@ -4,6 +4,7 @@
  * user's Jira session and are blocked by the CSP anyway.
  */
 import DOMPurify from "dompurify";
+import { trimBaseUrl } from "./url";
 
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -12,7 +13,7 @@ export function sanitizeJiraHtml(html: string, baseUrl: string, win: Window = wi
   // DOMPurify returns its input unchanged when the DOM lacks what it needs;
   // never pass unsanitised HTML through, show it as text instead.
   if (!purify.isSupported) return `<pre>${escapeHtml(html)}</pre>`;
-  const base = baseUrl.replace(/\/+$/, "");
+  const base = trimBaseUrl(baseUrl);
   const absolute = (href: string) => (href.startsWith("/") ? `${base}${href}` : href);
   purify.addHook("afterSanitizeAttributes", (node) => {
     if (node.tagName === "A") {

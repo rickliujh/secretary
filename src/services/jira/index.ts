@@ -1,5 +1,4 @@
 import { Context, Data, type Effect } from "effect";
-import { z } from "zod";
 import type {
   BoardSprintPage,
   CommentPage,
@@ -7,6 +6,7 @@ import type {
   CreateMetaIssueType,
   EditMeta,
   JiraField,
+  JiraUser,
   Priority,
   Project,
   ProjectStatuses,
@@ -25,21 +25,6 @@ export class JiraError extends Data.TaggedError("JiraError")<{
   readonly message: string;
   readonly status?: number;
 }> {}
-
-/** `GET /rest/api/2/myself`; `id` is the account ID on Cloud and the username on Data Center. */
-export const JiraUserSchema = z
-  .object({
-    name: z.string().optional(),
-    accountId: z.string().optional(),
-    key: z.string().optional(),
-    displayName: z.string(),
-    emailAddress: z.string().optional(),
-    active: z.boolean().optional(),
-    timeZone: z.string().optional(),
-  })
-  .transform((u) => ({ ...u, id: u.accountId ?? u.name ?? "" }))
-  .refine((u) => u.id !== "", "User has neither accountId nor name");
-export type JiraUser = z.infer<typeof JiraUserSchema>;
 
 export type { Credentials } from "@/services/atlassian/credentials";
 

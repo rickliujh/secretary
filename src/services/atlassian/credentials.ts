@@ -1,5 +1,6 @@
 /** Resolves base URL, deployment and auth for Jira or Confluence from settings and the keychain. */
 import { Effect, Option } from "effect";
+import { parseUrl } from "@/lib/url";
 import { allowHost } from "@/services/http/guard";
 import { Secrets, secretNames } from "@/services/secrets";
 import { Settings } from "@/services/settings";
@@ -29,13 +30,7 @@ export class MissingCredentials {
   constructor(readonly message: string) {}
 }
 
-const origin = (url: string) => {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return url;
-  }
-};
+const origin = (url: string) => parseUrl(url)?.origin ?? url;
 
 export const resolveCredentials = (product: Product, overrides: Credentials = {}) =>
   Effect.gen(function* () {

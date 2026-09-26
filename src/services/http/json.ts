@@ -5,6 +5,7 @@
 import ky, { HTTPError, type KyInstance, TimeoutError } from "ky";
 import type { z } from "zod";
 import { redact } from "@/lib/redact";
+import { trimBaseUrl } from "@/lib/url";
 import { type AtlassianAuth, authorizationHeader } from "@/services/atlassian/deployment";
 import type { FetchFn } from ".";
 
@@ -20,8 +21,6 @@ export class HttpFailure extends Error {
   }
 }
 
-export const normalizeBaseUrl = (url: string) => url.trim().replace(/\/+$/, "");
-
 export function makeAtlassianClient(opts: {
   /** API root, already resolved for the deployment (see atlassian/deployment.ts). */
   baseUrl: string;
@@ -31,7 +30,7 @@ export function makeAtlassianClient(opts: {
   timeoutMs?: number;
 }): KyInstance {
   return ky.create({
-    prefix: `${normalizeBaseUrl(opts.baseUrl)}${opts.apiPrefix}`,
+    prefix: `${trimBaseUrl(opts.baseUrl)}${opts.apiPrefix}`,
     headers: {
       Authorization: authorizationHeader(opts.auth),
       Accept: "application/json",
