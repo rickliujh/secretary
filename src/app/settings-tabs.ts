@@ -5,6 +5,7 @@ export const SETTINGS_TABS = [
   { value: "ranking", label: "Ranking" },
   { value: "jira", label: "Jira" },
   { value: "confluence", label: "Confluence" },
+  { value: "sources", label: "Data sources" },
   { value: "usage", label: "Usage" },
   { value: "data", label: "Data" },
 ] as const;

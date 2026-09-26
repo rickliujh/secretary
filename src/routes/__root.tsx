@@ -6,6 +6,7 @@ import { useDeleteWordKey } from "@/app/keyboard";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
 import { macOverlay, ownWindowButtons } from "@/app/platform";
 import { useFollowupReminders } from "@/app/reminders";
+import { useSourceIndexing } from "@/app/sources";
 import { useAutoCleanup, useStorageWarning } from "@/app/storage";
 import { useSyncScheduler } from "@/app/sync";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -37,6 +38,7 @@ function Background() {
   useAutoCleanup();
   useDeleteWordKey();
   useStorageWarning();
+  useSourceIndexing();
   return null;
 }
 

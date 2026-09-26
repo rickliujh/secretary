@@ -10,6 +10,7 @@ import { ModelsSection } from "@/components/settings/models-section";
 import { NetworkSection } from "@/components/settings/network-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RankingSection } from "@/components/settings/ranking-section";
+import { SourcesSection } from "@/components/settings/sources-section";
 import { UsageSection } from "@/components/settings/usage-section";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -31,7 +32,7 @@ function SettingsPage() {
     <div className="mx-auto max-w-4xl">
       <PageHeader
         title="Settings"
-        description="Model providers, Jira and Confluence connections, and local data. Keys and tokens are kept in the OS keychain."
+        description="Model providers, Jira and Confluence connections, note folders and local data. Keys and tokens are kept in the OS keychain."
       />
       <Tabs
         value={tab}
@@ -63,6 +64,9 @@ function SettingsPage() {
         </TabsContent>
         <TabsContent value="confluence">
           <AtlassianSection product="confluence" />
+        </TabsContent>
+        <TabsContent value="sources">
+          <SourcesSection />
         </TabsContent>
         <TabsContent value="usage">
           <UsageSection />
