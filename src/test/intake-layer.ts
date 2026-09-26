@@ -1,5 +1,6 @@
 /** Full intake stack for tests: fixture-synced Jira cache, scripted models, real services. */
 import { Layer } from "effect";
+import { CommsLive } from "@/services/comms/live";
 import { IntakeLive } from "@/services/intake/live";
 import { LlmLive } from "@/services/llm/live";
 import { makeScriptedModels, type Scripted } from "@/services/llm/test";
@@ -30,7 +31,10 @@ export function intakeTestLayer(
   });
   const models = makeScriptedModels(scripts);
   const llm = Layer.provideMerge(LlmLive, Layer.merge(jira.layer, models.layer));
-  const layer = Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, llm));
+  const layer = Layer.provideMerge(
+    CommsLive,
+    Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, llm)),
+  );
   return { layer, models, seen: jira.seen };
 }
 
