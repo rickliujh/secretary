@@ -10,7 +10,6 @@ export const snapshot: ItemSnapshot = {
   sender: { id: "p-ana", displayName: "Ana Bell", title: "Tech lead", team: "Payments" },
   quote:
     "The ledger export (PAY-2) is still blocked on INC0012345 from Platform. Can you chase them and move it to Blocked? Expect a fix by Friday.",
-  clarification: null,
   references: { issueKeys: ["PAY-2"], tickets: ["INC0012345"], urls: [], contactIds: ["p-ana"] },
   candidates: [
     {

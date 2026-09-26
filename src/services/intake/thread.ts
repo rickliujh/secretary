@@ -24,9 +24,7 @@ export type UserContent = z.infer<typeof UserContentSchema>;
 
 export const AssistantContentSchema = z.object({
   summary: z.string().nullable(),
-  error: z.string().nullable().optional(),
 });
-export type AssistantContent = z.infer<typeof AssistantContentSchema>;
 
 const joined = (parts: readonly MessagePart[], type: MessagePart["type"], sep: string) =>
   parts

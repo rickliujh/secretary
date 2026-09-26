@@ -9,7 +9,6 @@ export type SnapshotRequest = {
   senderPersonId: string | null;
   references: References;
   today: string;
-  clarification?: string | null;
   /** Thread context for a follow-up (design.md D22). */
   thread?: ThreadContext | null;
 };

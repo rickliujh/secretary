@@ -219,12 +219,6 @@ export const CreateMetaFieldsSchema = z
   })
   .transform((r) => r.values ?? r.fields ?? r.results ?? []);
 
-export const IssueLinkTypesSchema = z.object({
-  issueLinkTypes: z.array(
-    z.object({ id: z.string(), name: z.string(), inward: z.string(), outward: z.string() }),
-  ),
-});
-
 export const RemoteLinkSchema = z.object({
   id: z.number(),
   globalId: z.string().optional(),

@@ -137,25 +137,17 @@ const notFound = () =>
   new ExecutorError({ kind: "invalid", message: "That dependency no longer exists." });
 
 /**
- * Pushes the current state of a mirrored dependency to its Jira remote link.
- * Does nothing for dependencies that are not mirrored.
+ * Turns Jira mirroring on or off for one dependency (FR-3.4). `"refresh"` pushes
+ * the current state of a mirrored dependency to its remote link and does nothing
+ * for one that is not mirrored.
  */
-export const refreshMirror = (id: string) =>
-  Effect.gen(function* () {
-    const dep = yield* query((d) =>
-      d.select().from(dependencies).where(eq(dependencies.id, id)).get(),
-    );
-    if (!dep?.mirrorRemoteLinkId) return;
-    yield* mirror(id, true);
-  });
-
-/** Turns Jira mirroring on or off for one dependency (FR-3.4). */
-export const mirror = (id: string, on: boolean) =>
+export const mirror = (id: string, on: boolean | "refresh") =>
   Effect.gen(function* () {
     const executor = yield* Executor;
     const dep = yield* query((d) =>
       d.select().from(dependencies).where(eq(dependencies.id, id)).get(),
     );
+    if (on === "refresh" && !dep?.mirrorRemoteLinkId) return null;
     if (!dep) return yield* notFound();
     if (!on) {
       if (dep.mirrorRemoteLinkId) {
@@ -245,7 +237,7 @@ export const updateDependency = (id: string, input: DependencyInput) =>
         .set({ ...v, resolvedAt })
         .where(eq(dependencies.id, id)),
     );
-    yield* refreshMirror(id);
+    yield* mirror(id, "refresh");
   });
 
 export const setStatus = (id: string, status: DependencyStatus) =>
@@ -256,7 +248,7 @@ export const setStatus = (id: string, status: DependencyStatus) =>
         .set({ status, resolvedAt: status === "resolved" ? nowIso() : null })
         .where(eq(dependencies.id, id)),
     );
-    yield* refreshMirror(id);
+    yield* mirror(id, "refresh");
   });
 
 export const deleteDependency = (id: string) =>
