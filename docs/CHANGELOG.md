@@ -539,3 +539,11 @@ Built
 - Logs rotate at 2 MB and keep three files; import backups keep the newest three.
 - Settings > Data > Storage shows the database size, the last cleanup and a "Clean up
   now" button. The user's own records are never removed automatically.
+
+## Ranked ticket picker in drafts (2026-09-26)
+
+- The draft composer's ticket picker is grouped and ranked instead of cache order:
+  the recipient's open tickets (or the team members'), recently viewed, your focus
+  (same ranking as the dashboard, sprint-aware), blocked, other open tickets by
+  priority, then done. Each row shows its blocker, priority or status. Tickets that
+  left the sync scope are no longer offered.

@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
+import { useMemo } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { useLookups } from "@/app/queries";
@@ -21,6 +22,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DRAFT_CHANNELS } from "@/services/comms";
 import { listDependencies } from "@/services/dependencies/queries";
 import { MESSAGE_INTENTS } from "@/services/proposals/schema";
+import { groupForPicker, loadPickerSource, type PickerRecipient } from "@/services/tickets/picker";
 import { type Recipient, RecipientPicker, TicketPicker } from "./pickers";
 import { useCreateDraft } from "./use-drafts";
 
@@ -46,6 +48,12 @@ export function DraftComposer() {
     queryKey: queryKeys.dependencyList(false),
     queryFn: ({ signal }) => run(listDependencies({}), signal),
   });
+  const pickerSource = useQuery({
+    queryKey: queryKeys.ticketPicker,
+    queryFn: ({ signal }) => run(loadPickerSource(), signal),
+    // Opening a ticket marks it viewed without invalidating; read fresh on open.
+    staleTime: 0,
+  });
   const create = useCreateDraft();
   const form = useForm<FormInput, unknown, z.output<typeof Form>>({
     resolver: zodResolver(Form),
@@ -58,6 +66,23 @@ export function DraftComposer() {
       notes: "",
     },
   });
+
+  const recipient = form.watch("recipient");
+  const ticketGroups = useMemo(() => {
+    if (!pickerSource.data) return [];
+    let who: PickerRecipient | null = null;
+    if (recipient?.type === "person") {
+      const p = lookups.person.get(recipient.id);
+      if (p) who = { label: p.displayName, usernames: p.jiraUsername ? [p.jiraUsername] : [] };
+    } else if (recipient?.type === "team") {
+      const members = lookups.people.filter((p) => p.teamId === recipient.id);
+      who = {
+        label: lookups.team.get(recipient.id)?.name ?? "the team",
+        usernames: members.flatMap((p) => (p.jiraUsername ? [p.jiraUsername] : [])),
+      };
+    }
+    return groupForPicker(pickerSource.data, who, new Date().toISOString());
+  }, [pickerSource.data, recipient, lookups]);
 
   const pickRecipient = (r: Recipient) => {
     form.setValue("recipient", r, { shouldValidate: true, shouldDirty: true });
@@ -186,7 +211,7 @@ export function DraftComposer() {
             <FieldLabel htmlFor="tickets">Tickets</FieldLabel>
             <TicketPicker
               id="tickets"
-              tickets={lookups.tickets}
+              groups={ticketGroups}
               value={field.value}
               onChange={field.onChange}
             />

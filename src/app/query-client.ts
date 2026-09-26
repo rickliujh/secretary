@@ -15,6 +15,8 @@ export const queryKeys = {
   dataPaths: ["data-paths"] as const,
   storage: ["storage"] as const,
   tickets: ["tickets"] as const,
+  /** Under `tickets`, so a sync or a viewed ticket refreshes the order. */
+  ticketPicker: ["tickets", "picker"] as const,
   ticketRows: ["tickets", "rows"] as const,
   /** Under "tickets" so sync, decisions and dependency changes refresh it. */
   dashboard: ["tickets", "dashboard"] as const,

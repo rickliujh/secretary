@@ -13,7 +13,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { Person } from "@/services/directory/queries";
-import type { TicketRow } from "@/services/tickets/tree";
+import type { PickerGroup } from "@/services/tickets/picker";
 
 export type Recipient = { type: "person" | "team"; id: string } | null;
 
@@ -107,14 +107,17 @@ export function RecipientPicker({
   );
 }
 
-/** Tickets the message is about; their facts ground the draft (FR-6.2). */
+/**
+ * Tickets the message is about; their facts ground the draft (FR-6.2). Groups
+ * come ranked (recipient's, recent, focus, blocked, the rest by priority).
+ */
 export function TicketPicker({
-  tickets,
+  groups,
   value,
   onChange,
   id,
 }: {
-  tickets: readonly TicketRow[];
+  groups: readonly PickerGroup[];
   value: string[];
   onChange: (keys: string[]) => void;
   id?: string;
@@ -142,21 +145,29 @@ export function TicketPicker({
             <CommandInput placeholder="Search by key or summary" />
             <CommandList>
               <CommandEmpty>No tickets.</CommandEmpty>
-              <CommandGroup>
-                {tickets.map((t) => (
-                  <CommandItem
-                    key={t.key}
-                    value={`${t.key} ${t.summary}`}
-                    onSelect={() => toggle(t.key)}
-                  >
-                    <Check
-                      className={cn("size-4", value.includes(t.key) ? "opacity-100" : "opacity-0")}
-                    />
-                    <span className="font-mono text-xs">{t.key}</span>
-                    <span className="truncate">{t.summary}</span>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
+              {groups.map((g) => (
+                <CommandGroup key={g.id} heading={g.label}>
+                  {g.items.map(({ ticket: t, note }) => (
+                    <CommandItem
+                      key={t.key}
+                      value={`${t.key} ${t.summary}`}
+                      onSelect={() => toggle(t.key)}
+                    >
+                      <Check
+                        className={cn(
+                          "size-4",
+                          value.includes(t.key) ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <span className="font-mono text-xs">{t.key}</span>
+                      <span className="truncate">{t.summary}</span>
+                      <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                        {note ?? t.priority ?? t.status}
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ))}
             </CommandList>
           </Command>
         </PopoverContent>
