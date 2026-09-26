@@ -2,12 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Effect } from "effect";
-import { ExternalLink, FileDown, Search } from "lucide-react";
+import { ExternalLink, FileDown } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { describeError } from "@/app/errors";
 import { useSettings } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
+import { SearchInput } from "@/components/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -92,21 +93,17 @@ export function ConfluenceImportDialog({
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <div className="relative min-w-60 flex-1">
-                <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
-                <Input
-                  autoFocus
-                  aria-label="Search Confluence"
-                  placeholder={
-                    cqlMode
-                      ? 'CQL, e.g. space = "PAY" AND label = "team"'
-                      : "Search titles and text"
-                  }
-                  className="pl-8 font-mono text-xs"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                />
-              </div>
+              <SearchInput
+                autoFocus
+                className="min-w-60 flex-1"
+                inputClassName="font-mono text-xs"
+                aria-label="Search Confluence"
+                placeholder={
+                  cqlMode ? 'CQL, e.g. space = "PAY" AND label = "team"' : "Search titles and text"
+                }
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+              />
               {!cqlMode && (
                 <Input
                   aria-label="Space key"

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { MessagesSquare, Plus, Search } from "lucide-react";
+import { MessagesSquare, Plus } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { z } from "zod";
 import { queryKeys } from "@/app/query-client";
@@ -9,9 +9,9 @@ import { Composer, toTriageInput } from "@/components/inbox/composer";
 import { ThreadView } from "@/components/inbox/thread-view";
 import { useTriage } from "@/components/inbox/use-inbox";
 import { EmptyState } from "@/components/page";
+import { SearchInput } from "@/components/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { listInbox } from "@/services/inbox/queries";
@@ -39,16 +39,12 @@ function InboxPage() {
         <Button variant={item ? "outline" : "secondary"} onClick={() => select(undefined)}>
           <Plus /> New thread
         </Button>
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
-          <Input
-            aria-label="Search threads"
-            placeholder="Search threads"
-            className="pl-8"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
-        </div>
+        <SearchInput
+          aria-label="Search threads"
+          placeholder="Search threads"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
         <ul className="min-h-0 flex-1 overflow-y-auto">
           {(list.data ?? []).map((i) => (
             <li key={i.id}>

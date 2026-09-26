@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ListTree, Search } from "lucide-react";
+import { ListTree } from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 import { z } from "zod";
 import { isSyncBusy } from "@/app/errors";
@@ -10,10 +10,10 @@ import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { runSync, useSyncStatus } from "@/app/sync";
 import { EmptyState, PageHeader } from "@/components/page";
+import { SearchInput } from "@/components/search-input";
 import { TicketSheet } from "@/components/tickets/ticket-sheet";
 import { TicketTable } from "@/components/tickets/ticket-table";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -115,16 +115,13 @@ function TicketsPage() {
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-72">
-          <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
-          <Input
-            aria-label="Search tickets"
-            placeholder="Search summary, description or key"
-            className="pl-8"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
-        </div>
+        <SearchInput
+          className="w-72"
+          aria-label="Search tickets"
+          placeholder="Search summary, description or key"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
         <ToggleGroup
           type="multiple"
           variant="outline"
