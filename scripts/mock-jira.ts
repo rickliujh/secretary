@@ -10,6 +10,12 @@
  * In Settings > Jira use base URL http://localhost:8089 and any token.
  * JQL support is minimal: `updated >= "yyyy/MM/dd HH:mm"` (UTC) and
  * `parent in (...)` are honoured; everything else matches all issues.
+ *
+ * Boards: 1 (PAY) and 2 (OPS) run back-to-back two-week sprints from
+ * 2026-06-29; the one covering today is active and two more are planned.
+ * `/rest/agile/1.0/board/{id}/sprint` serves that history, and each issue's
+ * Sprint field names the sprint it was created in, plus the active one when
+ * unfinished work was carried over.
  */
 import j2m from "jira2md";
 
@@ -19,7 +25,7 @@ type Issue = {
   id: string;
   key: string;
   project: string;
-  type: "Epic" | "Story" | "Task" | "Bug" | "Sub-task";
+  type: (typeof ISSUE_TYPES)[number];
   summary: string;
   description: string | null;
   status: keyof typeof STATUSES;
@@ -53,10 +59,78 @@ const TRANSITIONS = Object.keys(STATUSES).map((name, i) => ({
   id: String((i + 1) * 10 + 1),
   name,
 }));
+const ISSUE_TYPES = ["Epic", "Story", "Task", "Bug", "Sub-task"] as const;
 const PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"];
 const EPIC_LINK = "customfield_10100";
 const EPIC_NAME = "customfield_10102";
 const SPRINT = "customfield_10104";
+
+const DAY = 86_400_000;
+const SPRINT_LENGTH = 14 * DAY;
+/** Monday 09:00 UTC: the first sprint of every board starts here. */
+const FIRST_SPRINT = Date.UTC(2026, 5, 29, 9);
+const PLANNED_SPRINTS = 2;
+const BOARDS = [
+  { id: 1, project: "PAY", name: "Payments" },
+  { id: 2, project: "OPS", name: "Ops" },
+] as const;
+
+type Sprint = {
+  id: number;
+  name: string;
+  state: "closed" | "active" | "future";
+  startDate: string;
+  endDate: string;
+  completeDate: string | null;
+  originBoardId: number;
+};
+
+const jiraTime = (t: number) => new Date(t).toISOString().replace("Z", "+00:00");
+/** Which sprint (0-based) was running at `t`; the first one covers anything earlier. */
+const sprintIndex = (t: number) => Math.max(0, Math.floor((t - FIRST_SPRINT) / SPRINT_LENGTH));
+
+/**
+ * A board's sprints, oldest first: every sprint up to the active one, then the
+ * planned ones. Each ends at 17:00 on the Monday the next one starts, as the
+ * recorded fixture board does.
+ */
+export function boardSprints(boardId: number, now = Date.now()): Sprint[] {
+  const board = BOARDS.find((b) => b.id === boardId);
+  if (!board) return [];
+  const active = sprintIndex(now);
+  return Array.from({ length: active + 1 + PLANNED_SPRINTS }, (_, i) => {
+    const start = FIRST_SPRINT + i * SPRINT_LENGTH;
+    const end = start + SPRINT_LENGTH + 8 * 3600 * 1000;
+    const state = i < active ? "closed" : i === active ? "active" : "future";
+    return {
+      id: board.id * 100 + i + 1,
+      name: `${board.name} ${i + 1}`,
+      state,
+      startDate: jiraTime(start),
+      endDate: jiraTime(end),
+      completeDate: state === "closed" ? jiraTime(end + 5 * 60 * 1000) : null,
+      originBoardId: board.id,
+    };
+  });
+}
+
+/** Data Center's legacy string form of a sprint, as the Sprint field returns it. */
+const sprintString = (s: Sprint) =>
+  `com.atlassian.greenhopper.service.sprint.Sprint@${s.id.toString(16)}[id=${s.id},rapidViewId=${s.originBoardId},state=${s.state.toUpperCase()},name=${s.name},startDate=${s.startDate},endDate=${s.endDate},completeDate=${s.completeDate ?? "<null>"},sequence=${s.id},goal=]`;
+
+/** The sprint the issue was created in, plus the active one if unfinished work carried over. */
+function issueSprints(issue: Issue, now = Date.now()): string[] | null {
+  if (issue.type === "Epic") return null;
+  const board = BOARDS.find((b) => b.project === issue.project);
+  if (!board) return null;
+  const sprints = boardSprints(board.id, now);
+  const active = sprintIndex(now);
+  const createdAt = new Date(issue.created.replace("+0000", "Z")).getTime();
+  const created = Math.min(sprintIndex(createdAt), active);
+  const picked = [sprints[created]];
+  if (created < active && issue.status !== "Done") picked.push(sprints[active]);
+  return picked.filter((s): s is Sprint => !!s).map(sprintString);
+}
 
 const USERS: User[] = [
   { name: "me", displayName: "Me Myself", emailAddress: "me@example.com" },
@@ -94,6 +168,7 @@ const TOPICS = [
 const VERBS = ["Fix", "Add", "Migrate", "Document", "Review", "Automate", "Investigate"];
 
 export function generate(total: number): Map<string, Issue> {
+  seed = 42;
   const issues = new Map<string, Issue>();
   const counters: Record<string, number> = { PAY: 0, OPS: 0 };
   const start = Date.UTC(2026, 6, 1);
@@ -214,12 +289,7 @@ function issueJson(issue: Issue, all: Map<string, Issue>, embedComments = 2) {
       resolutiondate: issue.status === "Done" ? issue.updated : null,
       [EPIC_LINK]: issue.epic,
       [EPIC_NAME]: issue.epicName,
-      [SPRINT]:
-        issue.type === "Epic"
-          ? null
-          : [
-              `com.atlassian.greenhopper.service.sprint.Sprint@1[id=7,rapidViewId=1,state=ACTIVE,name=Sprint 7,startDate=2026-09-14T09:00:00.000Z,sequence=7]`,
-            ],
+      [SPRINT]: issueSprints(issue),
       issuelinks: issue.links.map((l, i) => {
         const other = all.get(l.inward);
         return {
@@ -273,6 +343,30 @@ export function createHandler(issues: Map<string, Issue>) {
     const url = new URL(req.url);
     if (!req.headers.get("authorization")?.startsWith("Bearer "))
       return new Response("", { status: 401 });
+    const agile = /^\/rest\/agile\/1\.0\/board\/(\d+)\/sprint$/.exec(url.pathname);
+    if (agile) {
+      const boardId = Number(agile[1]);
+      if (!BOARDS.some((b) => b.id === boardId))
+        return error(
+          `Board ${boardId} does not exist or you do not have permission to see it.`,
+          404,
+        );
+      const states = url.searchParams.get("state")?.split(",").filter(Boolean);
+      const all = boardSprints(boardId).filter((s) => !states?.length || states.includes(s.state));
+      const startAt = Number(url.searchParams.get("startAt") ?? 0);
+      const max = Math.min(Number(url.searchParams.get("maxResults") ?? 50), 50);
+      const values = all.slice(startAt, startAt + max);
+      return json({
+        maxResults: max,
+        startAt,
+        isLast: startAt + values.length >= all.length,
+        values: values.map(({ completeDate, ...s }) => ({
+          ...s,
+          ...(completeDate ? { completeDate } : {}),
+          self: `${url.origin}/rest/agile/1.0/sprint/${s.id}`,
+        })),
+      });
+    }
     const path = url.pathname.replace(/^\/rest\/api\/2\//, "");
     const body =
       req.method === "GET"
@@ -327,6 +421,20 @@ export function createHandler(issues: Map<string, Issue>) {
         { id: "PAY", key: "PAY", name: "Payments" },
         { id: "OPS", key: "OPS", name: "Operations" },
       ]);
+    const projectStatuses = /^project\/([^/]+)\/statuses$/.exec(path);
+    if (projectStatuses) {
+      const key = decodeURIComponent(projectStatuses[1] ?? "");
+      if (!["PAY", "OPS"].includes(key))
+        return error(`No project could be found with key '${key}'.`, 404);
+      return json(
+        ISSUE_TYPES.map((name) => ({
+          id: name,
+          name,
+          subtask: name === "Sub-task",
+          statuses: (Object.keys(STATUSES) as (keyof typeof STATUSES)[]).map(status),
+        })),
+      );
+    }
     if (path === "user/assignable/search") {
       const q = (url.searchParams.get("username") ?? "").toLowerCase();
       return json(
@@ -356,11 +464,10 @@ export function createHandler(issues: Map<string, Issue>) {
 
     const meta = /^issue\/createmeta\/([A-Z]+)\/issuetypes(?:\/(\w[\w-]*))?$/.exec(path);
     if (meta) {
-      const types = ["Epic", "Story", "Task", "Bug", "Sub-task"] as const;
       if (!meta[2])
         return json({
           isLast: true,
-          values: types.map((t) => ({ id: t, name: t, subtask: t === "Sub-task" })),
+          values: ISSUE_TYPES.map((t) => ({ id: t, name: t, subtask: t === "Sub-task" })),
         });
       const fieldsMeta = [
         { fieldId: "project", name: "Project", required: true },
