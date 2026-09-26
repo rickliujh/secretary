@@ -19,6 +19,12 @@ export const UserContentSchema = z.object({
   source: z.enum(SOURCES).optional(),
   /** The question proposal this message answers. */
   answers: z.string().nullable().optional(),
+  /**
+   * Set when a feature, not pasted input, started the thread (sprint planner,
+   * rule suggestions). Such threads are reviewed and approved but not revised by
+   * replying, because they have no input to classify again.
+   */
+  origin: z.enum(["planner", "rules"]).optional(),
 });
 export type UserContent = z.infer<typeof UserContentSchema>;
 

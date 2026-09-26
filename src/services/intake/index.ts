@@ -6,7 +6,7 @@ export const SOURCES = ["teams", "email", "meeting", "typed", "other"] as const;
 export type Source = (typeof SOURCES)[number];
 
 export class IntakeError extends Data.TaggedError("IntakeError")<{
-  readonly kind: "empty" | "not_found";
+  readonly kind: "empty" | "not_found" | "read_only";
   readonly message: string;
 }> {}
 

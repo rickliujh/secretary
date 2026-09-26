@@ -85,6 +85,7 @@ const make = Effect.gen(function* () {
               { type: "typed", text: `Suggest rules from my last ${examples.length} corrections.` },
             ],
             source: "other",
+            origin: "rules",
           },
           createdAt: now,
         },

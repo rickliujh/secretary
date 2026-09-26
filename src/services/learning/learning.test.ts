@@ -53,6 +53,13 @@ describe("Learning.consolidate", () => {
               ]),
           );
           const res = yield* (yield* Learning).consolidate;
+          // A thread of suggested rules has no input to revise.
+          const replied = yield* Effect.either(
+            (yield* Intake).reply({
+              inboxItemId: res.inboxItemId ?? "",
+              instruction: "make it shorter",
+            }),
+          );
           const props = yield* query((d) =>
             d
               .select()
@@ -60,12 +67,15 @@ describe("Learning.consolidate", () => {
               .where(eq(proposals.inboxItemId, res.inboxItemId ?? ""))
               .all(),
           );
-          return { res, props };
+          return { res, props, replied };
         }),
         layer,
       ),
     );
     expect(r.res).toMatchObject({ rules: 1, corrections: 2 });
+    expect(r.replied._tag === "Left" && (r.replied.left as { kind: string }).kind).toBe(
+      "read_only",
+    );
     expect(r.props).toHaveLength(1);
     expect(r.props[0]).toMatchObject({ kind: "remember", status: "pending" });
     expect(r.props[0]?.payload).toMatchObject({ memoryKind: "rule", content: rule });

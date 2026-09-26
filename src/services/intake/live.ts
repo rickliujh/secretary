@@ -647,6 +647,22 @@ const make = Effect.gen(function* () {
       );
     });
 
+  /** Threads a feature started (planner, rule suggestions) have no input to classify again. */
+  const refuseFeatureThread = (thread: Thread) => {
+    const first = thread.messages.find((m) => m.role === "user");
+    const origin = UserContentSchema.safeParse(first?.content).data?.origin;
+    if (!origin) return Effect.void;
+    return Effect.fail(
+      new IntakeError({
+        kind: "read_only",
+        message:
+          origin === "planner"
+            ? "This thread holds a sprint plan. Change the plan on the Planning page."
+            : "This thread holds suggested rules. Approve or reject them here, or edit rules on the Memory page.",
+      }),
+    );
+  };
+
   const reply = (input: ReplyInput) =>
     Effect.gen(function* () {
       const text = input.text?.trim() ?? "";
@@ -654,6 +670,7 @@ const make = Effect.gen(function* () {
       if (!text && !instruction)
         return yield* new IntakeError({ kind: "empty", message: "Type or paste something first." });
       const thread = yield* loadThread(input.inboxItemId);
+      yield* refuseFeatureThread(thread);
       const now = nowIso();
       const messageId = newId();
       yield* q((d) =>
@@ -695,6 +712,7 @@ const make = Effect.gen(function* () {
       inboxItemId,
       Effect.gen(function* () {
         const thread = yield* loadThread(inboxItemId);
+        yield* refuseFeatureThread(thread);
         const progress: Progress = () => undefined;
         const last = thread.messages.at(-1);
         const firstUser = thread.messages.find((m) => m.role === "user");

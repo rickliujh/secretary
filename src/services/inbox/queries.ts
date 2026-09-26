@@ -81,6 +81,8 @@ export type ThreadMessage =
       parts: MessagePart[];
       source: string | null;
       answers: string | null;
+      /** Set when a feature started the thread; such threads take no replies. */
+      origin: "planner" | "rules" | null;
     }
   | { id: string; role: "assistant"; createdAt: string; summary: string | null };
 
@@ -94,6 +96,7 @@ const toMessage = (m: typeof inboxMessages.$inferSelect): ThreadMessage => {
       parts: c.success ? c.data.parts : [],
       source: c.success ? (c.data.source ?? null) : null,
       answers: c.success ? (c.data.answers ?? null) : null,
+      origin: c.success ? (c.data.origin ?? null) : null,
     };
   }
   const c = AssistantContentSchema.safeParse(m.content);

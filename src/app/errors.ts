@@ -68,9 +68,19 @@ export function describeError(error: unknown): Described {
       return { title: "That action cannot run", description };
     case "ProposalError":
       return { title: "Proposal not available", description };
+    case "PlanningError":
+      return {
+        title: error.kind === "no_sprint" ? "No next sprint in Jira" : "Can't plan yet",
+        description,
+      };
     case "IntakeError":
       return {
-        title: error.kind === "empty" ? "Nothing to read" : "Thread not found",
+        title:
+          error.kind === "empty"
+            ? "Nothing to read"
+            : error.kind === "read_only"
+              ? "This thread takes no replies"
+              : "Thread not found",
         description,
       };
     case "SyncError":
