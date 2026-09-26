@@ -4,6 +4,7 @@ import { logger } from "@/lib/log";
 import { redact } from "@/lib/redact";
 import { Secrets, secretNames } from "@/services/secrets";
 import { Settings } from "@/services/settings";
+import { checkRequest, OFFLINE_MESSAGE } from "./guard";
 
 export type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -55,12 +56,32 @@ export const FetcherLive = Layer.effect(
           Effect.provideService(Secrets, secrets),
         ),
       );
+    const guard = (url: string) =>
+      Effect.runPromise(
+        settings.get.pipe(
+          Effect.map((s) =>
+            checkRequest(
+              url,
+              {
+                jiraBaseUrl: s.jira.baseUrl,
+                confluenceBaseUrl: s.confluence.baseUrl,
+                providerBaseUrls: s.providers.map((p) => p.baseUrl),
+              },
+              navigator.onLine,
+            ),
+          ),
+          Effect.orElseSucceed(() => (navigator.onLine ? null : OFFLINE_MESSAGE)),
+        ),
+      );
     const tauriFetch: FetchFn = async (input, init) => {
       const { fetch: pluginFetch } = await import("@tauri-apps/plugin-http");
       // plugin-http only wires cancellation from `init.signal`; ky passes a Request
       // whose own signal carries timeouts and aborts, so forward it.
       const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
       const url = input instanceof Request ? input.url : String(input);
+      const refused = await guard(url);
+      // A TypeError, like any other fetch failure, so clients map it to a network error.
+      if (refused) throw new TypeError(refused);
       try {
         return await pluginFetch(input, { ...init, signal, proxy: await proxy() });
       } catch (error) {

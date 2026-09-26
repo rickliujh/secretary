@@ -1,5 +1,6 @@
 /** Resolves base URL, deployment and auth for Jira or Confluence from settings and the keychain. */
 import { Effect, Option } from "effect";
+import { allowHost } from "@/services/http/guard";
 import { Secrets, secretNames } from "@/services/secrets";
 import { Settings } from "@/services/settings";
 import {
@@ -48,6 +49,8 @@ export const resolveCredentials = (product: Product, overrides: Credentials = {}
         Effect.mapError((e) => new MissingCredentials(e.message)),
       );
     const conf = settings[product];
+    // A URL typed into the settings form may be tested before it is saved (D27).
+    if (overrides.baseUrl?.trim()) allowHost(overrides.baseUrl.trim());
     const siteUrl = overrides.baseUrl?.trim() || conf.baseUrl;
     const label = product === "jira" ? "Jira" : "Confluence";
     if (!siteUrl)
