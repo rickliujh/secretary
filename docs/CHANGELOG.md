@@ -566,3 +566,9 @@ Built
 - The app header is the title bar (design.md D36): drag it to move the window,
   double-click to maximise. macOS keeps its traffic lights over the header; Windows
   and Linux get minimise, maximise and close buttons at its right end.
+
+## Brief for a chosen period (2026-09-26)
+
+- The dashboard brief can catch you up on a period (design.md D37): the arrow next
+  to Regenerate offers since yesterday, the last 3, 7 or 14 days, or any number of
+  days up to 30. The brief shows which period it covers.

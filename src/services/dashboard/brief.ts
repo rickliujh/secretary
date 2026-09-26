@@ -24,6 +24,20 @@ import { buildDashboard, type Dashboard } from "./sections";
 
 const CACHE_KEY = "brief.cache";
 const CHANGE_LIMIT = 15;
+/** Longest period a brief can cover, in days (D37). */
+export const MAX_BRIEF_DAYS = 30;
+
+/** Local midnight `days` days before `now`: 1 is the start of yesterday. */
+export function periodStart(now: Date, days: number): Date {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return d;
+}
+
+/** More changes fit a longer period; a week lists up to 40. */
+const changeLimit = (days: number | null) =>
+  days ? Math.min(CHANGE_LIMIT + 5 * days, 40) : CHANGE_LIMIT;
 
 const CachedBriefSchema = z.object({
   hash: z.string(),
@@ -35,6 +49,10 @@ const CachedBriefSchema = z.object({
   }),
   model: z.string().nullable().default(null),
   tier: z.string().nullable().default(null),
+  /** Start of the period the brief covers. */
+  since: z.string().nullable().default(null),
+  /** Days chosen by the user (D37); null for "since the last brief". */
+  days: z.number().nullable().default(null),
 });
 export type CachedBrief = z.infer<typeof CachedBriefSchema>;
 
@@ -49,8 +67,8 @@ function hashFacts(value: unknown): string {
   return (h >>> 0).toString(16);
 }
 
-/** The "since" window moves with each brief, so it is not part of the identity. */
-const briefHash = (facts: BriefFacts) => hashFacts({ ...facts, since: null });
+/** The period moves with each brief, so it is not part of the identity. */
+const briefHash = (facts: BriefFacts) => hashFacts({ ...facts, since: null, period: undefined });
 
 const readCache = Effect.map(getState(CACHE_KEY), (v) =>
   readJson(v, CachedBriefSchema.nullable(), null),
@@ -61,6 +79,8 @@ const collectFacts = (
   since: string | null,
   today: string,
   outputLanguage: string,
+  limit = CHANGE_LIMIT,
+  period?: string,
 ) =>
   Effect.gen(function* () {
     const inScope = new Set([
@@ -99,11 +119,12 @@ const collectFacts = (
     const facts: BriefFacts = {
       today,
       since,
+      period,
       outputLanguage,
       changed: changedRows
         .filter((r) => inScope.has(r.key) || commented.has(r.key))
         .sort((a, b) => b.updated.localeCompare(a.updated))
-        .slice(0, CHANGE_LIMIT)
+        .slice(0, limit)
         .map((r) => ({
           key: r.key,
           summary: r.summary,
@@ -161,8 +182,12 @@ export const dashboardWithBrief = (now = new Date()) =>
     return { dashboard, brief: cached, briefFresh: cached.hash === briefHash(facts) };
   });
 
-/** Generates and caches a new brief. With nothing to report, no model call is made. */
-export const generateBrief = (now = new Date()) =>
+/**
+ * Generates and caches a new brief. With nothing to report, no model call is made.
+ * `days` covers changes from local midnight that many days ago until now (D37);
+ * without it, changes since the last brief.
+ */
+export const generateBrief = (now = new Date(), days: number | null = null) =>
   Effect.gen(function* () {
     const settings = yield* settingsOrDefault(yield* Settings);
     const today = localDate(now);
@@ -173,14 +198,27 @@ export const generateBrief = (now = new Date()) =>
       now.toISOString(),
     );
     const previous = yield* readCache;
-    const since = previous?.generatedAt ?? new Date(now.getTime() - 24 * 3_600_000).toISOString();
-    const facts = yield* collectFacts(dashboard, since, today, settings.general.outputLanguage);
+    const span = days ? Math.min(Math.max(Math.round(days), 1), MAX_BRIEF_DAYS) : null;
+    const since = span
+      ? periodStart(now, span).toISOString()
+      : (previous?.generatedAt ?? new Date(now.getTime() - 24 * 3_600_000).toISOString());
+    const period = span
+      ? `${span === 1 ? "since the start of yesterday" : `in the last ${span} days`} (since ${localDate(new Date(since))})`
+      : undefined;
+    const facts = yield* collectFacts(
+      dashboard,
+      since,
+      today,
+      settings.general.outputLanguage,
+      changeLimit(span),
+      period,
+    );
     let sections: CachedBrief["sections"];
     let model: string | null = null;
     let tier: string | null = null;
     if (isEmpty(facts)) {
       sections = {
-        changed: "Nothing new since the last brief.",
+        changed: span ? "Nothing changed in this period." : "Nothing new since the last brief.",
         doFirst: "Nothing is urgent.",
         chase: "No one to chase.",
       };
@@ -201,6 +239,8 @@ export const generateBrief = (now = new Date()) =>
       sections,
       model,
       tier,
+      since,
+      days: span,
     };
     yield* setState(CACHE_KEY, JSON.stringify(brief));
     return brief;

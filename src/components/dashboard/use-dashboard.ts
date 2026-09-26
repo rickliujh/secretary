@@ -15,7 +15,9 @@ export function useDashboard() {
 }
 
 export function useGenerateBrief() {
-  return useAppMutation(() => generateBrief(), { invalidate: [queryKeys.dashboard] });
+  return useAppMutation((days: number | null = null) => generateBrief(new Date(), days), {
+    invalidate: [queryKeys.dashboard],
+  });
 }
 
 /** Local ticket state change (pin, snooze, override); refreshes rankings. */
