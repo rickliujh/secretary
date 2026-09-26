@@ -1,6 +1,6 @@
 [package]
 name = "secretary"
-version = "0.1.0"
+version = "0.0.1"
 description = "Personal AI secretary for Jira Cloud and Data Center"
 authors = ["Rick Liu"]
 edition = "2021"

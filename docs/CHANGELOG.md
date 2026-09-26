@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.0.1 (2026-09-26)
+
+First release: everything below, Phases 0 to 8 and the features and fixes after
+them. Bundles are unsigned; macOS and Windows warn on first open.
+
 ## Phase 0: Scaffold and settings (2026-09-23)
 
 Built
