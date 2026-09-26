@@ -29,8 +29,10 @@ function useDraftMutation<I, A, E>(
 }
 
 export function useDraftActions(id: string) {
-  const generate = useDraftMutation((instruction: string | null) =>
-    Effect.flatMap(Comms, (c) => c.generate(id, { instruction })),
+  // The editor shows a failed write inline with its issues, so no toast as well.
+  const generate = useDraftMutation(
+    (instruction: string | null) => Effect.flatMap(Comms, (c) => c.generate(id, { instruction })),
+    { toastError: false },
   );
   const save = useDraftMutation((edit: DraftEdit) => saveDraft(id, edit));
   const copy = useDraftMutation(

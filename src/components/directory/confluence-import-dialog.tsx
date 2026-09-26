@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Effect } from "effect";
 import { ExternalLink, FileDown, Search } from "lucide-react";
 import { useDeferredValue, useState } from "react";
+import { describeError } from "@/app/errors";
 import { useSettings } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
@@ -123,11 +124,7 @@ export function ConfluenceImportDialog({
               </div>
             </div>
             <div className="max-h-96 min-h-24 overflow-y-auto">
-              {results.isError && (
-                <p className="text-sm text-destructive">
-                  {String((results.error as Error).message)}
-                </p>
-              )}
+              {results.isError && <SearchError error={results.error} />}
               {results.data?.results.length === 0 && (
                 <p className="text-sm text-muted-foreground">No pages found.</p>
               )}
@@ -175,5 +172,15 @@ export function ConfluenceImportDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SearchError({ error }: { error: unknown }) {
+  const d = describeError(error);
+  return (
+    <p className="text-sm text-destructive">
+      {d.title}
+      {d.description && `: ${d.description}`}
+    </p>
   );
 }

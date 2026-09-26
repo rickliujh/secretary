@@ -3,7 +3,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ListTree, Search } from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 import { z } from "zod";
-import { useSettings } from "@/app/hooks";
+import { isSyncBusy } from "@/app/errors";
+import { useErrorToast, useSettings } from "@/app/hooks";
 import { useTicketRows } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
@@ -46,6 +47,11 @@ function TicketsPage() {
   const navigate = useNavigate({ from: "/tickets" });
   const { data: settings } = useSettings();
   const sync = useSyncStatus();
+  const onError = useErrorToast();
+  const syncNow = () =>
+    runSync().catch((e) => {
+      if (!isSyncBusy(e)) onError(e, syncNow);
+    });
 
   const [text, setText] = useState("");
   const q = useDeferredValue(text.trim());
@@ -173,9 +179,7 @@ function TicketsPage() {
       {rows.isSuccess && data.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-16 text-sm text-muted-foreground">
           <p>{sync?.running ? "Syncing for the first time..." : "Nothing cached yet."}</p>
-          {!sync?.running && (
-            <Button onClick={() => void runSync().catch(() => undefined)}>Sync now</Button>
-          )}
+          {!sync?.running && <Button onClick={() => void syncNow()}>Sync now</Button>}
         </div>
       ) : (
         <TicketTable
