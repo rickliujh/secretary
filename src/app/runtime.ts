@@ -24,7 +24,7 @@ const Base = FetcherLive.pipe(
 );
 
 // Chat's propose_actions tool runs intake, so Chat sits above it.
-export const AppLayer = ChatLive.pipe(
+const AppLayer = ChatLive.pipe(
   Layer.provideMerge(Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive, LearningLive)),
   Layer.provideMerge(Layer.mergeAll(RetrievalLive, ExecutorLive)),
   Layer.provideMerge(SyncLive),

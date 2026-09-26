@@ -10,7 +10,7 @@ import { queryKeys } from "./query-client";
 import { type AppServices, run } from "./runtime";
 import type { SettingsTab } from "./settings-tabs";
 
-export function useOpenSettings() {
+function useOpenSettings() {
   const navigate = useNavigate();
   return useCallback(
     (tab: SettingsTab) => void navigate({ to: "/settings", search: { tab } }),
