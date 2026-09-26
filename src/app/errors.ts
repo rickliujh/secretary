@@ -46,6 +46,8 @@ export function describeError(error: unknown): Described {
       };
     case "SettingsError":
       return { title: "Settings problem", description, settingsTab: "general" };
+    case "TransferError":
+      return { title: "Import refused", description };
     case "LearningError":
       return { title: "Not enough to learn from", description };
     case "CommsError":
