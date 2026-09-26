@@ -26,7 +26,7 @@ function setup(extra: StubRoute[] = []) {
     { match: (u) => u.pathname.endsWith("/field"), respond: () => json(fields) },
     { match: (u) => u.pathname.endsWith("/issue/PAY-2/editmeta"), respond: () => json(editmeta) },
     {
-      match: (u) => u.pathname.endsWith("/issue/PAY-2/comment") && true,
+      match: (u) => u.pathname.endsWith("/issue/PAY-2/comment"),
       respond: (r) =>
         r.method === "POST"
           ? json(

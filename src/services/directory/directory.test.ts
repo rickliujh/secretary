@@ -11,14 +11,8 @@ import { makeSecretsTest } from "@/services/secrets/test";
 import { defaultSettings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
 import { Sync } from "@/services/sync";
-import { SyncLive } from "@/services/sync/live";
 import page from "@/test/fixtures/confluence/page-65601.json";
-import comments from "@/test/fixtures/jira/comments-PAY-2.json";
-import fields from "@/test/fixtures/jira/field.json";
-import myself from "@/test/fixtures/jira/myself.json";
-import page1 from "@/test/fixtures/jira/search-page-1.json";
-import page2 from "@/test/fixtures/jira/search-page-2.json";
-import { jiraSettings, jiraTestLayer } from "@/test/layers";
+import { syncedJiraLayer } from "@/test/seed";
 import { json, stubFetch } from "@/test/stub-fetch";
 import { addNote, deleteNote, importConfluencePage, listNotes, searchNoteIds } from "./notes";
 import {
@@ -84,29 +78,6 @@ describe("teams and people", () => {
 });
 
 describe("matching contacts to Jira users", () => {
-  const all = [...page1.issues, ...page2.issues];
-  const layer = () => {
-    const stub = stubFetch([
-      { match: (u) => u.pathname.endsWith("/myself"), respond: () => json(myself) },
-      { match: (u) => u.pathname.endsWith("/field"), respond: () => json(fields) },
-      { match: (u) => u.pathname.endsWith("/comment"), respond: () => json(comments) },
-      {
-        match: (u) => u.pathname.endsWith("/search"),
-        respond: (r) => {
-          const b = r.body as { startAt: number; jql: string };
-          const src = b.jql.startsWith("(parent in") ? [] : all;
-          return json({
-            startAt: b.startAt,
-            maxResults: 100,
-            total: src.length,
-            issues: src.slice(b.startAt),
-          });
-        },
-      },
-    ]);
-    return Layer.provideMerge(SyncLive, jiraTestLayer(stub.fetch, jiraSettings()));
-  };
-
   test("usernames match case-insensitively; unmatched Jira users are suggested by frequency", async () => {
     const r = await Effect.runPromise(
       Effect.provide(
@@ -119,7 +90,7 @@ describe("matching contacts to Jira users", () => {
           const detail = yield* getPerson(ana);
           return { before, map, after, detail };
         }),
-        layer(),
+        syncedJiraLayer().layer,
       ),
     );
     expect(r.before.map((u) => u.username)).toEqual(["rliu", "ana.b", "tom.k"]);

@@ -40,13 +40,9 @@ import { ProviderSchema, type TierBindings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
-import boardSprints from "@/test/fixtures/jira/board-7-sprints.json";
-import comments from "@/test/fixtures/jira/comments-PAY-2.json";
-import fields from "@/test/fixtures/jira/field.json";
-import myself from "@/test/fixtures/jira/myself.json";
-import { jiraSettings } from "@/test/layers";
-import { fixtureIssues } from "@/test/seed";
-import { json, stubFetch } from "@/test/stub-fetch";
+import { JIRA_BASE, jiraSettings } from "@/test/layers";
+import { fixtureRoutes } from "@/test/seed";
+import { stubFetch } from "@/test/stub-fetch";
 import { EVAL_CASES, type EvalCase } from "./cases";
 
 const env = process.env;
@@ -70,53 +66,11 @@ function layerFor(tiers: TierBindings) {
     kind: env.SECRETARY_EVAL_KIND === "openai-compatible" ? "openai-compatible" : "anthropic",
     baseUrl: env.SECRETARY_EVAL_BASE_URL,
   });
-  const jiraStub = stubFetch([
-    { match: (u) => u.pathname.endsWith("/myself"), respond: () => json(myself) },
-    { match: (u) => u.pathname.endsWith("/field"), respond: () => json(fields) },
-    {
-      match: (u) => u.pathname.endsWith("/rest/agile/1.0/board/7/sprint"),
-      respond: () => json(boardSprints),
-    },
-    { match: (u) => u.pathname.endsWith("/comment"), respond: () => json(comments) },
-    // Project metadata as a real sync reads it (every issue type and status per project).
-    {
-      match: (u) => /\/project\/[A-Z]+\/statuses$/.test(u.pathname),
-      respond: (r) => {
-        const pay = r.url.pathname.includes("/PAY/");
-        const statuses = (names: string[]) => names.map((name) => ({ name }));
-        return json(
-          pay
-            ? ["Epic", "Story", "Task", "Bug", "Sub-task"].map((name) => ({
-                name,
-                statuses: statuses(["To Do", "In Progress", "Blocked", "In Review", "Done"]),
-              }))
-            : ["Task", "Sub-task"].map((name) => ({
-                name,
-                statuses: statuses(["To Do", "In Progress", "Done"]),
-              })),
-        );
-      },
-    },
-    {
-      match: (u) => u.pathname.endsWith("/search"),
-      respond: (r) => {
-        const b = r.body as { startAt: number; jql: string };
-        const src = b.jql.startsWith("(parent in") ? [] : fixtureIssues;
-        return json({
-          startAt: b.startAt,
-          maxResults: 100,
-          total: src.length,
-          issues: src.slice(b.startAt),
-        });
-      },
-    },
-  ]);
+  const jiraStub = stubFetch(fixtureRoutes());
   // Jira goes to the stub; the model provider gets real network access.
   const fetcher = makeFetcherTest((input, init) => {
     const url = input instanceof Request ? input.url : String(input);
-    return url.startsWith("https://jira.example.com")
-      ? jiraStub.fetch(input, init)
-      : fetch(input, init);
+    return url.startsWith(JIRA_BASE) ? jiraStub.fetch(input, init) : fetch(input, init);
   });
   const base = Layer.mergeAll(
     makeSettingsTest({

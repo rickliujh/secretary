@@ -12,7 +12,8 @@ import { RetrievalLive } from "./live";
 
 describe("Retrieval.snapshot", () => {
   test("builds candidates, constraints, directory, memories and notes for an item", async () => {
-    const { layer } = syncedJiraLayer();
+    // No project metadata, so the fallback to cache-derived lists is what gets checked.
+    const { layer } = syncedJiraLayer([], {}, { projectStatuses: false });
     const s = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
