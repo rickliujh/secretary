@@ -492,3 +492,26 @@ Built
 
 Fixed
 - A stray merge marker line in this changelog.
+
+## Sprint focus, clickable tickets, sprint planner (2026-09-26)
+
+Why: the chat suggested an unplanned backlog epic as today's focus (D29); the user
+wants help planning each next sprint (D30); ticket keys in the brief should open.
+
+Built
+- Top focus is the user's work in the active sprint plus pinned tickets, never
+  epics (by type, or by having children); with no active sprint it ranks the whole
+  scope. The dashboard names the sprint and its end; the chat's `my_focus` says what
+  it covers and the chat keeps focus answers inside it.
+- Ticket keys in the daily brief and chat answers are links that open the ticket
+  (only keys of synced tickets; code and existing links are left alone).
+- Sprint planner (Planning page): the ending sprint's summary, velocity from the
+  user's points resolved in the last three closed sprints, candidates (carry-over,
+  already planned, ranked backlog, pickups under tracked epics), a drafted plan
+  (`plan_sprint`) checked for decided carry-overs, capacity and named blockers, an
+  editable review, and one `move_to_sprint` proposal per ticket in an Inbox thread.
+  The dashboard suggests planning in the last two working days of a sprint.
+- Threads started by the planner or by rule suggestions take no replies (intake
+  refuses to revise them; the Inbox shows approve-only).
+- Live planning eval (GLM 5.3 Flash: a plan within capacity that defers the blocked
+  carry-over and names the risk).
