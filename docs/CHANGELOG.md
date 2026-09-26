@@ -515,3 +515,12 @@ Built
   refuses to revise them; the Inbox shows approve-only).
 - Live planning eval (GLM 5.3 Flash: a plan within capacity that defers the blocked
   carry-over and names the risk).
+
+## Ticket panel in place, one keychain prompt (2026-09-26)
+
+- Clicking a ticket anywhere (dashboard, brief, chat, inbox, planner, sheets, Ctrl+K)
+  opens the ticket panel on the current page instead of jumping to Tickets; closing
+  it returns to where you were.
+- All secrets live in one keychain entry, read once per run (design.md D32), so macOS
+  asks once instead of once per secret. Existing entries move in on first use.
+  Unsigned builds still ask again after each rebuild or update.
