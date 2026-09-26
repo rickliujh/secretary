@@ -9,6 +9,7 @@ import {
   people,
   teams,
 } from "@/db/schema";
+import { nowIso } from "@/lib/ids";
 import {
   type CandidateIssue,
   CLASSIFY_PROMPT_VERSION,
@@ -27,6 +28,7 @@ import {
   orderPriorities,
   type Reason,
   rankByRelevance,
+  rankMemories,
   retrievalFtsQuery,
 } from "./ranking";
 
@@ -273,36 +275,54 @@ const make = Effect.gen(function* () {
           )
         : [];
 
-      // --- memories and correction examples --------------------------------
+      // --- memories and correction examples (D26) ---------------------------
       const memoryRows = yield* q((d) =>
         d.select().from(memories).where(eq(memories.confirmed, true)).all(),
       );
-      const rules = takeWithinBudget(
-        rankByRelevance(
+      const about = new Set([
+        ...candidates.map((c) => `issue:${c.key}`),
+        ...req.references.contactIds.map((id) => `person:${id}`),
+        ...(sender ? [`person:${sender.id}`] : []),
+        ...(sender?.teamId ? [`team:${sender.teamId}`] : []),
+      ]);
+      const pickedRules = takeWithinBudget(
+        rankMemories(
           memoryRows
             .filter((m) => m.kind !== "example")
             .map((m) => ({ ...m, text: m.content, at: m.lastUsedAt ?? m.createdAt })),
           req.quote,
+          about,
           20,
-        ).map((m) => ({ kind: m.kind, content: m.content })),
+        ),
         (m) => m.content,
         BUDGETS.memories,
       );
-      const examples = takeWithinBudget(
-        rankByRelevance(
+      const pickedExamples = takeWithinBudget(
+        rankMemories(
           memoryRows
             .filter((m) => m.kind === "example")
             .map((m) => ({ ...m, text: m.exampleInput ?? m.content, at: m.createdAt })),
           req.quote,
+          about,
           10,
-        ).map((m) => ({
-          input: (m.exampleInput ?? "").slice(0, 300),
-          proposed: describeExample(m.exampleBefore),
-          corrected: m.exampleAfter ? describeExample(m.exampleAfter) : null,
-        })),
-        (e) => `${e.input} ${e.proposed} ${e.corrected ?? ""}`,
+        ),
+        (m) => `${m.exampleInput ?? ""} ${m.content}`.slice(0, 1200),
         BUDGETS.examples,
       );
+      const rules = pickedRules.map((m) => ({ kind: m.kind, content: m.content }));
+      const examples = pickedExamples.map((m) => ({
+        input: (m.exampleInput ?? "").slice(0, 300),
+        proposed: describeExample(m.exampleBefore),
+        corrected: m.exampleAfter ? describeExample(m.exampleAfter) : null,
+      }));
+      const used = [...pickedRules, ...pickedExamples].map((m) => m.id);
+      if (used.length)
+        yield* q((d) =>
+          d
+            .update(memories)
+            .set({ lastUsedAt: nowIso(), useCount: sql`${memories.useCount} + 1` })
+            .where(inArray(memories.id, used)),
+        );
 
       // --- context notes ------------------------------------------------------
       const subjects = [

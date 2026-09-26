@@ -96,3 +96,40 @@ export function orderPriorities(names: readonly string[]): string[] {
   };
   return [...new Set(names)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
+
+export type RankableMemory = Rankable & {
+  subjectType: string | null;
+  subjectId: string | null;
+  useCount?: number;
+};
+
+/**
+ * Memories for one prompt (design.md D26): overlap with the input, a boost when
+ * the memory is about something in the item (an issue, the sender, a contact or
+ * a team), then weight, recency and how often it has been useful.
+ */
+export function rankMemories<T extends RankableMemory>(
+  items: readonly T[],
+  input: string,
+  subjects: ReadonlySet<string>,
+  limit: number,
+  now = Date.now(),
+): T[] {
+  const score = (t: T) => {
+    const days = t.at ? Math.max(0, (now - new Date(t.at).getTime()) / 86_400_000) : 365;
+    const about =
+      t.subjectType && t.subjectId ? subjects.has(`${t.subjectType}:${t.subjectId}`) : false;
+    return (
+      overlap(t.text, input) * 3 +
+      (about ? 2 : 0) +
+      (t.weight ?? 1) * 0.3 +
+      (1 / (1 + days / 30)) * 0.5 +
+      Math.min(t.useCount ?? 0, 10) * 0.03
+    );
+  };
+  return [...items]
+    .map((t) => ({ t, s: score(t) }))
+    .sort((a, b) => b.s - a.s)
+    .slice(0, limit)
+    .map((x) => x.t);
+}

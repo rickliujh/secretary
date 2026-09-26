@@ -4,6 +4,7 @@ import {
   orderPriorities,
   overlap,
   rankByRelevance,
+  rankMemories,
   retrievalFtsQuery,
   tokens,
 } from "./ranking";
@@ -50,6 +51,29 @@ describe("retrieval ranking", () => {
     );
     expect(ranked.map((r) => r.id)).toEqual([1, 3]);
     expect(overlap("a b c", "")).toBe(0);
+  });
+
+  test("memories about something in the item rank above loosely related ones", () => {
+    const m = (id: string, text: string, subjectType: string | null, subjectId: string | null) => ({
+      id,
+      text,
+      subjectType,
+      subjectId,
+      weight: 1,
+      at: "2026-09-20T00:00:00Z",
+    });
+    const ranked = rankMemories(
+      [
+        m("loose", "Ledger exports are slow on Mondays", null, null),
+        m("about", "Always copy Priya on escalations", "person", "p-priya"),
+        m("other", "Tom prefers email", "person", "p-tom"),
+      ],
+      "ledger export blocked, escalate to Priya",
+      new Set(["person:p-priya", "issue:PAY-2"]),
+      2,
+      Date.parse("2026-09-24T00:00:00Z"),
+    );
+    expect(ranked.map((r) => r.id)).toEqual(["about", "loose"]);
   });
 
   test("priorities follow Jira's usual order", () => {

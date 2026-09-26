@@ -66,13 +66,17 @@ describe("Retrieval.snapshot", () => {
           const contacts = [
             { id: ana, displayName: "Ana Bell", email: null, jiraUsername: "ana.b" },
           ];
-          return yield* (yield* Retrieval).snapshot({
+          const snap = yield* (yield* Retrieval).snapshot({
             quote,
             source: "teams",
             senderPersonId: ana,
             references: extractReferences(quote, contacts),
             today: "2026-09-24",
           });
+          const usage = yield* query((d) =>
+            d.select({ id: memories.id, useCount: memories.useCount }).from(memories).all(),
+          );
+          return { ...snap, usage };
         }),
         Layer.provideMerge(RetrievalLive, layer),
       ),
@@ -99,5 +103,11 @@ describe("Retrieval.snapshot", () => {
       { input: "ledger export is blocked again", proposed: "Move PAY-2 to Done", corrected: null },
     ]);
     expect(s.notes[0]).toMatchObject({ about: "Ana Bell", title: "Working hours" });
+    // Memories that reached the prompt are counted as used (D26).
+    expect(Object.fromEntries(s.usage.map((m) => [m.id, m.useCount]))).toEqual({
+      m1: 1,
+      m2: 0,
+      m3: 1,
+    });
   });
 });
