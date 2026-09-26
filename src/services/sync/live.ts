@@ -1,5 +1,5 @@
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
-import { Effect, Layer, Option, SubscriptionRef } from "effect";
+import { Clock, Effect, Layer, Option, SubscriptionRef } from "effect";
 import { jiraIssues } from "@/db/schema";
 import { nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
@@ -221,9 +221,10 @@ const make = Effect.gen(function* () {
           startAt += r.value.values.length;
         }
       }
-      const cutoff = new Date(Date.now() - SPRINT_KEEP_DAYS * 86_400_000).toISOString();
+      const now = yield* Clock.currentTimeMillis;
+      const cutoff = new Date(now - SPRINT_KEEP_DAYS * 86_400_000).toISOString().slice(0, 10);
       const state: SprintState = {
-        sprints: [...byId.values()].filter((s) => !s.end || s.end >= cutoff.slice(0, 10)),
+        sprints: [...byId.values()].filter((s) => !s.end || s.end >= cutoff),
         completeBoards: [...complete],
         boardProjects: Object.fromEntries(
           [...boardProjects].map(([k, v]) => [String(k), [...v].sort()]),
