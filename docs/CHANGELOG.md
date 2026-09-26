@@ -613,3 +613,17 @@ Built
 - The report covers only tickets in the active sprint, like Top focus (design.md
   D40); a "Current sprint only" switch widens it to all your tickets. The report
   header says which sprint it covers.
+
+## Data sources: Obsidian vaults (2026-09-26)
+
+- Settings > Data sources connects Obsidian vaults (design.md D41). The app reads the
+  vault's Markdown files directly (no Obsidian CLI or running app); picking the folder
+  grants access, kept across restarts. Notes are parsed for frontmatter, title,
+  aliases, tags and wikilinks, and indexed with SQLite full-text search: incrementally
+  after launch, every 15 minutes, on demand and before a chat search. Dot folders,
+  excluded folders and files over 2 MB are skipped.
+- Chat gets `search_vault` and `read_vault_note`: ranked notes with excerpts (title and
+  alias matches first), and a note with its properties, links and backlinks. Note text
+  is untrusted input and reaches the model only when the chat reads it.
+- Live eval (GLM 5.3 Flash) answers a decision-and-owner question from the fixture
+  vault, naming the notes.
