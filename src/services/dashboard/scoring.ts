@@ -3,6 +3,7 @@
  * "Scoring"). Each factor is scaled to 0..1, multiplied by its weight, and the
  * user's local override is added. Reasons explain every non-zero factor.
  */
+import { daysBetween } from "@/lib/dates";
 import type { ScoringWeights } from "@/services/settings/schema";
 
 export type ScoreInput = {
@@ -31,13 +32,6 @@ export type Factor = keyof ScoringWeights | "override";
 export type Contribution = { factor: Factor; value: number; points: number; reason: string };
 export type Scored = { key: string; score: number; contributions: Contribution[] };
 
-const DAY_MS = 86_400_000;
-const days = (from: string, to: string) =>
-  Math.round(
-    (Date.parse(`${to.slice(0, 10)}T00:00:00Z`) - Date.parse(`${from.slice(0, 10)}T00:00:00Z`)) /
-      DAY_MS,
-  );
-
 const PRIORITY_VALUE: Record<string, number> = {
   blocker: 1,
   highest: 1,
@@ -62,13 +56,13 @@ export function dueValue(
   today: string,
 ): { value: number; daysLeft: number | null } {
   if (!dueDate) return { value: 0, daysLeft: null };
-  const left = days(today, dueDate);
+  const left = daysBetween(today, dueDate);
   return { value: left <= 0 ? 1 : Math.max(0, 1 - left / 14), daysLeft: left };
 }
 
 /** 0 for work touched in the last week, rising to 1 at 30 days without updates. */
 export function staleValue(updated: string, today: string): { value: number; idle: number } {
-  const idle = Math.max(0, days(updated, today));
+  const idle = Math.max(0, daysBetween(updated, today));
   return { value: Math.min(1, Math.max(0, (idle - 7) / 23)), idle };
 }
 

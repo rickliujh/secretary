@@ -3,6 +3,7 @@
  * projected future sprints, computed from dates alone so nothing depends on how
  * teams name their sprints.
  */
+import { MONTH_NAMES } from "@/lib/dates";
 
 export type SprintInfo = {
   id: number;
@@ -28,7 +29,7 @@ export type CalendarSprint = {
 };
 
 const DAY = 86_400_000;
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS = MONTH_NAMES.map((m) => m.slice(0, 3));
 /** A board whose last sprint ended longer ago than this is not projected forward. */
 const IDLE_DAYS = 60;
 const MAX_PROJECTED = 20;

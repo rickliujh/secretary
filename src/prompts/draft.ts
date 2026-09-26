@@ -4,6 +4,7 @@
  * recipient, and `validateDraft` checks what a message must contain.
  */
 import { z } from "zod";
+import { MONTH_NAMES } from "@/lib/dates";
 import type { MESSAGE_INTENTS } from "@/services/proposals/schema";
 import { untrusted } from "./common";
 
@@ -70,26 +71,10 @@ export const DraftOutputSchema = z.object({
 });
 export type DraftOutput = z.infer<typeof DraftOutputSchema>;
 
-const MONTHS = [
-  "january",
-  "february",
-  "march",
-  "april",
-  "may",
-  "june",
-  "july",
-  "august",
-  "september",
-  "october",
-  "november",
-  "december",
-];
-
 /** A readable form of an ISO date for the prompt, e.g. "15 September 2026". */
 export const longDate = (iso: string) => {
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number) as [number, number, number];
-  const month = MONTHS[m - 1] ?? "";
-  return `${d} ${month.charAt(0).toUpperCase()}${month.slice(1)} ${y}`;
+  return `${d} ${MONTH_NAMES[m - 1] ?? ""} ${y}`;
 };
 
 /** Whether text mentions a date in a common written form (ISO, "15 Sep", "Sep 15", 15/09). */
@@ -97,7 +82,7 @@ export function mentionsDate(text: string, iso: string) {
   const [, m, d] = iso.slice(0, 10).split("-").map(Number) as [number, number, number];
   const t = text.toLowerCase();
   if (t.includes(iso.slice(0, 10))) return true;
-  const month = MONTHS[m - 1] ?? "";
+  const month = (MONTH_NAMES[m - 1] ?? "").toLowerCase();
   const names = [month, month.slice(0, 3)];
   const day = `${d}(st|nd|rd|th)?`;
   return (

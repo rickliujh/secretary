@@ -2,6 +2,7 @@
  * Pure dashboard section builders (FR-5.1). Input is one snapshot of the
  * local cache; output is what each card renders.
  */
+import { daysBetween } from "@/lib/dates";
 import { timing } from "@/services/dependencies/logic";
 import type { ScoringWeights } from "@/services/settings/schema";
 import { rank, type Scored, type ScoreInput, staleValue } from "./scoring";
@@ -109,9 +110,6 @@ export function blockInfo(links: readonly IssueLink[]): { blockedBy: string[]; b
   return { blockedBy, blocks };
 }
 
-const daysUntil = (from: string, to: string) =>
-  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
-
 export function buildDashboard(
   input: DashboardInputs,
   weights: ScoringWeights,
@@ -205,7 +203,7 @@ export function buildDashboard(
     const idle = staleValue(i.updated, today).idle;
     if (idle >= AT_RISK_IDLE_DAYS) reasons.push(`No updates for ${idle} days`);
     if (i.dueDate) {
-      const left = daysUntil(today, i.dueDate);
+      const left = daysBetween(today, i.dueDate);
       if (left < 0) reasons.push(`${-left} day${left === -1 ? "" : "s"} past due`);
       else if (left <= 3 && i.statusCategory === "new")
         reasons.push(`Due in ${left} day${left === 1 ? "" : "s"} and not started`);
@@ -220,8 +218,8 @@ export function buildDashboard(
   );
 
   const dueSoon = scoped
-    .filter((i) => i.dueDate && daysUntil(today, i.dueDate) <= DUE_SOON_DAYS)
-    .map((i) => ({ ...i, daysLeft: daysUntil(today, i.dueDate ?? today) }))
+    .filter((i) => i.dueDate && daysBetween(today, i.dueDate) <= DUE_SOON_DAYS)
+    .map((i) => ({ ...i, daysLeft: daysBetween(today, i.dueDate ?? today) }))
     .sort((a, b) => a.daysLeft - b.daysLeft || a.key.localeCompare(b.key));
 
   const epicHealth = input.trackedEpics.map((key) => {
