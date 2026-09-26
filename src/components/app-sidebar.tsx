@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Sparkles } from "lucide-react";
 import { CONTEXT_NAV, type NavItem, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
+import { macOverlay } from "@/app/platform";
 import { usePendingCount } from "@/app/queries";
 import {
   Sidebar,
@@ -50,6 +51,8 @@ export function AppSidebar() {
   });
   return (
     <Sidebar collapsible="icon">
+      {/* macOS draws its traffic lights here (D36); the strip also drags the window. */}
+      {macOverlay && <div data-tauri-drag-region className="h-8 shrink-0" />}
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>

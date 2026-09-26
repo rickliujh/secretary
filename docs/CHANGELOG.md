@@ -560,3 +560,9 @@ Built
   Points"), whichever a ticket has filled. Settings > Jira shows every field found.
 - When the fields in use change, the next sync is a full one, so existing tickets
   pick up their points without being edited in Jira.
+
+## No native title bar (2026-09-26)
+
+- The app header is the title bar (design.md D36): drag it to move the window,
+  double-click to maximise. macOS keeps its traffic lights over the header; Windows
+  and Linux get minimise, maximise and close buttons at its right end.

@@ -7,6 +7,7 @@ import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { WindowBar } from "@/components/window-controls";
 import { Db } from "@/services/db";
 import { Settings } from "@/services/settings";
 
@@ -20,6 +21,7 @@ export function StartupGate({ children }: { children: ReactNode }) {
   if (startup.isPending) {
     return (
       <div className="flex h-svh items-center justify-center text-muted-foreground">
+        <WindowBar />
         <Loader2 className="size-5 animate-spin" />
       </div>
     );
@@ -28,6 +30,7 @@ export function StartupGate({ children }: { children: ReactNode }) {
     const d = describeError(startup.error);
     return (
       <div className="flex h-svh items-center justify-center p-8">
+        <WindowBar />
         <Alert variant="destructive" className="max-w-lg">
           <AlertCircle />
           <AlertTitle>{d.title}</AlertTitle>
