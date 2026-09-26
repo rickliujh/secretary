@@ -1,68 +1,46 @@
 /**
- * Data sources (design.md D41): folders of notes outside Jira, Obsidian vaults
- * first, indexed locally so the chat can search and read them. Files are read
- * directly; Obsidian does not need to run.
+ * Data sources (design.md D41): the user's notes outside Jira, Obsidian vaults
+ * first. Obsidian does the work through its CLI (Obsidian 1.12.7+, enabled in
+ * Settings > General > Advanced > Command line interface): Secretary runs one
+ * short-lived `obsidian` command per lookup and ranks search results itself.
+ * Nothing is indexed or kept; Obsidian opens if it is not running.
  */
 import { Context, Data, type Effect } from "effect";
-import type { DbError } from "@/services/db";
 
 export class SourceError extends Data.TaggedError("SourceError")<{
   /**
-   * not_found: no such source or document. no_access: the folder cannot be read
-   * (moved, deleted, or permission not granted; pick it again in Settings).
+   * not_found: no such source, vault or note. unavailable: the Obsidian CLI is
+   * missing, turned off, or did not answer (see `message` for what to do).
    */
-  readonly kind: "not_found" | "no_access";
+  readonly kind: "not_found" | "unavailable";
   readonly message: string;
 }> {}
 
-/** A file in a source folder, as listed by `VaultFs`. */
-export type VaultFile = {
-  /** Path inside the folder with forward slashes, e.g. "Projects/Ledger.md". */
-  path: string;
-  /** Modification time in ms since the epoch. */
-  mtime: number;
-  size: number;
-};
+/** Raw result of one `obsidian` command. */
+export type CliOutput = { stdout: string; code: number | null };
 
 /**
- * File access for sources. Live: the Tauri fs plugin, within the folders the
- * user picked (the pick grants access, persisted across restarts). Test: memory.
+ * Runs the `obsidian` command. Live: a Tauri command that only allows read-only
+ * subcommands and finds the binary (or uses the path set in Settings). Test: a
+ * fake over an in-memory vault.
  */
-export interface VaultFsShape {
-  /** Every Markdown file under `root`, recursively, skipping dot folders. */
-  readonly list: (root: string) => Effect.Effect<VaultFile[], SourceError>;
-  readonly readText: (root: string, path: string) => Effect.Effect<string, SourceError>;
+export interface ObsidianCliShape {
+  /** `args` as the CLI takes them, e.g. ["vault=Work", "search:context", "query=ledger", "format=json"]. */
+  readonly run: (args: readonly string[]) => Effect.Effect<CliOutput, SourceError>;
 }
-export class VaultFs extends Context.Tag("VaultFs")<VaultFs, VaultFsShape>() {}
-
-export type IndexResult = {
-  sourceId: string;
-  added: number;
-  updated: number;
-  removed: number;
-  unchanged: number;
-  /** Files left out: too large or unreadable. */
-  skipped: number;
-  durationMs: number;
-};
-
-export type SourceStatus = {
-  sourceId: string;
-  documents: number;
-  lastIndexedAt: string | null;
-  lastError: string | null;
-};
+export class ObsidianCli extends Context.Tag("ObsidianCli")<ObsidianCli, ObsidianCliShape>() {}
 
 export type SearchHit = {
   sourceId: string;
   sourceName: string;
+  /** Path in the vault, e.g. "Projects/Ledger export.md". */
   path: string;
+  /** File name without ".md". */
   title: string;
-  tags: string[];
-  /** A short excerpt around the match, from the note's text. */
+  /** The matching lines, joined and clipped. */
   snippet: string;
-  /** ISO time of the file's last change. */
-  modified: string;
+  /** How many lines matched. */
+  matches: number;
 };
 
 export type SourceDocument = {
@@ -70,42 +48,30 @@ export type SourceDocument = {
   sourceName: string;
   path: string;
   title: string;
-  aliases: string[];
-  tags: string[];
-  frontmatter: Record<string, unknown> | null;
+  /** YAML frontmatter as parsed, or null. */
+  properties: Record<string, unknown> | null;
   /** Markdown without the frontmatter. */
   body: string;
-  /** Notes this one links to, and notes linking here (titles or paths). */
-  links: string[];
+  tags: string[];
+  /** Paths of notes linking here. */
   backlinks: string[];
-  modified: string;
 };
 
+export type SourceCheck =
+  | { ok: true; notes: number }
+  | { ok: false; kind: SourceError["kind"]; message: string };
+
 export interface SourcesShape {
-  /**
-   * Brings the index up to date with the enabled sources (or one): new and
-   * changed files are parsed, deleted or excluded ones removed, unchanged ones
-   * skipped by modification time and size. Removed sources lose their rows.
-   */
-  readonly index: (opts?: {
-    sourceId?: string;
-    force?: boolean;
-  }) => Effect.Effect<IndexResult[], SourceError | DbError>;
-  /** `index` when the last run is older than `maxAgeMs`; failures are recorded, not raised. */
-  readonly indexIfStale: (maxAgeMs: number) => Effect.Effect<void>;
-  /** Full-text search over enabled sources, best first. */
+  /** Searches the enabled sources (or one), best first. */
   readonly search: (
     query: string,
     opts?: { limit?: number; sourceId?: string },
-  ) => Effect.Effect<SearchHit[], DbError>;
-  /**
-   * One document by path, or by title or alias when `path` is not found (so a
-   * wikilink target works).
-   */
-  readonly read: (
-    sourceId: string,
-    path: string,
-  ) => Effect.Effect<SourceDocument, SourceError | DbError>;
-  readonly status: Effect.Effect<SourceStatus[], DbError>;
+  ) => Effect.Effect<SearchHit[], SourceError>;
+  /** One note by vault path, or by name the way a [[link]] resolves. */
+  readonly read: (sourceId: string, path: string) => Effect.Effect<SourceDocument, SourceError>;
+  /** Vault names Obsidian knows, most recently opened first. */
+  readonly vaults: Effect.Effect<string[], SourceError>;
+  /** Whether the CLI answers for a source's vault, and how many files it has. */
+  readonly check: (sourceId: string) => Effect.Effect<SourceCheck>;
 }
 export class Sources extends Context.Tag("Sources")<Sources, SourcesShape>() {}

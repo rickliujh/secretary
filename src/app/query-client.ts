@@ -54,7 +54,7 @@ export const queryKeys = {
   assignableUsers: (key: string, q: string) => ["jira", "assignable", key, q] as const,
   planning: ["planning"] as const,
   planPrep: ["planning", "prep"] as const,
-  /** Data source index status (D41); refreshed after every index run. */
+  /** Obsidian vault names and source checks (D41). */
   sources: ["sources"] as const,
   /** The last recap report (D37). */
   report: ["report"] as const,

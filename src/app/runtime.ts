@@ -19,7 +19,7 @@ import { ReportsLive } from "@/services/report/live";
 import { RetrievalLive } from "@/services/retrieval/live";
 import { SecretsLive } from "@/services/secrets/live";
 import { SettingsLive } from "@/services/settings/live";
-import { VaultFsLive } from "@/services/sources/fs-live";
+import { ObsidianCliLive } from "@/services/sources/cli-live";
 import { SourcesLive } from "@/services/sources/live";
 import { SyncLive } from "@/services/sync/live";
 
@@ -33,7 +33,7 @@ const AppLayer = ChatLive.pipe(
     Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive, LearningLive, PlanningLive, ReportsLive),
   ),
   Layer.provideMerge(
-    Layer.mergeAll(RetrievalLive, ExecutorLive, SourcesLive.pipe(Layer.provide(VaultFsLive))),
+    Layer.mergeAll(RetrievalLive, ExecutorLive, SourcesLive.pipe(Layer.provide(ObsidianCliLive))),
   ),
   Layer.provideMerge(SyncLive),
   Layer.provideMerge(Layer.mergeAll(LlmLive, JiraClientLive, ConfluenceClientLive)),

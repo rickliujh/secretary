@@ -616,14 +616,14 @@ Built
 
 ## Data sources: Obsidian vaults (2026-09-26)
 
-- Settings > Data sources connects Obsidian vaults (design.md D41). The app reads the
-  vault's Markdown files directly (no Obsidian CLI or running app); picking the folder
-  grants access, kept across restarts. Notes are parsed for frontmatter, title,
-  aliases, tags and wikilinks, and indexed with SQLite full-text search: incrementally
-  after launch, every 15 minutes, on demand and before a chat search. Dot folders,
-  excluded folders and files over 2 MB are skipped.
-- Chat gets `search_vault` and `read_vault_note`: ranked notes with excerpts (title and
-  alias matches first), and a note with its properties, links and backlinks. Note text
-  is untrusted input and reaches the model only when the chat reads it.
-- Live eval (GLM 5.3 Flash) answers a decision-and-owner question from the fixture
-  vault, naming the notes.
+- Settings > Data sources connects Obsidian vaults by name (design.md D41). The chat
+  searches and reads them through Obsidian's command line interface (Obsidian
+  1.12.7+, turned on in Obsidian's Settings > General > Advanced); Secretary keeps no
+  index. A "Test" button checks each vault; the CLI's path can be set if Obsidian is
+  installed somewhere unusual.
+- Chat gets `search_vault` (Obsidian's search, ranked by Secretary: notes named after
+  the query words first, with their matching lines) and `read_vault_note` (a note by
+  path or name with its properties, tags and backlinks). Note text is untrusted input
+  and reaches the model only when the chat reads it.
+- Live eval (GLM 5.3 Flash) answers a decision-and-owner question from a test vault,
+  naming the notes.

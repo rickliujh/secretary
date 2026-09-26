@@ -98,8 +98,8 @@ export function describeError(error: unknown): Described {
     case "SecretsError":
       return { title: "Keychain problem", description };
     case "SourceError":
-      return error.kind === "no_access"
-        ? { title: "Can't read the notes folder", description, settingsTab: "sources" }
+      return error.kind === "unavailable"
+        ? { title: "Obsidian isn't reachable", description, settingsTab: "sources" }
         : { title: "Note not found", description };
     case "DbError":
       return { title: "Database error", description, settingsTab: "data" };

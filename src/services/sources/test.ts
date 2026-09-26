@@ -1,79 +1,182 @@
-/** In-memory `VaultFs` for tests, plus a loader for the fixture vault on disk. */
+/**
+ * A fake `obsidian` command for tests (D41), over in-memory vaults, printing
+ * what Obsidian 1.13's CLI handlers print; plus a loader for the fixture vault.
+ */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
-import { SourceError, VaultFs } from ".";
+import { ObsidianCli } from ".";
+import { splitFrontmatter } from "./cli-output";
 
-export type MemoryFile = { text: string; mtime: number; size?: number };
-/** root -> vault-relative path -> file. */
-export type MemoryVaults = Record<string, Record<string, MemoryFile>>;
+/** vault name -> path in the vault -> file text. */
+export type MemoryVaults = Record<string, Record<string, string>>;
 
-const byteLength = (text: string) => new TextEncoder().encode(text).length;
+type Options = {
+  /** Paths Obsidian's "Excluded files" setting hides from search. */
+  excluded?: string[];
+  /** Off: every command answers that the CLI is disabled. */
+  enabled?: boolean;
+};
 
-/**
- * A memory file system. `vaults` stays live: `write` and `remove` change it
- * between calls, a root missing from it fails like a folder that was moved,
- * and `reads` records every `readText` as "root:path".
- */
-export function makeVaultFsTest(initial: MemoryVaults = {}) {
+const notes = (files: Record<string, string>, excluded: string[] = []) =>
+  Object.keys(files).filter(
+    (p) =>
+      /\.md$/i.test(p) &&
+      !p.split("/").some((s) => s.startsWith(".")) &&
+      !excluded.some((e) => p === e || p.startsWith(`${e.replace(/\/$/, "")}/`)),
+  );
+
+const base = (p: string) => p.split("/").pop()?.replace(/\.md$/i, "").toLowerCase() ?? "";
+
+/** Resolves a name the way a [[link]] does: full path without ".md", or file name. */
+const resolve = (files: Record<string, string>, name: string) => {
+  const n = name.toLowerCase().replace(/\.md$/i, "");
+  const all = notes(files);
+  return (
+    all.find((p) => p.toLowerCase().replace(/\.md$/i, "") === n) ??
+    all.find((p) => base(p) === n) ??
+    null
+  );
+};
+
+const linksOf = (text: string) =>
+  [...text.matchAll(/!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g)].map(
+    (m) => m[1]?.trim() ?? "",
+  );
+
+const tagsOf = (text: string) => {
+  const { frontmatter, body } = splitFrontmatter(text);
+  const fm = frontmatter?.tags;
+  const listed = Array.isArray(fm) ? fm : typeof fm === "string" ? fm.split(/[,\s]+/) : [];
+  const inline = [
+    ...body
+      .replace(/```[\s\S]*?```/g, "")
+      .matchAll(/(?:^|\s)#([\p{L}\p{N}_/-]*\p{L}[\p{L}\p{N}_/-]*)/gu),
+  ].map((m) => m[1] ?? "");
+  return [...new Set([...listed.map(String), ...inline].map((t) => `#${t.replace(/^#/, "")}`))];
+};
+
+/** Obsidian's search: terms separated by spaces must all match; OR between groups. */
+function search(files: Record<string, string>, query: string, excluded: string[]) {
+  const groups = query
+    .split(/\s+OR\s+/)
+    .map((g) =>
+      [...g.matchAll(/"([^"]*)"|(\S+)/g)]
+        .map((m) => (m[1] ?? m[2] ?? "").toLowerCase())
+        .filter(Boolean),
+    );
+  const out: { file: string; matches: { line: number; text: string }[] }[] = [];
+  for (const path of notes(files, excluded)) {
+    const text = files[path] ?? "";
+    const hay = `${path}\n${text}`.toLowerCase();
+    const group = groups.find((g) => g.every((t) => hay.includes(t)));
+    if (!group) continue;
+    const matches = text
+      .split("\n")
+      .map((l, i) => ({ line: i + 1, text: l.trim() }))
+      .filter((l) => group.some((t) => l.text.toLowerCase().includes(t)));
+    out.push({ file: path, matches });
+  }
+  return out;
+}
+
+export function makeObsidianCliTest(initial: MemoryVaults = {}, opts: Options = {}) {
   const vaults: MemoryVaults = structuredClone(initial);
-  const reads: string[] = [];
-  const missing = (root: string) =>
-    new SourceError({
-      kind: "no_access",
-      message: `Cannot read the folder "${root}". Pick the folder again in Settings > Data sources.`,
-    });
-  const layer = Layer.succeed(
-    VaultFs,
-    VaultFs.of({
-      list: (root) =>
-        Effect.suspend(() => {
-          const files = vaults[root];
-          if (!files) return Effect.fail(missing(root));
-          return Effect.succeed(
-            Object.entries(files)
-              .filter(
-                ([path]) =>
-                  /\.md$/i.test(path) && !path.split("/").some((seg) => seg.startsWith(".")),
-              )
-              .map(([path, f]) => ({ path, mtime: f.mtime, size: f.size ?? byteLength(f.text) })),
+  const calls: string[][] = [];
+  const answer = (args: readonly string[]): string => {
+    if (opts.enabled === false)
+      return "Command line interface is not enabled. Please turn it on in Settings > General > Advanced.";
+    let rest = [...args];
+    let files: Record<string, string> | undefined;
+    if (rest[0]?.startsWith("vault=")) {
+      files = vaults[rest[0].slice(6)];
+      if (!files) return "Vault not found.";
+      rest = rest.slice(1);
+    }
+    const [command, ...params] = rest;
+    const p = Object.fromEntries(
+      params.map((a) =>
+        a.includes("=") ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a, "true"],
+      ),
+    );
+    if (command === "vaults") return Object.keys(vaults).join("\n");
+    if (!files) files = Object.values(vaults)[0] ?? {};
+    const target = () => {
+      const path = p.path
+        ? files?.[p.path] !== undefined
+          ? p.path
+          : null
+        : resolve(files ?? {}, p.file ?? "");
+      if (!path) throw `File "${p.path ?? p.file}" not found.`;
+      return path;
+    };
+    try {
+      switch (command) {
+        case "search:context": {
+          const r = search(files, p.query ?? "", opts.excluded ?? []);
+          return r.length ? JSON.stringify(r) : "No matches found.";
+        }
+        case "file": {
+          const path = target();
+          return `path ${path}\nname ${base(path)}\nextension md\nsize ${(files[path] ?? "").length}`;
+        }
+        case "read":
+          return files[target()] ?? "";
+        case "backlinks": {
+          const path = target();
+          const names = [path.toLowerCase().replace(/\.md$/i, ""), base(path)];
+          const from = notes(files).filter(
+            (f) =>
+              f !== path && linksOf(files?.[f] ?? "").some((l) => names.includes(l.toLowerCase())),
           );
-        }),
-      readText: (root, path) =>
-        Effect.suspend(() => {
-          const file = vaults[root]?.[path];
-          if (!file) return Effect.fail(missing(root));
-          reads.push(`${root}:${path}`);
-          return Effect.succeed(file.text);
+          return from.length
+            ? JSON.stringify(
+                from.sort().map((file) => ({ file })),
+                null,
+                2,
+              )
+            : "No backlinks found.";
+        }
+        case "tags": {
+          const tags = tagsOf(files[target()] ?? "");
+          return tags.length
+            ? JSON.stringify(
+                tags.map((tag) => ({ tag })),
+                null,
+                2,
+              )
+            : "No tags found.";
+        }
+        case "files":
+          return String(notes(files).length);
+        default:
+          throw `Command "${command}" not found.`;
+      }
+    } catch (e) {
+      return `Error: ${String(e)}`;
+    }
+  };
+  const layer = Layer.succeed(
+    ObsidianCli,
+    ObsidianCli.of({
+      run: (args) =>
+        Effect.sync(() => {
+          calls.push([...args]);
+          return { stdout: answer(args), code: 0 };
         }),
     }),
   );
-  return {
-    layer,
-    vaults,
-    reads,
-    write: (root: string, path: string, file: MemoryFile) => {
-      vaults[root] ??= {};
-      vaults[root][path] = file;
-    },
-    remove: (root: string, path: string) => {
-      delete vaults[root]?.[path];
-    },
-    /** Makes the whole folder unreadable (moved or permission lost). */
-    removeRoot: (root: string) => {
-      delete vaults[root];
-    },
-  };
+  return { layer, vaults, calls };
 }
 
-/** Reads a folder on disk, dot folders included, into memory files with mtime `mtime`. */
-export function loadVaultFromDisk(dir: string, mtime = 1_700_000_000_000) {
-  const out: Record<string, MemoryFile> = {};
+/** Reads a folder on disk into memory files, dot folders included. */
+export function loadVaultFromDisk(dir: string): Record<string, string> {
+  const out: Record<string, string> = {};
   const visit = (abs: string, rel: string) => {
     for (const e of readdirSync(abs, { withFileTypes: true })) {
       const path = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) visit(join(abs, e.name), path);
-      else out[path] = { text: readFileSync(join(abs, e.name), "utf8"), mtime };
+      else out[path] = readFileSync(join(abs, e.name), "utf8");
     }
   };
   visit(dir, "");

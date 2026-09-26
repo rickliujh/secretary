@@ -12,7 +12,7 @@ import { ReportsLive } from "@/services/report/live";
 import { RetrievalLive } from "@/services/retrieval/live";
 import type { DataSource } from "@/services/settings/schema";
 import { SourcesLive } from "@/services/sources/live";
-import { type MemoryVaults, makeVaultFsTest } from "@/services/sources/test";
+import { type MemoryVaults, makeObsidianCliTest } from "@/services/sources/test";
 import { testProvider } from "./helpers";
 import { syncedJiraLayer } from "./seed";
 import type { StubRoute } from "./stub-fetch";
@@ -44,7 +44,7 @@ export function intakeTestLayer(
       Layer.provideMerge(
         Layer.merge(
           RetrievalLive,
-          SourcesLive.pipe(Layer.provide(makeVaultFsTest(opts.vaults).layer)),
+          SourcesLive.pipe(Layer.provide(makeObsidianCliTest(opts.vaults).layer)),
         ),
         llm,
       ),

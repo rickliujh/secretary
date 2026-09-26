@@ -51,7 +51,7 @@ import { makeSecretsTest } from "@/services/secrets/test";
 import { ProviderSchema, type TierBindings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
 import { SourcesLive } from "@/services/sources/live";
-import { FIXTURE_VAULT_DIR, loadVaultFromDisk, makeVaultFsTest } from "@/services/sources/test";
+import { FIXTURE_VAULT_DIR, loadVaultFromDisk, makeObsidianCliTest } from "@/services/sources/test";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
 import { getState, parseSprintState, SYNC_KEYS, setState } from "@/services/sync/state";
@@ -77,9 +77,8 @@ const EVAL_VAULT = {
   id: "vault",
   kind: "obsidian" as const,
   name: "Work",
-  path: "/vaults/work",
+  vault: "Work",
   enabled: true,
-  exclude: ["Private"],
 };
 
 function layerFor(tiers: TierBindings, extraRoutes: StubRoute[] = []) {
@@ -123,7 +122,7 @@ function layerFor(tiers: TierBindings, extraRoutes: StubRoute[] = []) {
             RetrievalLive,
             SourcesLive.pipe(
               Layer.provide(
-                makeVaultFsTest({ [EVAL_VAULT.path]: loadVaultFromDisk(FIXTURE_VAULT_DIR) }).layer,
+                makeObsidianCliTest({ Work: loadVaultFromDisk(FIXTURE_VAULT_DIR) }).layer,
               ),
             ),
           ),

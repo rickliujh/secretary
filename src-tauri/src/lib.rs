@@ -1,3 +1,4 @@
+mod obsidian;
 mod secrets;
 
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -84,9 +85,6 @@ pub fn run() {
     });
     builder
         .plugin(tauri_plugin_fs::init())
-        // After fs: restores the folders picked in the dialog (data sources, D41)
-        // so they stay readable across restarts.
-        .plugin(tauri_plugin_persisted_scope::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -105,7 +103,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             secrets::secret_get,
             secrets::secret_set,
-            secrets::secret_delete
+            secrets::secret_delete,
+            obsidian::obsidian_cli
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

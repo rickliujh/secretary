@@ -257,9 +257,8 @@ describe("notes from an Obsidian vault (D41)", () => {
     id: "v1",
     kind: "obsidian" as const,
     name: "Work",
-    path: "/vaults/work",
+    vault: "Work",
     enabled: true,
-    exclude: ["Private"],
   };
 
   test("search_vault indexes and finds the note; read_vault_note returns it with backlinks", async () => {
@@ -270,7 +269,7 @@ describe("notes from an Obsidian vault (D41)", () => {
           {
             toolCall: {
               name: "read_vault_note",
-              input: { sourceId: "v1", path: "Ledger CSV" },
+              input: { sourceId: "v1", path: "Projects/Ledger export.md" },
             },
           },
           { text: "Generated files are kept for 90 days (Ledger export)." },
@@ -278,7 +277,7 @@ describe("notes from an Obsidian vault (D41)", () => {
       },
       [],
       {
-        vaults: { "/vaults/work": loadVaultFromDisk(FIXTURE_VAULT_DIR) },
+        vaults: { Work: loadVaultFromDisk(FIXTURE_VAULT_DIR) },
         dataSources: [vault],
       },
     );
@@ -301,8 +300,6 @@ describe("notes from an Obsidian vault (D41)", () => {
       title: "Ledger export",
       path: "Projects/Ledger export.md",
     });
-    // Excluded folders never reach the model.
-    expect(JSON.stringify(found)).not.toContain("Salary");
     expect(note.title).toBe("Ledger export");
     expect(note.text).toContain("Retention of generated files is 90 days");
     expect(note.tags).toContain("finance/ledger");

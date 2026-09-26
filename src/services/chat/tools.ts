@@ -30,9 +30,6 @@ type Exec = <A, E>(effect: Effect.Effect<A, E, ToolDeps>) => Promise<A | { error
 
 /** How much of one note the chat reads at once. */
 const NOTE_CHARS = 8000;
-/** A search refreshes the index first when it is older than this. */
-const VAULT_FRESH_MS = 2 * 60_000;
-
 const noSources = {
   error: "No notes are connected. The user can add an Obsidian vault in Settings > Data sources.",
 };
@@ -416,7 +413,7 @@ export function chatTools(
 
     search_vault: tool({
       description:
-        "Search the user's own notes (their Obsidian vaults): projects, meeting notes, decisions, how-tos, people and anything they wrote down. Returns the best matching notes with a short excerpt. Use read_vault_note to read one.",
+        "Search the user's own notes (their Obsidian vaults): projects, meeting notes, decisions, how-tos, people and anything they wrote down. Returns the best matching notes with their matching lines. Use read_vault_note to read one.",
       inputSchema: z.object({
         query: z.string().describe("Words to look for; names, project terms, topics"),
       }),
@@ -425,17 +422,14 @@ export function chatTools(
           Effect.gen(function* () {
             const settings = yield* settingsOrDefault(yield* Settings);
             if (!settings.dataSources.some((s) => s.enabled)) return noSources;
-            const sources = yield* Sources;
-            yield* sources.indexIfStale(VAULT_FRESH_MS);
-            const hits = yield* sources.search(text, { limit: 8 });
+            const hits = yield* (yield* Sources).search(text, { limit: 8 });
             return {
               notes: hits.map((h) => ({
                 vault: h.sourceName,
                 sourceId: h.sourceId,
                 path: h.path,
                 title: h.title,
-                tags: h.tags,
-                modified: h.modified.slice(0, 10),
+                matchingLines: h.matches,
                 excerpt: h.snippet,
               })),
             };
@@ -445,10 +439,10 @@ export function chatTools(
 
     read_vault_note: tool({
       description:
-        "Read one of the user's notes from search_vault, by its path (or its title, or a [[link]] target), with its tags, links and the notes linking to it.",
+        "Read one of the user's notes from search_vault, by its path (or its name, or a [[link]] target), with its properties, tags and the notes linking to it.",
       inputSchema: z.object({
         sourceId: z.string().describe("sourceId from search_vault"),
-        path: z.string().describe("path from search_vault, or the note's title"),
+        path: z.string().describe("path from search_vault, or the note's file name (not an alias)"),
       }),
       execute: ({ sourceId, path }) =>
         exec(
@@ -458,13 +452,10 @@ export function chatTools(
               vault: n.sourceName,
               path: n.path,
               title: n.title,
-              aliases: n.aliases,
+              properties: n.properties,
               tags: n.tags,
-              modified: n.modified.slice(0, 10),
-              properties: n.frontmatter,
               text: clip(n.body, NOTE_CHARS),
               truncated: n.body.length > NOTE_CHARS,
-              linksTo: n.links.slice(0, 30),
               linkedFrom: n.backlinks.slice(0, 30),
             };
           }),

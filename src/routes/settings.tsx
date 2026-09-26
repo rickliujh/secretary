@@ -32,7 +32,7 @@ function SettingsPage() {
     <div className="mx-auto max-w-4xl">
       <PageHeader
         title="Settings"
-        description="Model providers, Jira and Confluence connections, note folders and local data. Keys and tokens are kept in the OS keychain."
+        description="Model providers, Jira and Confluence connections, Obsidian vaults and local data. Keys and tokens are kept in the OS keychain."
       />
       <Tabs
         value={tab}
