@@ -10,6 +10,7 @@ import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { MemoryDialog } from "@/components/memory/memory-dialog";
 import { useMemoryMutation } from "@/components/memory/use-memory";
+import { WEIGHT_OPTIONS, type WeightName, weightName } from "@/components/memory/weight";
 import { EmptyState, PageHeader } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,7 +145,6 @@ function MemoryCard({ memory: m, onEdit }: { memory: MemoryView; onEdit: () => v
   const weight = useMemoryMutation((w: number) => setWeight(m.id, w));
   const confirm = useMemoryMutation(() => setConfirmed(m.id, true), "Confirmed");
   const remove = useMemoryMutation(() => deleteMemory(m.id), "Forgotten");
-  const preset = Object.entries(WEIGHTS).find(([, w]) => w === m.weight)?.[0] ?? "normal";
   return (
     <article
       className={cn("flex flex-col gap-2 rounded-lg border p-3", !m.confirmed && "border-dashed")}
@@ -157,16 +157,18 @@ function MemoryCard({ memory: m, onEdit }: { memory: MemoryView; onEdit: () => v
         {!m.confirmed && <Badge variant="outline">not confirmed, not used</Badge>}
         <span className="ml-auto flex items-center gap-1">
           <Select
-            value={preset}
-            onValueChange={(v) => weight.mutate(WEIGHTS[v as keyof typeof WEIGHTS])}
+            value={weightName(m.weight)}
+            onValueChange={(v) => weight.mutate(WEIGHTS[v as WeightName])}
           >
             <SelectTrigger size="sm" className="w-28" aria-label="Importance">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="normal">Normal</SelectItem>
-              <SelectItem value="high">High</SelectItem>
+              {WEIGHT_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Button size="icon" variant="ghost" aria-label="Edit" onClick={onEdit}>

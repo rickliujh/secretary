@@ -31,6 +31,7 @@ import {
 } from "@/services/memory/queries";
 import { ISSUE_KEY_RE } from "@/services/proposals/schema";
 import { useMemoryMutation } from "./use-memory";
+import { WEIGHT_NAMES, WEIGHT_OPTIONS, weightName } from "./weight";
 
 const KIND_HELP: Record<(typeof EDITABLE_KINDS)[number], string> = {
   rule: "How to handle work, e.g. “Anything about the billing migration goes under PAY-1.”",
@@ -46,7 +47,7 @@ const Form = z
     content: z.string().trim().min(1, "Write the rule, fact or preference").max(2000),
     about: z.enum([NONE, "person", "team", "issue"]),
     subjectId: z.string().trim(),
-    weight: z.enum(["low", "normal", "high"]),
+    weight: z.enum(WEIGHT_NAMES),
   })
   .refine((f) => f.about === NONE || f.subjectId !== "", {
     path: ["subjectId"],
@@ -57,9 +58,6 @@ const Form = z
     message: "Use an issue key like PAY-12",
   });
 type FormValues = z.infer<typeof Form>;
-
-const weightName = (w: number): FormValues["weight"] =>
-  w <= WEIGHTS.low ? "low" : w >= WEIGHTS.high ? "high" : "normal";
 
 /** Add or edit a rule, fact or preference (FR-7.1). */
 export function MemoryDialog({
@@ -223,9 +221,11 @@ export function MemoryDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="normal">Normal</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
+                    {WEIGHT_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <FieldDescription>
