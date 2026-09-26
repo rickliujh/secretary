@@ -35,15 +35,14 @@ import {
 } from "@/services/memory/queries";
 
 export const Route = createFileRoute("/memory")({
-  validateSearch: z.object({ tab: z.enum(["memories", "corrections"]).optional() }),
+  validateSearch: z.object({ tab: z.enum(["memories", "corrections"]).catch("memories") }),
   component: MemoryPage,
 });
 
 /** FR-7: what the secretary remembers, where it came from and how often it helps. */
 function MemoryPage() {
-  const { tab = "memories" } = Route.useSearch();
-  const navigate = Route.useNavigate();
-  const navigateTo = useNavigate();
+  const { tab } = Route.useSearch();
+  const navigate = useNavigate({ from: "/memory" });
   const list = useQuery({
     queryKey: queryKeys.memories,
     queryFn: ({ signal }) => run(listMemories, signal),
@@ -53,7 +52,7 @@ function MemoryPage() {
     onSuccess: (r) => {
       if (r.inboxItemId) {
         toast.success(`${r.rules} rule${r.rules === 1 ? "" : "s"} to review`);
-        void navigateTo({ to: "/inbox", search: { item: r.inboxItemId } });
+        void navigate({ to: "/inbox", search: { item: r.inboxItemId } });
       } else toast.info(`No clear pattern in ${r.corrections} corrections yet.`);
     },
   });

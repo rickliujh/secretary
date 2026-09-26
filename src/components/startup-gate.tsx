@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { AlertCircle, Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { describeError } from "@/app/errors";
+import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import { Settings } from "@/services/settings";
 /** Opens the database (running migrations) and loads settings before the UI. */
 export function StartupGate({ children }: { children: ReactNode }) {
   const startup = useQuery({
-    queryKey: ["startup"],
+    queryKey: queryKeys.startup,
     queryFn: () => run(Effect.all([Db, Effect.flatMap(Settings, (s) => s.get)])),
     staleTime: Number.POSITIVE_INFINITY,
   });

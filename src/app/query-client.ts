@@ -46,4 +46,7 @@ export const queryKeys = {
   drafts: ["drafts"] as const,
   draftList: ["drafts", "list"] as const,
   draft: (id: string) => ["drafts", "detail", id] as const,
+  startup: ["startup"] as const,
+  jiraUsername: ["jira", "username"] as const,
+  assignableUsers: (key: string, q: string) => ["jira", "assignable", key, q] as const,
 };

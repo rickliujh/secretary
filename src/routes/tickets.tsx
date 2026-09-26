@@ -60,7 +60,7 @@ function TicketsPage() {
   const [project, setProject] = useState<string>(ANY);
   const [showStale, setShowStale] = useState(false);
   const me = useQuery({
-    queryKey: ["jira", "username"],
+    queryKey: queryKeys.jiraUsername,
     queryFn: ({ signal }) => run(currentJiraUsername, signal),
   }).data;
 
