@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import {
   AlertCircle,
   CheckCheck,
@@ -88,6 +89,31 @@ function UserBubble({
         ),
       )}
     </div>
+  );
+}
+
+/** Threads a feature started take no replies; changes happen where the feature lives. */
+function ReadOnlyNote({ origin }: { origin: "planner" | "rules" }) {
+  return (
+    <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
+      {origin === "planner" ? (
+        <>
+          This thread holds a sprint plan. Approve or reject the moves here; change the plan on the{" "}
+          <Link to="/planning" className="underline">
+            Planning page
+          </Link>
+          .
+        </>
+      ) : (
+        <>
+          Approve or reject the suggested rules here; edit rules on the{" "}
+          <Link to="/memory" search={{ tab: "memories" }} className="underline">
+            Memory page
+          </Link>
+          .
+        </>
+      )}
+    </p>
   );
 }
 
@@ -192,6 +218,8 @@ export function ThreadView({ id }: { id: string }) {
     .at(-1);
   const answering = openQuestion && openQuestion.id !== skipAnswer ? openQuestion : null;
   const last = d.messages.at(-1);
+  const firstUser = d.messages.find((m) => m.role === "user");
+  const origin = firstUser?.role === "user" ? firstUser.origin : null;
   const unanswered = !reply.isPending && last?.role === "user" && d.item.error;
 
   const send = (m: ComposerMessage) =>
@@ -237,15 +265,17 @@ export function ThreadView({ id }: { id: string }) {
             {approveAll.isPending ? <Loader2 className="animate-spin" /> : <CheckCheck />}
             Approve all ({pendingActions})
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={retriage.isPending || reply.isPending}
-            onClick={() => retriage.mutate(id)}
-          >
-            {retriage.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-            Re-triage
-          </Button>
+          {!origin && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={retriage.isPending || reply.isPending}
+              onClick={() => retriage.mutate(id)}
+            >
+              {retriage.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              Re-triage
+            </Button>
+          )}
           {d.item.status !== "dismissed" && (
             <Button size="sm" variant="ghost" onClick={() => dismiss.mutate(id)}>
               <Trash2 /> Dismiss
@@ -290,49 +320,55 @@ export function ThreadView({ id }: { id: string }) {
               <AlertTitle>That message did not go through</AlertTitle>
               <AlertDescription className="flex flex-col items-start gap-2">
                 <span>{d.item.error}</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={retriage.isPending}
-                  onClick={() => retriage.mutate(id)}
-                >
-                  {retriage.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                  Try again
-                </Button>
+                {!origin && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={retriage.isPending}
+                    onClick={() => retriage.mutate(id)}
+                  >
+                    {retriage.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                    Try again
+                  </Button>
+                )}
               </AlertDescription>
             </Alert>
           )}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
-      <Composer
-        busy={reply.isPending}
-        progress={reply.progress}
-        onCancel={reply.cancel}
-        onSend={send}
-        defaultSource={d.item.source as Source}
-        placeholder={`Ask for a change ("priority High", "make it a sub-task of PAY-3"), answer a question, or paste more.`}
-        banner={
-          answering && (
-            <div className="flex items-center gap-2 rounded-md bg-amber-500/10 px-2 py-1 text-xs">
-              <HelpCircle className="size-3.5 text-amber-600" />
-              <span className="min-w-0 flex-1 truncate">
-                Answering:{" "}
-                {answering.payload.kind === "needs_clarification" && answering.payload.question}
-              </span>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-5"
-                aria-label="Do not treat my next message as the answer"
-                onClick={() => setSkipAnswer(answering.id)}
-              >
-                <X />
-              </Button>
-            </div>
-          )
-        }
-      />
+      {origin ? (
+        <ReadOnlyNote origin={origin} />
+      ) : (
+        <Composer
+          busy={reply.isPending}
+          progress={reply.progress}
+          onCancel={reply.cancel}
+          onSend={send}
+          defaultSource={d.item.source as Source}
+          placeholder={`Ask for a change ("priority High", "make it a sub-task of PAY-3"), answer a question, or paste more.`}
+          banner={
+            answering && (
+              <div className="flex items-center gap-2 rounded-md bg-amber-500/10 px-2 py-1 text-xs">
+                <HelpCircle className="size-3.5 text-amber-600" />
+                <span className="min-w-0 flex-1 truncate">
+                  Answering:{" "}
+                  {answering.payload.kind === "needs_clarification" && answering.payload.question}
+                </span>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-5"
+                  aria-label="Do not treat my next message as the answer"
+                  onClick={() => setSkipAnswer(answering.id)}
+                >
+                  <X />
+                </Button>
+              </div>
+            )
+          }
+        />
+      )}
     </div>
   );
 }
