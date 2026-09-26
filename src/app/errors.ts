@@ -46,6 +46,8 @@ export function describeError(error: unknown): Described {
       };
     case "SettingsError":
       return { title: "Settings problem", description, settingsTab: "general" };
+    case "CommsError":
+      return { title: "Draft not available", description };
     case "SecretsError":
       return { title: "Keychain problem", description };
     case "DbError":

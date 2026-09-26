@@ -3,6 +3,7 @@
  * React calls `run` inside TanStack Query functions.
  */
 import { Cause, type Effect, Exit, Layer, ManagedRuntime } from "effect";
+import { CommsLive } from "@/services/comms/live";
 import { ConfluenceClientLive } from "@/services/confluence/live";
 import { DbLive } from "@/services/db/live";
 import { ExecutorLive } from "@/services/executor/live";
@@ -20,7 +21,7 @@ const Base = FetcherLive.pipe(
   Layer.provideMerge(Layer.mergeAll(SettingsLive, SecretsLive, DbLive)),
 );
 
-export const AppLayer = Layer.mergeAll(IntakeLive, ProposalsLive).pipe(
+export const AppLayer = Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive).pipe(
   Layer.provideMerge(Layer.mergeAll(RetrievalLive, ExecutorLive)),
   Layer.provideMerge(SyncLive),
   Layer.provideMerge(Layer.mergeAll(LlmLive, JiraClientLive, ConfluenceClientLive)),

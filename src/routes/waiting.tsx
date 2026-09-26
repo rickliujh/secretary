@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Building2, CircleDashed, Hourglass, Plus, UserRound } from "lucide-react";
+import { Building2, CircleDashed, Hourglass, Plus, Send, UserRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 import { queryKeys } from "@/app/query-client";
@@ -8,6 +8,7 @@ import { run } from "@/app/runtime";
 import { DependencyDialog } from "@/components/dependencies/dependency-dialog";
 import { DependencyRowView } from "@/components/dependencies/dependency-row";
 import { DependencySheet } from "@/components/dependencies/dependency-sheet";
+import { useChaseDraft } from "@/components/drafts/use-drafts";
 import { PageHeader, Planned } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ const OWNER_ICON = { person: UserRound, team: Building2, none: CircleDashed } as
 function WaitingPage() {
   const { id } = Route.useSearch();
   const navigate = useNavigate({ from: "/waiting" });
+  const chase = useChaseDraft();
   const [includeResolved, setIncludeResolved] = useState(false);
   const [dueOnly, setDueOnly] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -109,12 +111,24 @@ function WaitingPage() {
             </header>
             <ul className="divide-y">
               {g.items.map((item) => (
-                <li key={item.id}>
-                  <DependencyRowView
-                    dep={item}
-                    timing={item.timing}
-                    onOpen={() => navigate({ search: { id: item.id } })}
-                  />
+                <li key={item.id} className="flex items-center gap-1 pr-2">
+                  <div className="min-w-0 flex-1">
+                    <DependencyRowView
+                      dep={item}
+                      timing={item.timing}
+                      onOpen={() => navigate({ search: { id: item.id } })}
+                    />
+                  </div>
+                  {item.status !== "resolved" && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={chase.isPending}
+                      onClick={() => chase.mutate(item.id)}
+                    >
+                      <Send /> Draft a chase
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>

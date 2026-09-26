@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
+import { useChaseDraft } from "@/components/drafts/use-drafts";
 import { useLookups } from "@/components/inbox/use-inbox";
 import { Markdown } from "@/components/markdown";
 import {
@@ -44,7 +45,6 @@ import {
   deleteDependency,
   getDependency,
   mirror,
-  requestChaseDraft,
   setStatus,
 } from "@/services/dependencies/queries";
 import { localDate } from "@/services/intake";
@@ -76,10 +76,7 @@ export function DependencySheet({
     (on: boolean) => mirror(dependencyId ?? "", on),
     (_a, on) => (on ? "Mirrored to Jira" : "Removed from Jira"),
   );
-  const chase = useDependencyMutation(
-    () => requestChaseDraft(dependencyId ?? ""),
-    "Chase saved for the Drafts page",
-  );
+  const chase = useChaseDraft();
   const remove = useDependencyMutation(
     () => deleteDependency(dependencyId ?? ""),
     "Dependency deleted",
@@ -123,7 +120,7 @@ export function DependencySheet({
                   size="sm"
                   variant="outline"
                   disabled={chase.isPending}
-                  onClick={() => chase.mutate(undefined)}
+                  onClick={() => dependencyId && chase.mutate(dependencyId)}
                 >
                   <Send /> Draft a chase
                 </Button>
