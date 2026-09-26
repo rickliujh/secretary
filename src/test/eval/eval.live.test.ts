@@ -14,9 +14,13 @@
 import { describe, expect, test } from "bun:test";
 import { asc, eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { intakeItems, proposals } from "@/db/schema";
+import { dependencies, intakeItems, proposals } from "@/db/schema";
+import { Comms } from "@/services/comms";
+import { CommsLive } from "@/services/comms/live";
+import { draftDetail } from "@/services/comms/queries";
 import { query } from "@/services/db";
 import { DbTest } from "@/services/db/test";
+import { createDependency, requestChaseDraft } from "@/services/dependencies/queries";
 import { createPerson, createTeam } from "@/services/directory/queries";
 import { scoreCase, signature } from "@/services/eval/score";
 import { makeFetcherTest } from "@/services/http";
@@ -125,7 +129,10 @@ function layerFor(tiers: TierBindings) {
   );
   const withJira = Layer.provideMerge(SyncLive, Layer.provideMerge(JiraClientLive, base));
   const withLlm = Layer.provideMerge(LlmLive, Layer.provideMerge(ModelFactoryLive, withJira));
-  return Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, withLlm));
+  return Layer.provideMerge(
+    CommsLive,
+    Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, withLlm)),
+  );
 }
 
 const runCases = (cases: EvalCase[]) =>
@@ -262,4 +269,85 @@ describe.skipIf(!configured)("live intake eval", () => {
     },
     900_000,
   );
+});
+
+describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live drafting eval (Phase 6)", () => {
+  test("chases name the incident and first request date; opposite profiles read differently", async () => {
+    const model = env.SECRETARY_EVAL_STANDARD_MODEL ?? "";
+    const bind = { providerId: "eval", model };
+    const drafts = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const platform = yield* createTeam({
+            name: "Platform",
+            function: "Shared infrastructure",
+          });
+          const contacts = {
+            formal: yield* createPerson({
+              displayName: "Priya Shah",
+              title: "Head of SRE",
+              teamId: platform,
+              profile: { formality: "formal", detail: "detailed", responsiveness: "slow" },
+            }),
+            casual: yield* createPerson({
+              displayName: "Sam Lee",
+              title: "SRE",
+              teamId: platform,
+              profile: { formality: "casual", detail: "brief", responsiveness: "fast" },
+            }),
+          };
+          const out: {
+            who: string;
+            ok: boolean;
+            error?: string;
+            short?: string;
+            standard?: string;
+          }[] = [];
+          for (const [who, personId] of Object.entries(contacts)) {
+            const dep = yield* createDependency({
+              issueKey: "PAY-2",
+              kind: "incident",
+              label: "Platform ledger fix",
+              ownerPersonId: personId,
+              externalRef: "INC0012345",
+              expectedAt: "2026-09-24",
+            });
+            // Asked a week and a half before the fixtures' today.
+            yield* query((d) =>
+              d
+                .update(dependencies)
+                .set({ requestedAt: "2026-09-15T09:00:00.000Z" })
+                .where(eq(dependencies.id, dep)),
+            );
+            const id = yield* requestChaseDraft(dep);
+            const r = yield* Effect.either((yield* Comms).generate(id, { today: EVAL_TODAY }));
+            const v = (yield* draftDetail(id))?.draft.variants;
+            out.push(
+              r._tag === "Left"
+                ? {
+                    who,
+                    ok: false,
+                    error: `${r.left.message} ${JSON.stringify((r.left as { issues?: unknown }).issues ?? [])}`,
+                  }
+                : { who, ok: true, short: v?.short, standard: v?.standard },
+            );
+          }
+          return out;
+        }),
+        layerFor({ fast: bind, standard: bind, strong: null }),
+      ),
+    );
+    for (const d of drafts) {
+      console.log(`\n${d.ok ? "PASS" : "FAIL"}  chase to the ${d.who} contact`);
+      console.log(d.ok ? `  short: ${d.short}\n  standard: ${d.standard}` : `  ${d.error}`);
+    }
+    // Content checks (incident number, first request date) run in code before a draft is saved.
+    expect(drafts.every((d) => d.ok)).toBe(true);
+    const formal = drafts.find((d) => d.who === "formal")?.standard ?? "";
+    const casual = drafts.find((d) => d.who === "casual")?.standard ?? "";
+    expect(formal).not.toMatch(/^\s*hey\b/i);
+    expect(casual).not.toMatch(/^\s*dear\b/i);
+    expect(casual.length).toBeLessThan(formal.length);
+  }, 600_000);
 });

@@ -322,3 +322,32 @@ Built
 - The classify prompt lists the sprints of the boards behind the item's projects; the
   model only matches the wording to a listed sprint and uses its end date.
 - Eval cases for "the second sprint of Q4" and "this sprint", with dates checked.
+
+## Phase 6: communication drafting (2026-09-26)
+
+Why: FR-6. Drafts are local records edited directly, not proposals (design.md D24).
+
+Built
+- `communications` keeps the request notes, the generated short and standard variants,
+  the chosen text, the regeneration instructions and the language (migration 0008;
+  earlier requests move their notes to `notes_md`).
+- `prompts/draft.ts`: code assembles the recipient's profile, team, language, tickets
+  (as untrusted input), the dependency with first request date and earlier chases,
+  recent messages to the recipient and memories about them. `validateDraft` requires
+  an incident chase to name the incident and a chase to say when it was first
+  requested, rejects placeholders, and needs a subject for email.
+- `Comms.generate` (standard tier) with repair on failed checks; `comms/queries.ts`
+  for create, edit, copy, mark sent (logs a follow-up on the dependency and schedules
+  the next one) and delete.
+- Drafts page: list, composer (recipient, purpose, channel, dependency, tickets,
+  notes), editor with short and standard tabs, subject for email, rewrite with an
+  instruction, copy to clipboard, mark sent, recent messages to the same recipient.
+- "Draft a chase" on the Waiting page rows and dependency sheet opens the draft and
+  writes it; approved `draft_message` proposals link to their draft.
+- Live drafting eval: an incident chase to a formal and to a casual contact.
+
+Checklist
+- Two contacts with opposite profiles yield clearly different tone: yes with GLM 5.3
+  Flash (the formal draft is fuller and more careful, the casual one a short nudge).
+- Marking sent updates the dependency's last follow-up and next chase date: covered by
+  `comms.test.ts`; not yet checked by the user in the UI.
