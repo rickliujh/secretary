@@ -37,6 +37,9 @@ const toJiraError = (e: unknown) =>
 
 const notConfigured = (message: string) => new JiraError({ kind: "not_configured", message });
 
+const PLATFORM_PREFIX = "/rest/api/2";
+const AGILE_PREFIX = "/rest/agile/1.0";
+
 const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const secrets = yield* Secrets;
@@ -49,7 +52,7 @@ const make = Effect.gen(function* () {
       Effect.mapError((e) => notConfigured(e.message)),
     );
 
-  const client = (overrides?: Credentials, apiPrefix = "/rest/api/2") =>
+  const client = (overrides?: Credentials, apiPrefix = PLATFORM_PREFIX) =>
     Effect.map(credentials(overrides), ({ apiBase, auth }) =>
       makeAtlassianClient({ baseUrl: apiBase, apiPrefix, auth, fetch }),
     );
@@ -174,17 +177,23 @@ const make = Effect.gen(function* () {
         `board/${boardId}/sprint`,
         { searchParams: { startAt, maxResults: 50, state: states.join(",") } },
         undefined,
-        "/rest/agile/1.0",
+        AGILE_PREFIX,
       ),
     remoteLinks: (key) =>
       call(z.array(RemoteLinkSchema), `issue/${encodeURIComponent(key)}/remotelink`),
     send: (req) =>
-      call(z.unknown(), req.path, {
-        method: req.method.toLowerCase() as "post" | "put" | "delete",
-        ...(req.body === undefined ? {} : { json: req.body }),
-        // Writes are not idempotent; never retry them automatically.
-        retry: 0,
-      }),
+      call(
+        z.unknown(),
+        req.path,
+        {
+          method: req.method.toLowerCase() as "post" | "put" | "delete",
+          ...(req.body === undefined ? {} : { json: req.body }),
+          // Writes are not idempotent; never retry them automatically.
+          retry: 0,
+        },
+        undefined,
+        req.api === "agile" ? AGILE_PREFIX : PLATFORM_PREFIX,
+      ),
   });
 });
 

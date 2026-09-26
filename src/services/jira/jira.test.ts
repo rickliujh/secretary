@@ -6,8 +6,8 @@ import { makeSecretsTest } from "@/services/secrets/test";
 import { defaultSettings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
 import myself from "@/test/fixtures/jira/myself.json";
-import { json, type StubRoute, stubFetch } from "@/test/stub-fetch";
-import { JiraClient, type JiraError } from ".";
+import { json, noContent, type StubRoute, stubFetch } from "@/test/stub-fetch";
+import { JiraClient, type JiraError, type JiraWrite } from ".";
 import { JiraClientLive } from "./live";
 
 const BASE = "https://jira.example.com/jira";
@@ -36,7 +36,14 @@ function run(routes: StubRoute[], opts: { baseUrl?: string; pat?: string } = {})
         layer,
       ),
     );
-  return { exit, seen: stub.seen };
+  const send = (req: JiraWrite) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(JiraClient, (c) => c.send(req)),
+        layer,
+      ),
+    );
+  return { exit, send, seen: stub.seen };
 }
 
 const myselfRoute = (respond: () => Response): StubRoute => ({
@@ -102,5 +109,33 @@ describe("JiraClient.testConnection", () => {
     const { exit, seen } = run([myselfRoute(() => json(myself))], { pat: "" });
     expect(errorOf(await exit())?.kind).toBe("not_configured");
     expect(seen).toHaveLength(0);
+  });
+});
+
+describe("JiraClient.send", () => {
+  const anyWrite: StubRoute = { match: () => true, respond: () => noContent() };
+
+  test("platform writes go under /rest/api/2", async () => {
+    const { send, seen } = run([anyWrite]);
+    const r = await send({ method: "PUT", path: "issue/PAY-4", body: { fields: {} } });
+    expect(r._tag).toBe("Success");
+    expect(seen[0]?.url).toBe("https://jira.example.com/jira/rest/api/2/issue/PAY-4");
+  });
+
+  test("agile writes go under /rest/agile/1.0 with the same auth", async () => {
+    const { send, seen } = run([anyWrite]);
+    const r = await send({
+      method: "POST",
+      api: "agile",
+      path: "sprint/42/issue",
+      body: { issues: ["PAY-4"] },
+    });
+    expect(r._tag).toBe("Success");
+    expect(seen[0]).toMatchObject({
+      url: "https://jira.example.com/jira/rest/agile/1.0/sprint/42/issue",
+      method: "POST",
+      body: { issues: ["PAY-4"] },
+    });
+    expect(seen[0]?.headers.authorization).toBe("Bearer stored-pat-123456");
   });
 });
