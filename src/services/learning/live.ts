@@ -16,7 +16,7 @@ import {
   type ConsolidateOutput,
   validateConsolidation,
 } from "@/prompts/consolidate";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { replayAgreement } from "@/services/eval/score";
 import { Llm } from "@/services/llm";
 import { listMemories } from "@/services/memory/queries";
@@ -28,12 +28,11 @@ const MAX_CORRECTIONS = 40;
 const DEFAULT_REPLAY = 30;
 
 const make = Effect.gen(function* () {
-  const db = yield* Db;
   const llm = yield* Llm;
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const { q, withDb } = bindDb(yield* Db);
 
   const consolidate = Effect.gen(function* () {
-    const all = yield* Effect.provideService(listMemories, Db, db);
+    const all = yield* withDb(listMemories);
     const examples = all.filter((m) => m.kind === "example" && m.example).slice(0, MAX_CORRECTIONS);
     if (examples.length < 2)
       return yield* new LearningError({

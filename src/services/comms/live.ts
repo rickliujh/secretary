@@ -18,7 +18,7 @@ import {
   DraftOutputSchema,
   validateDraft,
 } from "@/prompts/draft";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { Llm } from "@/services/llm";
 import type { MESSAGE_INTENTS } from "@/services/proposals/schema";
 import { Settings, settingsOrDefault } from "@/services/settings";
@@ -28,10 +28,9 @@ const RECENT_MESSAGES = 3;
 const MAX_MEMORIES = 10;
 
 const make = Effect.gen(function* () {
-  const db = yield* Db;
   const llm = yield* Llm;
   const settings = yield* Settings;
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const { q } = bindDb(yield* Db);
 
   /** Everything the model may use, gathered from local data (design.md D24). */
   const context = (

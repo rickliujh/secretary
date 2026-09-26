@@ -4,7 +4,7 @@ import { inboxItems, intakeItems, memories, proposals } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redact } from "@/lib/redact";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { Executor } from "@/services/executor";
 import {
   type DecisionResult,
@@ -22,9 +22,8 @@ type Row = typeof proposals.$inferSelect;
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 const make = Effect.gen(function* () {
-  const db = yield* Db;
   const executor = yield* Executor;
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const { q } = bindDb(yield* Db);
 
   const load = (id: string) =>
     Effect.flatMap(

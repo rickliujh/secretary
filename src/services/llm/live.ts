@@ -4,7 +4,7 @@ import { llmCalls } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redact } from "@/lib/redact";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { Fetcher } from "@/services/http";
 import { getHeaders, Secrets, secretNames } from "@/services/secrets";
 import { type AppSettings, type Provider, Settings } from "@/services/settings";
@@ -72,7 +72,7 @@ export const makeLlm = Effect.gen(function* () {
   const settingsSvc = yield* Settings;
   const secrets = yield* Secrets;
   const factory = yield* ModelFactory;
-  const db = yield* Db;
+  const { q } = bindDb(yield* Db);
 
   const record = (
     target: Target,
@@ -85,7 +85,7 @@ export const makeLlm = Effect.gen(function* () {
       errorKind?: string;
     },
   ) =>
-    query((d) =>
+    q((d) =>
       d.insert(llmCalls).values({
         id: newId(),
         task: meta.task,
@@ -103,7 +103,6 @@ export const makeLlm = Effect.gen(function* () {
         at: nowIso(),
       }),
     ).pipe(
-      Effect.provideService(Db, db),
       // Accounting must never break a call.
       Effect.catchAll((e) => Effect.sync(() => logger.warn("llm_calls insert failed", e.message))),
     );

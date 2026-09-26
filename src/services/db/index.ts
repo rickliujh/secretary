@@ -28,3 +28,13 @@ export const query = <A>(f: (db: Database) => Promise<A>): Effect.Effect<A, DbEr
       catch: (cause) => new DbError({ message: describe(cause), cause }),
     }),
   );
+
+/**
+ * Binds a service built in a Layer to its database, so its methods need no `Db`:
+ * `withDb` provides it to any effect, `q` runs one query on it.
+ */
+export const bindDb = (db: DbShape) => {
+  const withDb = <A, E, R>(e: Effect.Effect<A, E, R>) => Effect.provideService(e, Db, db);
+  const q = <A>(f: (d: Database) => Promise<A>) => withDb(query(f));
+  return { withDb, q };
+};

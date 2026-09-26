@@ -16,7 +16,7 @@ import {
   type ItemSnapshot,
 } from "@/prompts/classify";
 import { takeWithinBudget } from "@/prompts/common";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { normalizeUsername } from "@/services/directory/schema";
 import { describeCorrection, describeStoredPayload } from "@/services/proposals/schema";
 import { Settings, settingsOrDefault } from "@/services/settings";
@@ -38,14 +38,13 @@ const PEOPLE_ALL_THRESHOLD = 30;
 const NOTE_EXCERPT = 600;
 
 const make = Effect.gen(function* () {
-  const db = yield* Db;
   const settingsSvc = yield* Settings;
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const { q, withDb } = bindDb(yield* Db);
 
   const snapshot = (req: SnapshotRequest) =>
     Effect.gen(function* () {
       const settings = yield* settingsOrDefault(settingsSvc);
-      const me = yield* Effect.provideService(getState(SYNC_KEYS.username), Db, db);
+      const me = yield* withDb(getState(SYNC_KEYS.username));
       const allPeople = yield* q((d) => d.select().from(people).all());
       const allTeams = yield* q((d) => d.select().from(teams).all());
       const teamName = new Map(allTeams.map((t) => [t.id, t.name]));
@@ -174,9 +173,7 @@ const make = Effect.gen(function* () {
       >();
       // Jira's project metadata (read at sync) is authoritative; the cache only adds
       // projects it does not cover.
-      const projectMeta = parseProjectMeta(
-        yield* Effect.provideService(getState(SYNC_KEYS.projectMeta), Db, db),
-      );
+      const projectMeta = parseProjectMeta(yield* withDb(getState(SYNC_KEYS.projectMeta)));
       for (const [key, type, status] of projectRows) {
         const p = projects.get(key) ?? { key, issueTypes: new Set(), statuses: new Set() };
         p.issueTypes.add(type);
@@ -361,9 +358,7 @@ const make = Effect.gen(function* () {
       );
 
       // --- sprint calendar (D23) -----------------------------------------------
-      const sprintState = parseSprintState(
-        yield* Effect.provideService(getState(SYNC_KEYS.sprints), Db, db),
-      );
+      const sprintState = parseSprintState(yield* withDb(getState(SYNC_KEYS.sprints)));
       const sprints = promptSprints(sprintState, {
         today: req.today,
         fyStartMonth: settings.general.fiscalYearStartMonth,

@@ -26,7 +26,7 @@ import {
   SegmentOutputSchema,
   validateSegments,
 } from "@/prompts/segment";
-import { Db, query } from "@/services/db";
+import { bindDb, Db } from "@/services/db";
 import { Llm } from "@/services/llm";
 import { describePayload, effectivePayload, issueRefs } from "@/services/proposals/schema";
 import { Retrieval } from "@/services/retrieval";
@@ -83,10 +83,9 @@ const mergeRefs = (a: References, b: References): References => ({
 });
 
 const make = Effect.gen(function* () {
-  const db = yield* Db;
   const llm = yield* Llm;
   const retrieval = yield* Retrieval;
-  const q = <A>(f: Parameters<typeof query<A>>[0]) => Effect.provideService(query(f), Db, db);
+  const { q } = bindDb(yield* Db);
 
   const contactsQuery = q((d) =>
     d
