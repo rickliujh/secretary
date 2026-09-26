@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { isSubmitEnter } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 import { SOURCES, type Source } from "@/services/intake";
 import { SenderPicker } from "./sender-picker";
@@ -123,7 +124,7 @@ export function Composer({
           setBlocks((all) => [...all, { id: Date.now() + all.length, text }]);
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+          if (isSubmitEnter(e)) {
             e.preventDefault();
             send();
           }

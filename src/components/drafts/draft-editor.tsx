@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { isSubmitEnter } from "@/lib/keys";
 import { dateTime, relativeTime } from "@/lib/time";
 import { type DraftDetail, draftDetail } from "@/services/comms/queries";
 import { useDraftActions } from "./use-drafts";
@@ -178,6 +179,11 @@ function Body({
   });
   const [subject, setSubject] = useState(d.draft.subject ?? "");
   const [instruction, setInstruction] = useState("");
+  const rewrite = () => {
+    if (actions.generate.isPending) return;
+    actions.generate.mutate(instruction.trim() || null);
+    setInstruction("");
+  };
   const sent = d.draft.status === "sent";
   const email = d.draft.kind === "email";
   const dirty =
@@ -266,20 +272,10 @@ function Body({
                 value={instruction}
                 onChange={(e) => setInstruction(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !actions.generate.isPending) {
-                    actions.generate.mutate(instruction.trim() || null);
-                    setInstruction("");
-                  }
+                  if (isSubmitEnter(e)) rewrite();
                 }}
               />
-              <Button
-                variant="outline"
-                disabled={actions.generate.isPending}
-                onClick={() => {
-                  actions.generate.mutate(instruction.trim() || null);
-                  setInstruction("");
-                }}
-              >
+              <Button variant="outline" disabled={actions.generate.isPending} onClick={rewrite}>
                 {actions.generate.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                 Rewrite
               </Button>
