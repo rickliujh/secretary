@@ -15,7 +15,9 @@ machine as a desktop app and keeps everything local.
 - **Dashboard**: a ranked focus list, what is due, what others wait on you for, and a
   daily brief.
 - **Drafts**: Teams messages and emails written in each recipient's style, grounded in
-  the tickets and the dependency history. You copy and send them yourself.
+  the tickets and the dependency history. "Open in Teams" or "Open in email" fills in
+  a Teams chat or a new message in your default mail app (no Microsoft sign-in); you
+  press Send yourself.
 - **People and teams**: who does what, how they like to be contacted, notes and
   imported Confluence pages.
 - **Memory**: rules and preferences it follows, and the corrections it learns from.

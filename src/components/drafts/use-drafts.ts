@@ -1,9 +1,11 @@
 import { useNavigate } from "@tanstack/react-router";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Effect } from "effect";
 import { type AppMutationOptions, useAppMutation } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import type { AppServices } from "@/app/runtime";
+import { type HandoffChannel, handoffLink } from "@/lib/handoff";
 import { Comms, type DraftEdit, type DraftRequest } from "@/services/comms";
 import {
   createDraft,
@@ -28,6 +30,15 @@ function useDraftMutation<I, A, E>(
   });
 }
 
+type Handoff = { channel: HandoffChannel; to: string[]; subject: string | null; body: string };
+
+const handoffMessage = (bodyIncluded: boolean, h: Handoff) =>
+  bodyIncluded
+    ? `Opened in ${h.channel === "teams" ? "Teams" : "your mail app"}. Press Send there, then mark it sent here.`
+    : `The message is too long for a link; it is on your clipboard. Paste it into ${
+        h.channel === "teams" ? "Teams" : "the new email"
+      }, press Send, then mark it sent here.`;
+
 export function useDraftActions(id: string) {
   // The editor shows a failed write inline with its issues, so no toast as well.
   const generate = useDraftMutation(
@@ -40,9 +51,23 @@ export function useDraftActions(id: string) {
       Effect.tryPromise(() => writeText(text)).pipe(Effect.zipRight(markCopied(id))),
     { success: "Copied. Paste it into Teams or your mail client." },
   );
+  // D31: open the user's own Teams or mail app with the text; they press Send there.
+  const handoff = useDraftMutation(
+    (h: Handoff) => {
+      const link = handoffLink(h.channel, h);
+      return Effect.gen(function* () {
+        // Too long for a link: the text goes on the clipboard and the window opens empty.
+        if (!link.bodyIncluded) yield* Effect.tryPromise(() => writeText(h.body));
+        yield* Effect.tryPromise(() => openUrl(link.url));
+        yield* markCopied(id);
+        return link.bodyIncluded;
+      });
+    },
+    { success: handoffMessage },
+  );
   const sent = useDraftMutation(() => markSent(id), { success: "Marked as sent" });
   const remove = useDraftMutation(() => deleteDraft(id), { success: "Draft deleted" });
-  return { generate, save, copy, sent, remove };
+  return { generate, save, copy, handoff, sent, remove };
 }
 
 /** Creates a draft from the composer and opens it, writing it straight away. */
