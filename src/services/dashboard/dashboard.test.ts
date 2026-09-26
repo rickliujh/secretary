@@ -54,7 +54,10 @@ describe("dashboard data", () => {
         layer,
       ),
     );
-    expect(d.topFocus.map((t) => t.key).sort()).toEqual(["PAY-2", "PAY-4"]);
+    // PAY-2 is in the active sprint "Payments 15"; PAY-4 is not, so it leaves Top
+    // focus (D29) but still shows as due soon.
+    expect(d.focus).toEqual({ mode: "sprint", sprints: ["Payments 15"], endsOn: "2026-09-28" });
+    expect(d.topFocus.map((t) => t.key)).toEqual(["PAY-2"]);
     expect(d.dueSoon.map((x) => [x.key, x.daysLeft])).toEqual([["PAY-4", 2]]);
     expect(d.iAmWaitingOn.map((x) => [x.externalRef, x.overdueDays])).toEqual([["INC0012345", 3]]);
     const pay2 = d.topFocus.find((t) => t.key === "PAY-2");
@@ -81,8 +84,9 @@ describe("dashboard data", () => {
       Effect.provide(
         Effect.gen(function* () {
           yield* seedWork;
+          // Without sprints, so the whole scope is ranked and the local controls show.
           const rank = Effect.map(loadDashboardInputs(NOW), (i) =>
-            buildDashboard(i, DEFAULT_WEIGHTS, TODAY, NOW.toISOString()),
+            buildDashboard({ ...i, sprints: [] }, DEFAULT_WEIGHTS, TODAY, NOW.toISOString()),
           );
           const before = (yield* rank).topFocus.map((t) => t.key);
           yield* setOverride("PAY-4", 20);

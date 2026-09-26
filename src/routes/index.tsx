@@ -89,7 +89,11 @@ function Dashboard() {
         <div className="lg:col-span-2">
           <Section
             title="Top focus"
-            description={`Ranked from ${d.inScope} open tickets you own, pinned, under tracked epics or with dependencies${d.snoozed ? `; ${d.snoozed} snoozed` : ""}.`}
+            description={
+              d.focus.mode === "sprint"
+                ? `Your work in ${d.focus.sprints.join(" and ")}${d.focus.endsOn ? `, ending ${d.focus.endsOn}` : ""}, plus anything pinned${d.snoozed ? `; ${d.snoozed} snoozed` : ""}.`
+                : `No active sprint, so ranked from ${d.inScope} open tickets you own, pinned, under tracked epics or with dependencies${d.snoozed ? `; ${d.snoozed} snoozed` : ""}.`
+            }
           >
             <FocusList items={d.topFocus} />
           </Section>

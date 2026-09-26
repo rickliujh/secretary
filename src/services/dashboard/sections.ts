@@ -21,6 +21,8 @@ export type DashIssue = {
   assignee: string | null;
   assigneeDisplay: string | null;
   epicKey: string | null;
+  /** The issue's current sprint name (active first), from the Sprint field. */
+  sprint: string | null;
   dueDate: string | null;
   updated: string;
   links: IssueLink[];
@@ -52,6 +54,8 @@ export type RecentComment = {
 export type DashboardInputs = {
   me: string | null;
   trackedEpics: string[];
+  /** Known sprints with their state and dates (D23), to find the active sprint. */
+  sprints: { name: string; state: string; end: string | null }[];
   issues: DashIssue[];
   dependencies: DashDependency[];
   /** Comments from the last two weeks, newest first. */
@@ -83,6 +87,11 @@ export type Dashboard = {
   }[];
   snoozed: number;
   inScope: number;
+  /**
+   * What Top focus covers (D29): the user's work in the active sprint(s), or the
+   * whole scope when none of it is in an active sprint.
+   */
+  focus: { mode: "sprint"; sprints: string[]; endsOn: string | null } | { mode: "scope" };
 };
 
 export const TOP_FOCUS_LIMIT = 10;
@@ -134,10 +143,34 @@ export function buildDashboard(
     i.pinned ||
     (!!i.epicKey && tracked.has(i.epicKey)) ||
     depsByIssue.has(i.key);
-  const scoped = active.filter((i) => inScope(i) && i.issueType !== "Epic");
+  // Epics are containers; Epic health covers them. Team-managed and localised
+  // projects name the type differently, so anything that has children counts too.
+  const epicKeys = new Set(input.issues.map((i) => i.epicKey).filter((k): k is string => !!k));
+  const isEpic = (i: DashIssue) => /epic/i.test(i.issueType) || epicKeys.has(i.key);
+  const scoped = active.filter((i) => inScope(i) && !isEpic(i));
   const blocks = new Map(scoped.map((i) => [i.key, blockInfo(i.links)]));
 
-  const focusCandidates = scoped.filter((i) => !snoozedNow(i));
+  // D29: when the user's work is in an active sprint, focus is that sprint's work
+  // (plus anything pinned); the backlog does not compete with it.
+  const activeSprints = new Map(
+    input.sprints.filter((s) => s.state === "active").map((s) => [s.name, s]),
+  );
+  const unsnoozed = scoped.filter((i) => !snoozedNow(i));
+  const inSprint = unsnoozed.filter((i) => !!i.sprint && activeSprints.has(i.sprint));
+  const sprintNames = [...new Set(inSprint.map((i) => i.sprint as string))];
+  const focus: Dashboard["focus"] = inSprint.length
+    ? {
+        mode: "sprint",
+        sprints: sprintNames,
+        endsOn:
+          sprintNames
+            .map((n) => activeSprints.get(n)?.end ?? null)
+            .filter((e): e is string => !!e)
+            .sort()[0] ?? null,
+      }
+    : { mode: "scope" };
+  const focusCandidates =
+    focus.mode === "sprint" ? unsnoozed.filter((i) => inSprint.includes(i) || i.pinned) : unsnoozed;
   const scores = rank(
     focusCandidates.map(
       (i): ScoreInput => ({
@@ -247,5 +280,6 @@ export function buildDashboard(
     epicHealth,
     snoozed: scoped.filter(snoozedNow).length,
     inScope: scoped.length,
+    focus,
   };
 }

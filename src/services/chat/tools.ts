@@ -216,11 +216,15 @@ export function chatTools(exec: Exec) {
 
     my_focus: tool({
       description:
-        "The user's ranked focus list with reasons, what is due soon, what others wait on them for, and what is at risk.",
+        "What the user should focus on: their work in the active sprint (plus pinned tickets), ranked with reasons; also what is due soon, what others wait on them for, and what is at risk.",
       inputSchema: z.object({}),
       execute: () =>
         exec(
           Effect.map(dashboardWithBrief(), ({ dashboard: d }) => ({
+            focusCovers:
+              d.focus.mode === "sprint"
+                ? `the active sprint ${d.focus.sprints.join(", ")}${d.focus.endsOn ? `, ending ${d.focus.endsOn}` : ""}, plus pinned tickets`
+                : "all open work in scope (no active sprint)",
             topFocus: d.topFocus.slice(0, 10).map((f) => ({
               key: f.key,
               summary: f.summary,

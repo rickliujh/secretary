@@ -16,6 +16,7 @@ const issue = (key: string, p: Partial<DashIssue> = {}): DashIssue => ({
   assignee: "me",
   assigneeDisplay: "Me",
   epicKey: null,
+  sprint: null,
   dueDate: null,
   updated: "2026-09-24T00:00:00.000Z",
   links: [],
@@ -36,6 +37,7 @@ const blockedByOps7 = [
 const inputs = (p: Partial<DashboardInputs> = {}): DashboardInputs => ({
   me: "me",
   trackedEpics: ["EP-1"],
+  sprints: [],
   issues: [],
   dependencies: [],
   comments: [],
@@ -253,5 +255,53 @@ describe("buildDashboard", () => {
     const d = buildDashboard(inputs({ issues, comments }), DEFAULT_WEIGHTS, TODAY, NOW);
     expect(performance.now() - started).toBeLessThan(150);
     expect(d.topFocus).toHaveLength(10);
+  });
+});
+
+describe("sprint focus (D29)", () => {
+  const sprints = [
+    { name: "Payments 15", state: "active", end: "2026-09-28" },
+    { name: "Payments 16", state: "future", end: "2026-10-12" },
+  ];
+
+  test("focus is the active sprint's work plus pins; the backlog and epics stay out", () => {
+    const d = buildDashboard(
+      inputs({
+        sprints,
+        issues: [
+          issue("PAY-10", { sprint: "Payments 15", priority: "Low" }),
+          issue("PAY-11", { sprint: null, priority: "Highest", dueDate: "2026-09-26" }),
+          issue("PAY-12", { sprint: "Payments 16", priority: "High" }),
+          issue("PAY-13", { sprint: null, pinned: true }),
+          issue("PAY-1", { issueType: "Epic", sprint: "Payments 15", priority: "Highest" }),
+          // A differently named epic type still counts: it has children.
+          issue("PAY-2", { issueType: "Initiative", priority: "Highest", sprint: "Payments 15" }),
+          issue("PAY-20", { epicKey: "PAY-2", sprint: "Payments 15" }),
+        ],
+      }),
+      DEFAULT_WEIGHTS,
+      TODAY,
+      NOW,
+    );
+    expect(d.topFocus.map((f) => f.key).sort()).toEqual(["PAY-10", "PAY-13", "PAY-20"]);
+    expect(d.focus).toEqual({ mode: "sprint", sprints: ["Payments 15"], endsOn: "2026-09-28" });
+  });
+
+  test("with nothing in an active sprint, focus falls back to the whole scope", () => {
+    const d = buildDashboard(
+      inputs({
+        sprints,
+        issues: [
+          issue("PAY-11", { priority: "Highest" }),
+          issue("PAY-12", { sprint: "Payments 16" }),
+          issue("PAY-1", { issueType: "Epic", priority: "Highest" }),
+        ],
+      }),
+      DEFAULT_WEIGHTS,
+      TODAY,
+      NOW,
+    );
+    expect(d.topFocus.map((f) => f.key)).toEqual(["PAY-11", "PAY-12"]);
+    expect(d.focus).toEqual({ mode: "scope" });
   });
 });

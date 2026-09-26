@@ -8,7 +8,7 @@ import { query } from "@/services/db";
 import { listDependencies } from "@/services/dependencies/queries";
 import { type IssueLink, IssueLinkSchema } from "@/services/jira/schemas";
 import { Settings, settingsOrDefault } from "@/services/settings";
-import { getState, SYNC_KEYS } from "@/services/sync/state";
+import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import type { DashboardInputs, DashIssue } from "./sections";
 
 const COMMENT_WINDOW_DAYS = 14;
@@ -37,6 +37,7 @@ export const loadDashboardInputs = (now = new Date()) =>
           assignee: jiraIssues.assignee,
           assigneeDisplay: jiraIssues.assigneeDisplay,
           epicKey: jiraIssues.epicKey,
+          sprint: jiraIssues.sprint,
           dueDate: jiraIssues.dueDate,
           updated: jiraIssues.updated,
           links: sql<string | null>`json_extract(${jiraIssues.raw}, '$.issuelinks')`,
@@ -80,9 +81,11 @@ export const loadDashboardInputs = (now = new Date()) =>
     );
 
     const deps = yield* listDependencies();
+    const sprintState = parseSprintState(yield* getState(SYNC_KEYS.sprints));
     return {
       me,
       trackedEpics: settings.jira.trackedEpics,
+      sprints: sprintState.sprints.map((s) => ({ name: s.name, state: s.state, end: s.end })),
       issues,
       dependencies: deps.map((x) => ({
         id: x.id,
