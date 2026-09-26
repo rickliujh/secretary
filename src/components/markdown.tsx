@@ -1,9 +1,9 @@
-import { Link } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useMemo } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTicketRows } from "@/app/queries";
+import { TicketLink } from "@/components/tickets/ticket-link";
 import { remarkIssueLinks, TICKET_URL_PREFIX, ticketOfUrl } from "@/lib/issue-links";
 import { cn } from "@/lib/utils";
 
@@ -36,9 +36,9 @@ export function Markdown({
             const key = ticketOfUrl(href);
             if (key)
               return (
-                <Link to="/tickets" search={{ key }} className="font-mono">
+                <TicketLink ticketKey={key} className="font-mono">
                   {text}
-                </Link>
+                </TicketLink>
               );
             return (
               <a

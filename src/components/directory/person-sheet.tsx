@@ -6,6 +6,7 @@ import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { Markdown } from "@/components/markdown";
 import { StatusBadge } from "@/components/tickets/status-badge";
+import { TicketLink } from "@/components/tickets/ticket-link";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -178,13 +179,9 @@ export function PersonSheet({
                   <ul className="flex flex-col gap-1">
                     {d.issues.map((i) => (
                       <li key={i.key} className="flex items-center gap-2">
-                        <Link
-                          to="/tickets"
-                          search={{ key: i.key }}
-                          className="font-mono text-xs underline"
-                        >
+                        <TicketLink ticketKey={i.key} className="font-mono text-xs underline">
                           {i.key}
-                        </Link>
+                        </TicketLink>
                         <span className="min-w-0 flex-1 truncate">{i.summary}</span>
                         <StatusBadge status={i.status} category={i.statusCategory} />
                       </li>

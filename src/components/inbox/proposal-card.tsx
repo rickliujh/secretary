@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import type { Lookups } from "@/app/queries";
 import { CHANNEL_LABELS, INTENT_LABELS } from "@/components/labels";
 import { Markdown } from "@/components/markdown";
+import { TicketLink } from "@/components/tickets/ticket-link";
 import { TONE } from "@/components/tone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,9 +28,9 @@ function IssueRef({ value, lookups }: { value: string; lookups: Lookups }) {
   const issue = lookups.issue.get(value);
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
-      <Link to="/tickets" search={{ key: value }} className="font-mono text-xs underline">
+      <TicketLink ticketKey={value} className="font-mono text-xs underline">
         {value}
-      </Link>
+      </TicketLink>
       {issue && <span className="truncate text-muted-foreground">{issue.summary}</span>}
     </span>
   );
@@ -249,9 +250,9 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
           {result.issueKey && (
             <>
               {" "}
-              <Link to="/tickets" search={{ key: result.issueKey }} className="underline">
+              <TicketLink ticketKey={result.issueKey} className="underline">
                 open
-              </Link>
+              </TicketLink>
             </>
           )}
           {result.communicationId && (

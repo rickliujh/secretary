@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { TicketLink } from "@/components/tickets/ticket-link";
 import { TONE } from "@/components/tone";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -32,9 +32,9 @@ function CandidateRow({ c, review }: { c: Candidate; review: ReviewState | null 
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-center gap-2 text-sm">
-          <Link to="/tickets" search={{ key: c.key }} className="font-mono text-xs underline">
+          <TicketLink ticketKey={c.key} className="font-mono text-xs underline">
             {c.key}
-          </Link>
+          </TicketLink>
           <span className="min-w-0 flex-1 truncate" title={c.summary}>
             {c.summary}
           </span>

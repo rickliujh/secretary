@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { TicketLink } from "@/components/tickets/ticket-link";
 import type { Dashboard } from "@/services/dashboard/sections";
 
 /** Per tracked epic: done / in progress / to do, plus blocked and stale counts (FR-5.1). */
@@ -21,9 +22,9 @@ export function EpicHealth({ epics }: { epics: Dashboard["epicHealth"] }) {
         return (
           <li key={e.key} className="flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm">
-              <Link to="/tickets" search={{ key: e.key }} className="font-mono text-xs underline">
+              <TicketLink ticketKey={e.key} className="font-mono text-xs underline">
                 {e.key}
-              </Link>
+              </TicketLink>
               <span className="min-w-0 flex-1 truncate">
                 {e.epic?.summary ?? "Not in the local cache"}
               </span>

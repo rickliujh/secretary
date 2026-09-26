@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   CheckCircle2,
@@ -16,6 +15,7 @@ import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { useChaseDraft } from "@/components/drafts/use-drafts";
 import { Markdown } from "@/components/markdown";
+import { TicketLink } from "@/components/tickets/ticket-link";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -97,9 +97,9 @@ export function DependencySheet({
         <SheetHeader className="border-b">
           <SheetDescription className="flex items-center gap-2">
             {d && (
-              <Link to="/tickets" search={{ key: d.issueKey }} className="font-mono underline">
+              <TicketLink ticketKey={d.issueKey} className="font-mono underline">
                 {d.issueKey}
-              </Link>
+              </TicketLink>
             )}
             {d && <Badge variant="outline">{d.kind}</Badge>}
             {d && <Badge variant={resolved ? "secondary" : "default"}>{d.status}</Badge>}

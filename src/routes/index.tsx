@@ -9,6 +9,7 @@ import { PlanCard } from "@/components/dashboard/plan-card";
 import { useDashboard } from "@/components/dashboard/use-dashboard";
 import { QuickThread } from "@/components/inbox/quick-thread";
 import { StatusBadge } from "@/components/tickets/status-badge";
+import { TicketLink } from "@/components/tickets/ticket-link";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -65,9 +66,9 @@ function IssueLine({
 }) {
   return (
     <li className="flex items-center gap-2 py-1 text-sm">
-      <Link to="/tickets" search={{ key: issueKey }} className="font-mono text-xs underline">
+      <TicketLink ticketKey={issueKey} className="font-mono text-xs underline">
         {issueKey}
-      </Link>
+      </TicketLink>
       <span className="min-w-0 flex-1 truncate">{summary}</span>
       {right}
     </li>

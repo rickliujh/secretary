@@ -6,6 +6,7 @@ import { describeError, errorIssues } from "@/app/errors";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { CHANNEL_LABELS, intentLabel } from "@/components/labels";
+import { TicketLink } from "@/components/tickets/ticket-link";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,9 +64,9 @@ export function DraftEditor({
         </h2>
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {d.draft.issueKeys.map((k) => (
-            <Link key={k} to="/tickets" search={{ key: k }} className="font-mono text-xs underline">
+            <TicketLink key={k} ticketKey={k} className="font-mono text-xs underline">
               {k}
-            </Link>
+            </TicketLink>
           ))}
           {d.dependency && (
             <Link

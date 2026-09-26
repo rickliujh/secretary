@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { ListTree } from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
-import { z } from "zod";
 import { isSyncBusy } from "@/app/errors";
 import { useErrorToast, useSettings } from "@/app/hooks";
 import { useTicketRows } from "@/app/queries";
@@ -11,7 +10,7 @@ import { run } from "@/app/runtime";
 import { runSync, useSyncStatus } from "@/app/sync";
 import { EmptyState, PageHeader } from "@/components/page";
 import { SearchInput } from "@/components/search-input";
-import { TicketSheet } from "@/components/tickets/ticket-sheet";
+import { useTicketPanel } from "@/components/tickets/ticket-link";
 import { TicketTable } from "@/components/tickets/ticket-table";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -32,10 +31,7 @@ import {
   type TicketRow,
 } from "@/services/tickets/tree";
 
-export const Route = createFileRoute("/tickets")({
-  validateSearch: z.object({ key: z.string().optional() }),
-  component: TicketsPage,
-});
+export const Route = createFileRoute("/tickets")({ component: TicketsPage });
 
 const ANY = "__any__";
 const ME = "__me__";
@@ -43,8 +39,8 @@ const EMPTY: TicketRow[] = [];
 type Category = TicketRow["statusCategory"];
 
 function TicketsPage() {
-  const { key } = Route.useSearch();
-  const navigate = useNavigate({ from: "/tickets" });
+  const { ticket: key } = Route.useSearch();
+  const openTicket = useTicketPanel();
   const { data: settings } = useSettings();
   const sync = useSyncStatus();
   const onError = useErrorToast();
@@ -183,10 +179,9 @@ function TicketsPage() {
           nodes={tree}
           expandAll={isFiltering(filters) && (q.length > 0 || assignee !== ANY || project !== ANY)}
           selectedKey={key}
-          onSelect={(k) => navigate({ search: { key: k } })}
+          onSelect={(k) => openTicket(k)}
         />
       )}
-      <TicketSheet issueKey={key} onClose={() => navigate({ search: {} })} />
     </div>
   );
 }

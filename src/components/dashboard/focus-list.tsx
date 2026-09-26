@@ -1,6 +1,6 @@
-import { Link } from "@tanstack/react-router";
 import { MoreHorizontal, Pin } from "lucide-react";
 import { StatusBadge } from "@/components/tickets/status-badge";
+import { TicketLink } from "@/components/tickets/ticket-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -147,9 +147,9 @@ export function FocusList({ items }: { items: FocusItem[] }) {
         <li key={item.key} className="flex items-center gap-2 border-b py-1.5 last:border-b-0">
           <span className="w-4 text-right text-xs text-muted-foreground tabular-nums">{i + 1}</span>
           {item.pinned && <Pin className="size-3.5 text-muted-foreground" aria-label="Pinned" />}
-          <Link to="/tickets" search={{ key: item.key }} className="font-mono text-xs underline">
+          <TicketLink ticketKey={item.key} className="font-mono text-xs underline">
             {item.key}
-          </Link>
+          </TicketLink>
           <span className="min-w-0 flex-1 truncate text-sm">{item.summary}</span>
           <span className="hidden text-xs text-muted-foreground lg:inline">
             {item.contributions[0]?.reason}

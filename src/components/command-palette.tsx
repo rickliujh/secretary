@@ -7,6 +7,7 @@ import { usePeople, useTeams, useTicketRows } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { SETTINGS_TABS } from "@/app/settings-tabs";
+import { useTicketPanel } from "@/components/tickets/ticket-link";
 import {
   Command,
   CommandDialog,
@@ -30,6 +31,7 @@ export function CommandPalette({
   onOpenChange: (open: boolean) => void;
 }) {
   const navigate = useNavigate();
+  const openTicket = useTicketPanel();
   const [input, setInput] = useState("");
   const q = useDeferredValue(input.trim());
   const rows = useTicketRows({ enabled: open });
@@ -83,7 +85,7 @@ export function CommandPalette({
                   key={t.key}
                   // Include the query so cmdk's own filter keeps full-text matches.
                   value={`${t.key} ${t.summary} ${q}`}
-                  onSelect={() => go(() => navigate({ to: "/tickets", search: { key: t.key } }))}
+                  onSelect={() => go(() => openTicket(t.key))}
                 >
                   <Ticket />
                   <span className="font-mono text-xs">{t.key}</span>

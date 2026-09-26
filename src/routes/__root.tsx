@@ -1,6 +1,7 @@
 import { createRootRoute, Outlet, useRouterState } from "@tanstack/react-router";
 import { Search } from "lucide-react";
 import { useState } from "react";
+import { z } from "zod";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
 import { useFollowupReminders } from "@/app/reminders";
 import { useSyncScheduler } from "@/app/sync";
@@ -9,12 +10,18 @@ import { CommandPalette } from "@/components/command-palette";
 import { StartupGate } from "@/components/startup-gate";
 import { SyncIndicator } from "@/components/sync-indicator";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useTicketPanel } from "@/components/tickets/ticket-link";
+import { TicketSheet } from "@/components/tickets/ticket-sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { UsageIndicator } from "@/components/usage-indicator";
 
-export const Route = createRootRoute({ component: RootLayout });
+export const Route = createRootRoute({
+  // `ticket` opens the ticket panel over whatever page is showing.
+  validateSearch: z.object({ ticket: z.string().optional() }),
+  component: RootLayout,
+});
 
 const ALL_NAV = [...WORK_NAV, ...CONTEXT_NAV, SETTINGS_NAV];
 
@@ -28,6 +35,8 @@ function Background() {
 function RootLayout() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { ticket } = Route.useSearch();
+  const openTicket = useTicketPanel();
   const title = ALL_NAV.find((n) => n.to === pathname)?.label ?? "Secretary";
   return (
     <StartupGate>
@@ -62,6 +71,7 @@ function RootLayout() {
           </div>
         </SidebarInset>
         <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+        <TicketSheet issueKey={ticket} onClose={() => openTicket(null)} />
       </SidebarProvider>
     </StartupGate>
   );
