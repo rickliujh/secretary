@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
 import { NEW_REF_RE, PROPOSAL_LABELS, type ProposalPayload } from "@/services/proposals/schema";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
+import { isEditable } from "./proposal-fields";
 import { useDecisions } from "./use-inbox";
 
 const STATUS_TONE: Record<string, string> = {
@@ -95,6 +96,14 @@ function PayloadView({ p, lookups }: { p: ProposalPayload; lookups: Lookups }) {
           <IssueRef value={p.target} lookups={lookups} />
           <span className="text-muted-foreground">→</span>
           <Badge variant="secondary">{p.toStatus}</Badge>
+        </p>
+      );
+    case "move_to_sprint":
+      return (
+        <p className="flex items-center gap-2 text-sm">
+          <IssueRef value={p.target} lookups={lookups} />
+          <span className="text-muted-foreground">→ sprint</span>
+          <Badge variant="secondary">{p.sprintName}</Badge>
         </p>
       );
     case "link_dependency":
@@ -197,6 +206,7 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
   const pending = proposal.status === "pending";
   const busy = approve.isPending || reject.isPending;
   const canApprove = pending || proposal.status === "failed";
+  const canEdit = canApprove && isEditable(payload);
 
   return (
     <article
@@ -211,7 +221,7 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
         if (e.target !== e.currentTarget || busy) return;
         if (e.key === "a" && canApprove) approve.mutate({ id: proposal.id });
         if (e.key === "r" && pending) reject.mutate(proposal.id);
-        if (e.key === "e" && canApprove) setEditing(true);
+        if (e.key === "e" && canEdit) setEditing(true);
       }}
     >
       <header className="flex items-center gap-2">
@@ -273,9 +283,11 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
             )}
             {proposal.status === "failed" ? "Retry" : "Approve"}
           </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing(true)}>
-            <Pencil /> Edit
-          </Button>
+          {canEdit && (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing(true)}>
+              <Pencil /> Edit
+            </Button>
+          )}
           {pending && (
             <Button
               size="sm"

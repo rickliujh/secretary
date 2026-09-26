@@ -38,6 +38,7 @@ const FieldIdsSchema = z.object({
   epicLink: z.string().optional(),
   epicName: z.string().optional(),
   sprint: z.string().optional(),
+  storyPoints: z.string().optional(),
 }) satisfies z.ZodType<FieldIds>;
 
 export const parseFieldIds = (value: string | undefined): FieldIds =>

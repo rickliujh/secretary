@@ -121,6 +121,7 @@
         "resolutiondate": null,
         "customfield_10100": "PAY-1",
         "customfield_10102": null,
+        "customfield_10106": 5,
         "customfield_10104": [
           "com.atlassian.greenhopper.service.sprint.Sprint@6b1c2e7[id=41,rapidViewId=7,state=CLOSED,name=Payments 14,startDate=2026-08-31T09:00:00.000+01:00,endDate=2026-09-14T17:00:00.000+01:00,completeDate=2026-09-14T17:05:00.000+01:00,sequence=41,goal=]",
           "com.atlassian.greenhopper.service.sprint.Sprint@3f2a9d1[id=42,rapidViewId=7,state=ACTIVE,name=Payments 15,startDate=2026-09-14T09:00:00.000+01:00,endDate=2026-09-28T17:00:00.000+01:00,completeDate=<null>,sequence=42,goal=Ship exports]"
@@ -240,6 +241,7 @@
         "resolutiondate": "2026-09-22T08:05:00.000+0100",
         "customfield_10100": null,
         "customfield_10102": null,
+        "customfield_10106": null,
         "customfield_10104": null,
         "issuelinks": [],
         "attachment": [],

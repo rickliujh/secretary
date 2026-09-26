@@ -46,7 +46,12 @@ export type SearchResult = { issues: RawIssue[]; next: string | null; total: num
 /** A write request built by `executor/jira-mapping.ts`. */
 export type JiraWrite = {
   method: "POST" | "PUT" | "DELETE";
-  /** Path under `/rest/api/2/`, without a leading slash. */
+  /**
+   * Which REST API the path is under: the platform API `/rest/api/2/` (default)
+   * or Jira Software's `/rest/agile/1.0/`, same on Cloud and Data Center.
+   */
+  api?: "platform" | "agile";
+  /** Path under the API root, without a leading slash. */
   path: string;
   body?: unknown;
 };

@@ -21,6 +21,7 @@ if (!pay2) throw new Error("fixture");
 
 function setup(extra: StubRoute[] = []) {
   let summary = pay2?.fields.summary ?? "";
+  let sprintField: unknown = pay2?.fields.customfield_10104;
   const stub = stubFetch([
     ...extra,
     { match: (u) => u.pathname.endsWith("/myself"), respond: () => json(myself) },
@@ -54,8 +55,21 @@ function setup(extra: StubRoute[] = []) {
       respond: () =>
         json({
           ...pay2,
-          fields: { ...pay2?.fields, summary, updated: "2026-09-23T10:00:00.000+0100" },
+          fields: {
+            ...pay2?.fields,
+            summary,
+            customfield_10104: sprintField,
+            updated: "2026-09-23T10:00:00.000+0100",
+          },
         }),
+    },
+    {
+      // Jira Software moves the issue out of its open sprint into the target.
+      match: (u, r) => u.pathname === "/rest/agile/1.0/sprint/44/issue" && r.method === "POST",
+      respond: () => {
+        sprintField = [{ id: 44, name: "Payments 16", state: "future", boardId: 7 }];
+        return new Response(null, { status: 204 });
+      },
     },
   ]);
   const layer = Layer.provideMerge(
@@ -196,5 +210,76 @@ describe("Executor", () => {
       ),
     );
     expect(row?.notesMd).toBe(`Met in June\n\n- ${localDate()}: Prefers email`);
+  });
+
+  test("move_to_sprint posts to the Agile API, re-fetches, logs, and is idempotent", async () => {
+    const { seen, layer } = setup();
+    const move = {
+      kind: "move_to_sprint",
+      target: "PAY-2",
+      sprintId: 44,
+      sprintName: "Payments 16",
+    } as const;
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sync = yield* Sync;
+          yield* sync.discoverFields;
+          yield* sync.refreshIssue("PAY-2");
+          const sprintRow = () =>
+            query((db) =>
+              db
+                .select({ sprint: jiraIssues.sprint, points: jiraIssues.storyPoints })
+                .from(jiraIssues)
+                .where(eq(jiraIssues.key, "PAY-2"))
+                .get(),
+            );
+          const before = yield* sprintRow();
+          yield* query((d) =>
+            d.insert(proposals).values({
+              id: "move1",
+              seq: 0,
+              kind: "move_to_sprint",
+              payload: move,
+              status: "approved",
+              createdAt: "2026-09-26T10:00:00.000Z",
+            }),
+          );
+          const executor = yield* Executor;
+          const first = yield* executor.runProposal(move, {
+            proposalId: "move1",
+            inboxItemId: null,
+          });
+          const after = yield* sprintRow();
+          const again = yield* executor.runProposal(move, {
+            proposalId: "move1",
+            inboxItemId: null,
+          });
+          return { before, first, after, again, log: yield* logs };
+        }),
+        layer,
+      ),
+    );
+    expect(r.before).toEqual({ sprint: "Payments 15", points: 5 });
+    expect(r.first).toEqual({ message: "Moved PAY-2 to sprint Payments 16", issueKey: "PAY-2" });
+    expect(r.after?.sprint).toBe("Payments 16");
+    const posts = seen.filter((x) => x.url.includes("/rest/agile/1.0/sprint/"));
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({
+      url: "https://jira.example.com/rest/agile/1.0/sprint/44/issue",
+      method: "POST",
+      body: { issues: ["PAY-2"] },
+    });
+    // The second approval found the cache already in the sprint and wrote nothing.
+    expect(r.again).toEqual({
+      message: "PAY-2 is already in sprint Payments 16",
+      issueKey: "PAY-2",
+    });
+    expect(r.log.map((l) => [l.action, l.target, l.ok, l.proposalId])).toEqual([
+      ["move_to_sprint", "PAY-2", true, "move1"],
+      ["move_to_sprint", "PAY-2", true, "move1"],
+    ]);
+    expect(r.log[0]?.request).toMatchObject({ api: "agile", path: "sprint/44/issue" });
+    expect(r.log[1]?.response).toEqual({ skipped: "already in sprint" });
   });
 });

@@ -52,10 +52,13 @@ const make = Effect.gen(function* () {
       return row.evidence ?? "";
     });
 
-  /** FR-7.2: a rejection or an edit becomes an example memory for later prompts. */
+  /**
+   * FR-7.2: a rejection or an edit becomes an example memory for later prompts.
+   * Sprint moves come from the planner, not intake, so they teach intake nothing.
+   */
   const captureCorrection = (row: Row, after: ProposalPayload | null) =>
     Effect.gen(function* () {
-      if (row.kind === "needs_clarification") return;
+      if (row.kind === "needs_clarification" || row.kind === "move_to_sprint") return;
       const before = row.payload as ProposalPayload;
       const input = (yield* inputFor(row)).slice(0, 1000);
       yield* q((d) =>

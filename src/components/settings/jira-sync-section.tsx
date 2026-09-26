@@ -150,7 +150,12 @@ function ScopeCard({ settings }: { settings: AppSettings }) {
   );
 }
 
-const FIELD_LABELS = { epicLink: "Epic Link", epicName: "Epic Name", sprint: "Sprint" } as const;
+const FIELD_LABELS = {
+  epicLink: "Epic Link",
+  epicName: "Epic Name",
+  sprint: "Sprint",
+  storyPoints: "Story Points",
+} as const;
 type FieldKey = keyof typeof FIELD_LABELS;
 
 function FieldsCard({ settings }: { settings: AppSettings }) {
@@ -178,6 +183,7 @@ function FieldsCard({ settings }: { settings: AppSettings }) {
       epicLink: settings.jira.fields.epicLink ?? "",
       epicName: settings.jira.fields.epicName ?? "",
       sprint: settings.jira.fields.sprint ?? "",
+      storyPoints: settings.jira.fields.storyPoints ?? "",
     },
   });
   const onSubmit = form.handleSubmit((v) =>
@@ -190,6 +196,7 @@ function FieldsCard({ settings }: { settings: AppSettings }) {
             epicLink: v.epicLink.trim() || undefined,
             epicName: v.epicName.trim() || undefined,
             sprint: v.sprint.trim() || undefined,
+            storyPoints: v.storyPoints.trim() || undefined,
           },
         },
       }),

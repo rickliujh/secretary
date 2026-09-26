@@ -56,7 +56,9 @@ export function issueFields(fieldIds: FieldIds): string[] {
     "issuelinks",
     "attachment",
     "comment",
-    ...[fieldIds.epicLink, fieldIds.epicName, fieldIds.sprint].filter((f): f is string => !!f),
+    ...[fieldIds.epicLink, fieldIds.epicName, fieldIds.sprint, fieldIds.storyPoints].filter(
+      (f): f is string => !!f,
+    ),
   ];
 }
 
@@ -106,6 +108,17 @@ export function parseSprints(value: unknown): SprintInfo[] {
     }
   }
   return out;
+}
+
+/** Story points: a finite number, or a string that parses as one; anything else is null. */
+export function parseStoryPoints(value: unknown): number | null {
+  const n =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : Number.NaN;
+  return Number.isFinite(n) ? n : null;
 }
 
 /** Active sprint first, then the next future one, then the most recent. */
@@ -213,6 +226,7 @@ export function mapIssue(raw: RawIssue, ctx: MapContext): MappedIssue {
       labels: strings(f.labels),
       components: names(f.components),
       sprint: ctx.fieldIds.sprint ? currentSprint(f[ctx.fieldIds.sprint]) : null,
+      storyPoints: ctx.fieldIds.storyPoints ? parseStoryPoints(f[ctx.fieldIds.storyPoints]) : null,
       dueDate: typeof f.duedate === "string" ? f.duedate : null,
       created: jiraDateToIso(String(f.created)),
       updated: jiraDateToIso(String(f.updated)),

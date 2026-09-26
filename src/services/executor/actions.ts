@@ -51,6 +51,13 @@ export const JiraActionSchema = z.discriminatedUnion("kind", [
     issueKey: IssueKey,
     globalId: z.string().min(1),
   }),
+  /** Moves the issue into a sprint through the Agile API (D30). */
+  z.object({
+    kind: z.literal("move_to_sprint"),
+    issueKey: IssueKey,
+    sprintId: z.number().int().positive(),
+    sprintName: z.string().optional(),
+  }),
 ]);
 export type JiraAction = z.infer<typeof JiraActionSchema>;
 
@@ -72,5 +79,7 @@ export function describeAction(a: JiraAction): string {
       return `Mirror "${a.title}" on ${a.issueKey}`;
     case "delete_remote_link":
       return `Remove mirrored dependency from ${a.issueKey}`;
+    case "move_to_sprint":
+      return `Move ${a.issueKey} to sprint ${a.sprintName ?? a.sprintId}`;
   }
 }

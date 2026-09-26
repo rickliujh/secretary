@@ -26,7 +26,13 @@ import {
   type ProposalPayload,
   ProposalPayloadSchema,
 } from "@/services/proposals/schema";
-import { FIELD_SPECS, fieldName, fromFormValues, toFormValues } from "./proposal-fields";
+import {
+  FIELD_SPECS,
+  fieldName,
+  fromFormValues,
+  isEditable,
+  toFormValues,
+} from "./proposal-fields";
 
 const UNSET = "__unset__";
 
@@ -52,7 +58,7 @@ export function ProposalEditDialog({
       setErrors([]);
     }
   }, [open, payload, form]);
-  if (payload.kind === "needs_clarification") return null;
+  if (!isEditable(payload)) return null;
   const specs = FIELD_SPECS[payload.kind];
 
   const submit = form.handleSubmit((values) => {

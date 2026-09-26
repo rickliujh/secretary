@@ -16,7 +16,7 @@ import { Proposals } from "@/services/proposals";
 import { ProposalsLive } from "@/services/proposals/live";
 import { DEFAULT_WEIGHTS } from "@/services/settings/schema";
 import { jiraSettings, jiraTestLayer } from "@/test/layers";
-import { createHandler, generate } from "../../../scripts/mock-jira";
+import { boardSprints, createHandler, generate } from "../../../scripts/mock-jira";
 import { Sync } from ".";
 import { SyncLive } from "./live";
 import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "./state";
@@ -79,7 +79,10 @@ describe("sync and executor against the mock Jira", () => {
           );
           const meta = parseProjectMeta(yield* getState(SYNC_KEYS.projectMeta));
           const sprints = parseSprintState(yield* getState(SYNC_KEYS.sprints));
-          return { first, second, count, changed, stored, meta, sprints };
+          const points = (yield* query((db) =>
+            db.select({ p: jiraIssues.storyPoints }).from(jiraIssues).all(),
+          )).map((x) => x.p);
+          return { first, second, count, changed, stored, meta, sprints, points };
         }),
         layer,
       ),
@@ -90,6 +93,10 @@ describe("sync and executor against the mock Jira", () => {
     expect(r.second.fetched).toBeGreaterThanOrEqual(1);
     expect(r.second.fetched).toBeLessThan(issues.size);
     expect(r.changed?.summary).toBe("Changed in Jira");
+    // Story Points are discovered by name and stored per issue (D30).
+    expect(r.changed?.storyPoints).toBe(story.points);
+    expect(r.points.filter((p) => p !== null).length).toBeGreaterThan(0);
+    expect(r.points).toContain(null);
     // Jira received wiki markup and the cache shows Jira's version.
     expect(story.comments.at(-1)?.body).toBe("*Chased* Ana");
     expect(r.stored.at(-1)?.body).toBe("*Chased* Ana");
@@ -154,6 +161,49 @@ describe("proposals against the mock Jira", () => {
     expect(created.result.status).toBe("executed");
     expect(created.row?.epicKey).toBe("PAY-1");
     expect(issues.get(created.result.issueKey ?? "")?.summary).toBe("Export credit notes");
+  });
+
+  test("an approved move_to_sprint puts the issue in the planned sprint (D30)", async () => {
+    const story = [...issues.values()].find(
+      (i) => i.project === "PAY" && i.type === "Story" && i.status !== "Done",
+    );
+    const next = boardSprints(1).find((s) => s.state === "future");
+    if (!story || !next) throw new Error("fixture");
+    const moved = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          yield* query((d) =>
+            d.insert(inboxItems).values({
+              id: "in2",
+              source: "typed",
+              rawText: "Plan the next sprint",
+              receivedAt: "2026-09-26T00:00:00Z",
+            }),
+          );
+          yield* query((d) =>
+            d.insert(proposals).values({
+              id: "p2",
+              inboxItemId: "in2",
+              kind: "move_to_sprint",
+              payload: {
+                kind: "move_to_sprint",
+                target: story.key,
+                sprintId: next.id,
+                sprintName: next.name,
+              },
+              createdAt: "2026-09-26T00:00:00Z",
+            }),
+          );
+          const result = yield* (yield* Proposals).approve("p2");
+          return { result, row: yield* row(story.key) };
+        }),
+        Layer.provideMerge(ProposalsLive, layer),
+      ),
+    );
+    expect(moved.result.status).toBe("executed");
+    expect(story.movedToSprint).toBe(next.id);
+    expect(moved.row?.sprint).toBe(next.name);
   });
 });
 

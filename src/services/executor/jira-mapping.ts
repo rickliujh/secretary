@@ -1,5 +1,6 @@
 /**
- * Pure mapping from actions to Jira REST v2 write requests (design.md 7.3).
+ * Pure mapping from actions to Jira REST v2 and Agile 1.0 write requests
+ * (design.md 7.3).
  */
 import { markdownToWiki } from "@/lib/wiki";
 import type { Deployment } from "@/services/atlassian/deployment";
@@ -18,6 +19,29 @@ export type MappingContext = {
 export class MappingError extends Error {}
 
 const issuePath = (key: string, suffix = "") => `issue/${encodeURIComponent(key)}${suffix}`;
+
+/** The Agile API accepts at most this many issues per move (Cloud and Data Center). */
+export const MAX_SPRINT_MOVE_ISSUES = 50;
+
+/**
+ * `POST /rest/agile/1.0/sprint/{sprintId}/issue`: moves up to 50 issues into a
+ * sprint, taking them out of any other open sprint.
+ */
+export function buildMoveToSprint(sprintId: number, issueKeys: readonly string[]): JiraWrite {
+  if (!Number.isInteger(sprintId) || sprintId <= 0)
+    throw new MappingError(`Invalid sprint id ${sprintId}.`);
+  if (issueKeys.length === 0) throw new MappingError("No issues to move.");
+  if (issueKeys.length > MAX_SPRINT_MOVE_ISSUES)
+    throw new MappingError(
+      `Jira moves at most ${MAX_SPRINT_MOVE_ISSUES} issues into a sprint at once (got ${issueKeys.length}).`,
+    );
+  return {
+    method: "POST",
+    api: "agile",
+    path: `sprint/${sprintId}/issue`,
+    body: { issues: [...issueKeys] },
+  };
+}
 
 export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWrite {
   switch (action.kind) {
@@ -100,6 +124,8 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
         method: "DELETE",
         path: `${issuePath(action.issueKey, "/remotelink")}?globalId=${encodeURIComponent(action.globalId)}`,
       };
+    case "move_to_sprint":
+      return buildMoveToSprint(action.sprintId, [action.issueKey]);
   }
 }
 

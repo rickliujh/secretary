@@ -15,7 +15,9 @@
  * 2026-06-29; the one covering today is active and two more are planned.
  * `/rest/agile/1.0/board/{id}/sprint` serves that history, and each issue's
  * Sprint field names the sprint it was created in, plus the active one when
- * unfinished work was carried over.
+ * unfinished work was carried over. `POST /rest/agile/1.0/sprint/{id}/issue`
+ * moves issues into a sprint. Stories, tasks and bugs carry Story Points
+ * (1, 2, 3, 5, 8, 13; some unestimated).
  */
 import j2m from "jira2md";
 
@@ -41,6 +43,10 @@ type Issue = {
   updated: string;
   comments: Comment[];
   links: { type: "Blocks"; inward: string }[];
+  /** Story Points; null when unestimated. */
+  points: number | null;
+  /** Set when the issue was moved into a sprint through the Agile API. */
+  movedToSprint?: number;
   remoteLinks?: {
     id: number;
     globalId: string;
@@ -64,6 +70,9 @@ const PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"];
 const EPIC_LINK = "customfield_10100";
 const EPIC_NAME = "customfield_10102";
 const SPRINT = "customfield_10104";
+const STORY_POINTS = "customfield_10106";
+/** Cycled by issue id so points do not disturb the seeded random sequence. */
+const POINTS = [3, 1, 5, 2, 8, 3, null, 2, 5, 1, 3, 13, 2, null, 5, 1, 8] as const;
 
 const DAY = 86_400_000;
 const SPRINT_LENGTH = 14 * DAY;
@@ -118,7 +127,10 @@ export function boardSprints(boardId: number, now = Date.now()): Sprint[] {
 const sprintString = (s: Sprint) =>
   `com.atlassian.greenhopper.service.sprint.Sprint@${s.id.toString(16)}[id=${s.id},rapidViewId=${s.originBoardId},state=${s.state.toUpperCase()},name=${s.name},startDate=${s.startDate},endDate=${s.endDate},completeDate=${s.completeDate ?? "<null>"},sequence=${s.id},goal=]`;
 
-/** The sprint the issue was created in, plus the active one if unfinished work carried over. */
+/**
+ * The sprint the issue was created in, plus the active one if unfinished work
+ * carried over, or plus the sprint it was moved into through the Agile API.
+ */
 function issueSprints(issue: Issue, now = Date.now()): string[] | null {
   if (issue.type === "Epic") return null;
   const board = BOARDS.find((b) => b.project === issue.project);
@@ -127,6 +139,11 @@ function issueSprints(issue: Issue, now = Date.now()): string[] | null {
   const active = sprintIndex(now);
   const createdAt = new Date(issue.created.replace("+0000", "Z")).getTime();
   const created = Math.min(sprintIndex(createdAt), active);
+  const moved = sprints.findIndex((s) => s.id === issue.movedToSprint);
+  if (moved >= 0)
+    return (created < moved ? [sprints[created], sprints[moved]] : [sprints[moved]])
+      .filter((s): s is Sprint => !!s)
+      .map(sprintString);
   const picked = [sprints[created]];
   if (created < active && issue.status !== "Done") picked.push(sprints[active]);
   return picked.filter((s): s is Sprint => !!s).map(sprintString);
@@ -182,8 +199,9 @@ export function generate(total: number): Map<string, Issue> {
     counters[project] = (counters[project] ?? 0) + 1;
     const topic = pick(TOPICS);
     const created = next();
+    const id = 20000 + issues.size;
     const issue: Issue = {
-      id: String(20000 + issues.size),
+      id: String(id),
       key: `${project}-${counters[project]}`,
       project,
       type,
@@ -203,6 +221,7 @@ export function generate(total: number): Map<string, Issue> {
       updated: created,
       comments: [],
       links: [],
+      points: type === "Epic" || type === "Sub-task" ? null : (POINTS[id % POINTS.length] ?? null),
       ...extra,
     };
     const n = Math.floor(rand() * 5);
@@ -290,6 +309,7 @@ function issueJson(issue: Issue, all: Map<string, Issue>, embedComments = 2) {
       [EPIC_LINK]: issue.epic,
       [EPIC_NAME]: issue.epicName,
       [SPRINT]: issueSprints(issue),
+      [STORY_POINTS]: issue.points,
       issuelinks: issue.links.map((l, i) => {
         const other = all.get(l.inward);
         return {
@@ -367,6 +387,26 @@ export function createHandler(issues: Map<string, Issue>) {
         })),
       });
     }
+    const moveTo = /^\/rest\/agile\/1\.0\/sprint\/(\d+)\/issue$/.exec(url.pathname);
+    if (moveTo && req.method === "POST") {
+      const sprintId = Number(moveTo[1]);
+      const board = BOARDS.find((b) => boardSprints(b.id).some((s) => s.id === sprintId));
+      if (!board) return error(`Sprint with id ${sprintId} does not exist.`, 404);
+      const sprint = boardSprints(board.id).find((s) => s.id === sprintId);
+      if (sprint?.state === "closed") return error("Cannot move issues into a closed sprint.");
+      const body = (await req.json().catch(() => undefined)) as { issues?: unknown } | undefined;
+      const keys = Array.isArray(body?.issues) ? body.issues.map(String) : [];
+      if (keys.length === 0 || keys.length > 50) return error("Between 1 and 50 issues required.");
+      const found = keys.map((k) => issues.get(k));
+      const missing = keys.filter((_, i) => !found[i]);
+      if (missing.length) return error(`Issues do not exist: ${missing.join(", ")}`);
+      for (const issue of found)
+        if (issue) {
+          issue.movedToSprint = sprintId;
+          touch(issue);
+        }
+      return new Response(null, { status: 204 });
+    }
     const path = url.pathname.replace(/^\/rest\/api\/2\//, "");
     const body =
       req.method === "GET"
@@ -411,6 +451,16 @@ export function createHandler(issues: Map<string, Issue>) {
             items: "string",
             custom: "com.pyxis.greenhopper.jira:gh-sprint",
             customId: 10104,
+          },
+        },
+        {
+          id: STORY_POINTS,
+          name: "Story Points",
+          custom: true,
+          schema: {
+            type: "number",
+            custom: "com.atlassian.jira.plugin.system.customfieldtypes:float",
+            customId: 10106,
           },
         },
       ]);
@@ -516,6 +566,7 @@ export function createHandler(issues: Map<string, Issue>) {
         updated: now,
         comments: [],
         links: [],
+        points: typeof f[STORY_POINTS] === "number" ? (f[STORY_POINTS] as number) : null,
       };
       issues.set(created.key, created);
       return json(
@@ -536,6 +587,8 @@ export function createHandler(issues: Map<string, Issue>) {
         if ("description" in f) issue.description = (f.description as string | null) ?? null;
         if ("priority" in f) issue.priority = (f.priority as { name: string } | null)?.name ?? null;
         if ("duedate" in f) issue.due = (f.duedate as string | null) ?? null;
+        if (STORY_POINTS in f)
+          issue.points = typeof f[STORY_POINTS] === "number" ? (f[STORY_POINTS] as number) : null;
         if (EPIC_LINK in f) {
           const epic = f[EPIC_LINK] as string | null;
           if (epic && issues.get(epic)?.type !== "Epic")
