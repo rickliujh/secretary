@@ -427,7 +427,6 @@ Built
 - Chats stay in memory while the app runs, so leaving the Chat page and coming back
   shows the same conversation, even mid-answer; the page reopens the last one.
 - Chat page: a list of past conversations with delete, and "New chat".
-||||||| 7e19e3b
 
 ## Cleanup: tests, tooling, docs (2026-09-26)
 
@@ -454,3 +453,21 @@ Changed
   where D19–D28 overtook it, plus a corrected data model, endpoint list, task table,
   error types and testing section; the implementation plan is marked as history;
   README lists install caveats for the unsigned bundles.
+
+## Draft handoff to Teams and email (2026-09-26)
+
+Why: copying a draft and pasting it into a new chat or email was the slowest part of
+sending it (design.md D31).
+
+Built
+- "Open in Teams" on Teams drafts and "Open in email" on email drafts, next to "Copy
+  message". They open a Teams chat deep link or a `mailto:` link in the user's own
+  app with the message (and an email's subject) filled in, after saving any edits.
+  No Microsoft sign-in or Graph; the user still presses Send, then "Mark sent".
+- Opening marks the draft copied. Text too long for a link (2000 characters for
+  `mailto:`, 4000 for Teams) goes to the clipboard and the window opens without it.
+- The button is disabled, with the reason, for a team recipient or a person without
+  an email; the latter links to the People page.
+- Pure link builders in `src/lib/handoff.ts` with tests for encoding, line breaks,
+  several recipients and the length limit. The existing `opener:default` capability
+  already allows `https:` and `mailto:` URLs.
