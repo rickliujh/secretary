@@ -351,3 +351,34 @@ Checklist
   Flash (the formal draft is fuller and more careful, the casual one a short nudge).
 - Marking sent updates the dependency's last follow-up and next chase date: covered by
   `comms.test.ts`; not yet checked by the user in the UI.
+
+## Phase 7: learning, memory and chat (2026-09-26)
+
+Why: FR-7, FR-8 and FR-9.4 (design.md D25, D26).
+
+Built
+- Memory page: rules, facts and preferences with subject, importance (weight),
+  provenance (added by you or inferred, from which thread), confirmation and usage;
+  corrections with the input, what was proposed and what you changed.
+- Memory ranking in retrieval: overlap with the input, a boost for memories about the
+  item's issues, sender, contacts and teams, then weight, recency and use count.
+  Memories that reach a prompt record `last_used_at` and `use_count`.
+- Corrections now name the fields that changed ("assignee: (none) -> ana.b"); before,
+  a changed assignee or priority was invisible to the model.
+- "Suggest rules" (strong tier): patterns seen in at least two corrections become
+  `remember` proposals in a new thread; nothing is remembered until approved.
+- Evaluation replay (Settings > Models): re-runs decided inbox items from their
+  snapshots on a chosen tier or model; agreement per proposal kind and repeated
+  rejections. `Llm.object` accepts an explicit target for this.
+- Chat page: `useChat` over an in-process transport; a streamed tool loop (tier
+  picker, 8 steps) with read-only tools (tickets, ticket details, what you wait on,
+  contacts, notes, focus list, Confluence search). Changes go through
+  `propose_actions`, which runs intake and links to the new thread.
+- `@ai-sdk/react` added; `ai` and the provider packages updated so one copy of each
+  is installed.
+
+Checklist (GLM 5.3 Flash)
+- Two corrections of the same kind make the third similar input classify correctly:
+  yes ("two corrections teach the third" eval case).
+- Chat answers "what am I waiting on from team X" from local data and turns "comment
+  on ABC-12 that we are blocked" into a pending proposal: yes (live chat eval).
