@@ -1,7 +1,15 @@
+# Rule
+
+When a step doesn't need my input, keep going. Put status notes in the
+same message as your next action.
+Stop and ask only when you can't continue without me, or before anything
+destructive: deleting data, force-pushing, or changing anything outside
+this repository.
+
 # Secretary
 
 Personal AI secretary desktop app for a single user whose work is tracked in Jira
-Data Center. It turns messy inputs into approved Jira actions, tracks external
+(Cloud or Data Center). It turns messy inputs into approved Jira actions, tracks external
 dependencies, holds team and people context, ranks what matters, and drafts Teams
 messages and emails. Read `docs/requirements.md` (what), `docs/design.md` (how) and
 `docs/implementation-plan.md` (order of work) before changing anything.
@@ -11,7 +19,7 @@ messages and emails. Read `docs/requirements.md` (what), `docs/design.md` (how) 
 Tauri 2 shell, React 19 + TypeScript in the webview, shadcn/ui on Tailwind v4,
 TanStack Router/Query/Table, react-hook-form + zod v4, Effect 3 for services,
 drizzle-orm (sqlite-proxy) over `@tauri-apps/plugin-sql`, Vercel AI SDK with
-`@ai-sdk/anthropic` and `@ai-sdk/openai-compatible`, a thin Jira DC client on `ky`,
+`@ai-sdk/anthropic` and `@ai-sdk/openai-compatible`, a thin Jira client on `ky` (Cloud and DC),
 Bun as package manager, script runner and test runner. Rust side: plugins plus a
 keychain command using the `keyring` crate. No sidecar.
 
@@ -32,7 +40,9 @@ keychain command using the `keyring` crate. No sidecar.
 - Use shadcn components via `bunx shadcn@latest add <component>`; do not hand-roll
   UI primitives. Prefer a mature library over custom code for parsing, markdown,
   tables, forms and HTTP.
-- Jira DC only: REST API v2, wiki markup (not ADF), Bearer PAT.
+- Jira Cloud and Data Center (design.md D19): REST API v2 and wiki markup (not ADF)
+  on both; Cloud authenticates with account email and API token, Data Center with a
+  Bearer PAT. Deployment differences stay inside the Atlassian clients.
 
 ## Commands
 
