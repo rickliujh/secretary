@@ -5,6 +5,8 @@ import { secretNames } from "@/services/secrets";
 import { makeSecretsTest } from "@/services/secrets/test";
 import { defaultSettings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
+import pageJson from "@/test/fixtures/confluence/page-65601.json";
+import search from "@/test/fixtures/confluence/search.json";
 import current from "@/test/fixtures/confluence/user-current.json";
 import { json, type StubRoute, stubFetch } from "@/test/stub-fetch";
 import { ConfluenceClient, type ConfluenceError } from ".";
@@ -60,8 +62,6 @@ describe("ConfluenceClient.testConnection", () => {
 
 describe("ConfluenceClient search and page", () => {
   test("search sends CQL with expansions; page fetch expands the storage body", async () => {
-    const { default: search } = await import("@/test/fixtures/confluence/search.json");
-    const { default: pageJson } = await import("@/test/fixtures/confluence/page-65601.json");
     const stub = stubFetch([
       { match: (u) => u.pathname === "/rest/api/content/search", respond: () => json(search) },
       { match: (u) => u.pathname === "/rest/api/content/65601", respond: () => json(pageJson) },
