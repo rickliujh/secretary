@@ -73,3 +73,44 @@ export function signature(actual: readonly ProposalPayload[]): string {
     .sort()
     .join(" ");
 }
+
+/** One replayed item: what the user approved or rejected, and what the model proposed now. */
+export type ReplayItem = {
+  done: readonly ProposalPayload[];
+  rejected: readonly ProposalPayload[];
+  got: readonly ProposalPayload[];
+};
+
+export type KindAgreement = {
+  kind: ProposalKind;
+  /** Proposals of this kind the user approved. */
+  approved: number;
+  /** Of those, how many the replayed model proposed again (same kind and target). */
+  matched: number;
+  /** Replayed proposals of this kind the user had rejected before. */
+  repeatedRejections: number;
+};
+
+const sameAction = (a: ProposalPayload, b: ProposalPayload) =>
+  a.kind === b.kind && payloadTarget(a) === payloadTarget(b);
+
+/** Agreement per proposal kind for evaluation replay (FR-9.4). */
+export function replayAgreement(items: readonly ReplayItem[]): KindAgreement[] {
+  const by = new Map<ProposalKind, KindAgreement>();
+  const row = (kind: ProposalKind) => {
+    const r = by.get(kind) ?? { kind, approved: 0, matched: 0, repeatedRejections: 0 };
+    by.set(kind, r);
+    return r;
+  };
+  for (const item of items) {
+    for (const d of item.done) {
+      const r = row(d.kind);
+      r.approved++;
+      if (item.got.some((g) => sameAction(g, d))) r.matched++;
+    }
+    for (const g of item.got)
+      if (item.rejected.some((x) => sameAction(g, x)) && !item.done.some((d) => sameAction(g, d)))
+        row(g.kind).repeatedRejections++;
+  }
+  return [...by.values()].sort((a, b) => b.approved - a.approved || a.kind.localeCompare(b.kind));
+}

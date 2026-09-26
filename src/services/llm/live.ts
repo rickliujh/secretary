@@ -270,12 +270,44 @@ export const makeLlm = Effect.gen(function* () {
     usage,
   });
 
+  /** The target for an explicit tier or provider/model. */
+  const explicit = (
+    settings: AppSettings,
+    target: { tier: Tier } | { providerId: string; model: string },
+  ) =>
+    Effect.gen(function* () {
+      if (!("tier" in target))
+        return { tier: null, providerId: target.providerId, model: target.model } as Target;
+      const binding = settings.tiers[target.tier];
+      if (!binding)
+        return yield* new LlmError({
+          kind: "config",
+          message: `The ${target.tier} tier is not bound to a model.`,
+        });
+      return { tier: target.tier, providerId: binding.providerId, model: binding.model } as Target;
+    });
+
   const object = <T>(task: TaskType, req: ObjectRequest<T>) =>
     Effect.gen(function* () {
       const settings = yield* settingsSvc.get.pipe(
         Effect.mapError((e) => new LlmError({ kind: "config", message: e.message })),
       );
       const route = resolveTask(settings, task);
+      if (req.target) {
+        const p = yield* prepare(settings, yield* explicit(settings, req.target));
+        const r = yield* attemptWithRepair(p, task, route.timeoutMs, false, true, req);
+        if (r.attempt.status === "ok")
+          return {
+            ...info(p, false, r.repaired, r.attempt.usage),
+            value: r.attempt.value,
+            lowConfidence: false,
+          } satisfies ObjectResult<T>;
+        return yield* new LlmError({
+          kind: "schema",
+          message: "The model output failed validation after repair",
+          issues: r.attempt.issues,
+        });
+      }
       if (!route.resolved) return yield* noTier();
       const lowConfidence = (value: T) =>
         req.confidence !== undefined && req.confidence(value) < route.confidenceThreshold;
@@ -363,20 +395,7 @@ export const makeLlm = Effect.gen(function* () {
       const settings = yield* settingsSvc.get.pipe(
         Effect.mapError((e) => new LlmError({ kind: "config", message: e.message })),
       );
-      let t: Target;
-      if ("tier" in target) {
-        const binding = settings.tiers[target.tier];
-        if (!binding) {
-          return yield* new LlmError({
-            kind: "config",
-            message: `The ${target.tier} tier is not bound to a model.`,
-          });
-        }
-        t = { tier: target.tier, providerId: binding.providerId, model: binding.model };
-      } else {
-        t = { tier: null, providerId: target.providerId, model: target.model };
-      }
-      const p = yield* prepare(settings, t);
+      const p = yield* prepare(settings, yield* explicit(settings, target));
       const started = Date.now();
       const r = yield* runText(
         p,

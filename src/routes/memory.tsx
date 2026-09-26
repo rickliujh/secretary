@@ -1,8 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { Brain, Check, Pencil, Plus, Trash2 } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { Effect } from "effect";
+import { Brain, Check, Loader2, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { z } from "zod";
+import { useErrorToast } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { MemoryDialog } from "@/components/memory/memory-dialog";
@@ -20,6 +23,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
+import { Learning } from "@/services/learning";
 import {
   deleteMemory,
   listMemories,
@@ -38,11 +42,23 @@ export const Route = createFileRoute("/memory")({
 function MemoryPage() {
   const { tab = "memories" } = Route.useSearch();
   const navigate = Route.useNavigate();
+  const navigateTo = useNavigate();
   const list = useQuery({
     queryKey: queryKeys.memories,
     queryFn: ({ signal }) => run(listMemories, signal),
   });
   const [editing, setEditing] = useState<MemoryView | null | undefined>(undefined);
+  const onError = useErrorToast();
+  const consolidate = useMutation({
+    mutationFn: () => run(Effect.flatMap(Learning, (l) => l.consolidate)),
+    onSuccess: (r) => {
+      if (r.inboxItemId) {
+        toast.success(`${r.rules} rule${r.rules === 1 ? "" : "s"} to review`);
+        void navigateTo({ to: "/inbox", search: { item: r.inboxItemId } });
+      } else toast.info(`No clear pattern in ${r.corrections} corrections yet.`);
+    },
+    onError: (e) => onError(e),
+  });
   const all = list.data ?? [];
   const kept = all.filter((m) => m.kind !== "example");
   const corrections = all.filter((m) => m.kind === "example");
@@ -75,6 +91,18 @@ function MemoryPage() {
           )}
         </TabsContent>
         <TabsContent value="corrections" className="mt-4 flex flex-col gap-2">
+          {corrections.length >= 2 && (
+            <div className="flex items-center gap-3 rounded-lg border bg-muted/40 p-3 text-sm">
+              <p className="flex-1 text-muted-foreground">
+                Look for patterns in these corrections and suggest rules. Suggestions arrive in the
+                Inbox for you to approve; nothing is remembered until you do.
+              </p>
+              <Button disabled={consolidate.isPending} onClick={() => consolidate.mutate()}>
+                {consolidate.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                Suggest rules
+              </Button>
+            </div>
+          )}
           {corrections.map((m) => (
             <CorrectionCard key={m.id} memory={m} />
           ))}

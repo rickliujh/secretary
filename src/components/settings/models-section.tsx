@@ -47,6 +47,7 @@ import {
   type Tier,
 } from "@/services/llm/tasks";
 import type { AppSettings, TaskOverride } from "@/services/settings";
+import { ReplayCard } from "./replay-card";
 
 const NONE = "__none__";
 
@@ -306,6 +307,7 @@ export function ModelsSection() {
     <div className="flex flex-col gap-4">
       <TiersCard settings={settings} />
       <RoutingCard settings={settings} />
+      <ReplayCard settings={settings} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ProposalPayloadSchema } from "@/services/proposals/schema";
-import { scoreCase, signature } from "./score";
+import { replayAgreement, scoreCase, signature } from "./score";
 
 const p = (x: Record<string, unknown>) => ProposalPayloadSchema.parse(x);
 
@@ -55,5 +55,19 @@ describe("eval scoring", () => {
     expect(signature([...actual].reverse())).toBe(
       signature([...actual, p({ kind: "needs_clarification", question: "?" })]),
     );
+  });
+
+  test("replay agreement counts matches per kind and repeated rejections", () => {
+    const comment = p({ kind: "add_comment", target: "PAY-4", bodyMd: "x" });
+    const move = p({ kind: "transition_issue", target: "PAY-2", toStatus: "Done" });
+    expect(
+      replayAgreement([
+        { done: [comment], rejected: [move], got: [comment, move] },
+        { done: [comment], rejected: [], got: [] },
+      ]),
+    ).toEqual([
+      { kind: "add_comment", approved: 2, matched: 1, repeatedRejections: 0 },
+      { kind: "transition_issue", approved: 0, matched: 0, repeatedRejections: 1 },
+    ]);
   });
 });

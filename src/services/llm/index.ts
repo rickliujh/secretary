@@ -28,6 +28,11 @@ export type ObjectRequest<T> = {
   validate?: (value: T) => readonly string[];
   /** Confidence reported by the output, 0..1, compared with the task threshold. */
   confidence?: (value: T) => number;
+  /**
+   * Run exactly this tier or model, with repair but no escalation (evaluation
+   * replay, FR-9.4). Routing still applies when absent.
+   */
+  target?: TestTarget;
 };
 
 export type ObjectResult<T> = CallInfo & {

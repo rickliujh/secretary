@@ -10,6 +10,7 @@ import { ExecutorLive } from "@/services/executor/live";
 import { FetcherLive } from "@/services/http";
 import { IntakeLive } from "@/services/intake/live";
 import { JiraClientLive } from "@/services/jira/live";
+import { LearningLive } from "@/services/learning/live";
 import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
 import { ProposalsLive } from "@/services/proposals/live";
 import { RetrievalLive } from "@/services/retrieval/live";
@@ -21,7 +22,7 @@ const Base = FetcherLive.pipe(
   Layer.provideMerge(Layer.mergeAll(SettingsLive, SecretsLive, DbLive)),
 );
 
-export const AppLayer = Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive).pipe(
+export const AppLayer = Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive, LearningLive).pipe(
   Layer.provideMerge(Layer.mergeAll(RetrievalLive, ExecutorLive)),
   Layer.provideMerge(SyncLive),
   Layer.provideMerge(Layer.mergeAll(LlmLive, JiraClientLive, ConfluenceClientLive)),
