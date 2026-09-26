@@ -4,7 +4,7 @@ import { useState } from "react";
 import { z } from "zod";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
 import { useFollowupReminders } from "@/app/reminders";
-import { useStorageWarning } from "@/app/storage";
+import { useAutoCleanup, useStorageWarning } from "@/app/storage";
 import { useSyncScheduler } from "@/app/sync";
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
@@ -30,6 +30,7 @@ const ALL_NAV = [...WORK_NAV, ...CONTEXT_NAV, SETTINGS_NAV];
 function Background() {
   useSyncScheduler();
   useFollowupReminders();
+  useAutoCleanup();
   useStorageWarning();
   return null;
 }

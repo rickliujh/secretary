@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Switch } from "@/components/ui/switch";
 import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import {
@@ -56,8 +57,8 @@ export function StorageCard() {
     queryFn: () => run(Effect.all({ size: databaseSize, last: lastCleanup })),
   });
   const clean = useMutation({
-    mutationFn: runCleanup,
-    onSuccess: (r) => toast.success(cleanupSummary(r)),
+    mutationFn: () => runCleanup("now"),
+    onSuccess: (r) => r && toast.success(cleanupSummary(r)),
     onError: (e) => onError(e),
   });
   const form = useForm<FormInput, unknown, z.output<typeof Form>>({
@@ -83,8 +84,8 @@ export function StorageCard() {
       <CardHeader>
         <CardTitle>Storage</CardTitle>
         <CardDescription>
-          The app warns when the database gets near your limit. Nothing is removed until you click
-          Clean up.
+          Cleanup runs once a day unless you turn it off, and the app warns when the database gets
+          near your limit. You can also clean up any time.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -124,6 +125,18 @@ export function StorageCard() {
             Save
           </Button>
         </form>
+
+        <Field orientation="horizontal">
+          <Switch
+            id="autoCleanup"
+            checked={settings?.storage.autoCleanup ?? true}
+            disabled={!settings || update.isPending}
+            onCheckedChange={(on) =>
+              update.mutate((s) => ({ ...s, storage: { ...s.storage, autoCleanup: on } }))
+            }
+          />
+          <FieldLabel htmlFor="autoCleanup">Clean up automatically once a day</FieldLabel>
+        </Field>
 
         <div className="flex flex-wrap items-start justify-between gap-3 border-t pt-4">
           <div className="min-w-0 flex-1 text-sm">

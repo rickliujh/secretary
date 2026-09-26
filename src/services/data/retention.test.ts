@@ -5,7 +5,7 @@ import { ulid } from "ulidx";
 import { inboxItems, intakeItems, jiraComments, jiraIssues, llmCalls } from "@/db/schema";
 import { query } from "@/services/db";
 import { syncedJiraLayer, syncOnce } from "@/test/seed";
-import { cleanup, lastCleanup, storageLevel, ulidAt } from "./retention";
+import { cleanup, cleanupIfDue, lastCleanup, storageLevel, ulidAt } from "./retention";
 
 const NOW = new Date("2026-09-26T12:00:00.000Z");
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000);
@@ -66,8 +66,12 @@ describe("storage cleanup (D34)", () => {
           yield* query((d) => d.insert(intakeItems).values([item(oldId), item(newId)]));
 
           const result = yield* cleanup(NOW);
+          const soon = yield* cleanupIfDue(new Date(NOW.getTime() + 3_600_000));
+          const nextDay = yield* cleanupIfDue(new Date(NOW.getTime() + 21 * 3_600_000));
           return {
             result,
+            soon,
+            nextDay,
             last: yield* lastCleanup,
             calls: (yield* query((d) => d.select().from(llmCalls).all())).map((c) => c.id),
             issues: (yield* query((d) =>
@@ -96,8 +100,11 @@ describe("storage cleanup (D34)", () => {
     expect(r.comments).toBe(0);
     expect(r.snapshots.find((s) => s.id === r.oldId)?.snapshot).toEqual({ pruned: true });
     expect(r.snapshots.filter((s) => !(s.snapshot as { pruned?: boolean }).pruned)).toHaveLength(1);
+    // Auto cleanup skips within 20 hours of the last one, then runs again.
+    expect(r.soon).toBeNull();
+    expect(r.nextDay).toMatchObject({ llmCalls: 0, staleIssues: 0, snapshots: 0 });
     // The last result is kept for Settings.
-    expect(r.last?.at).toBe(NOW.toISOString());
+    expect(r.last?.at).toBe(new Date(NOW.getTime() + 21 * 3_600_000).toISOString());
   });
 
   test("storage level against the user's limit", () => {

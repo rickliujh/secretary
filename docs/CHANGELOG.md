@@ -531,14 +531,15 @@ Built
 
 ## Storage limit and cleanup (2026-09-26)
 
-- Settings > Data > Storage shows the database size against a limit you set (default
-  1024 MB). Shortly after launch and after each sync the app checks it and warns at
-  90% and when over, with a link to the page (design.md D34).
-- "Clean up" removes model usage records after 90 days, tickets that left the sync
+- Settings > Data > Storage (design.md D34): the database size against a limit you set
+  (default 1024 MB), an "auto cleanup" switch (on by default; a minute after launch,
+  then daily) and a "Clean up" button. Shortly after launch and after each sync the
+  app warns at 90% of the limit and when over, with a link to the page.
+- A cleanup removes model usage records after 90 days, tickets that left the sync
   scope 30 days ago (with their comments), inbox context snapshots after 180 days
   (emptied; threads, proposals and decisions stay; evaluation replay skips them) and
-  all but the newest three import backups, then compacts the database. Nothing is
-  removed automatically; your own records are never removed.
+  all but the newest three import backups, then compacts the database. Your own
+  records are never removed.
 - Logs rotate at 2 MB and keep three files.
 
 ## Ranked ticket picker in drafts (2026-09-26)

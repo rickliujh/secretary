@@ -1,7 +1,7 @@
 /**
- * Storage limit and the cleanup the user runs from Settings (design.md D34).
- * Nothing runs on a schedule. Only caches and derived data go; the user's own
- * records stay.
+ * Storage limit and cleanup (design.md D34): daily when auto cleanup is on (the
+ * default), or from the button in Settings. Only caches and derived data go; the
+ * user's own records stay.
  */
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { Effect } from "effect";
@@ -18,6 +18,8 @@ export const RETENTION = {
   vacuumFreeBytes: 1024 * 1024,
   /** Share of the storage limit at which the app starts warning. */
   nearLimit: 0.9,
+  /** Auto cleanup does not repeat a cleanup this recent. */
+  autoEveryHours: 20,
 } as const;
 
 export type StorageLevel = "ok" | "near" | "over";
@@ -124,6 +126,15 @@ export const cleanup = (now = new Date()) =>
   });
 
 /** Runs the cleanup unless one ran recently (the daily schedule). */
+/** Auto cleanup: runs unless a cleanup (automatic or by hand) ran recently. */
+export const cleanupIfDue = (now = new Date()) =>
+  Effect.gen(function* () {
+    const last = yield* lastCleanup;
+    if (last && now.getTime() - Date.parse(last.at) < RETENTION.autoEveryHours * 3_600_000)
+      return null;
+    return yield* cleanup(now);
+  });
+
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /** The smallest ULID for a moment: its 10-character time prefix, then zeros. */
 export function ulidAt(date: Date): string {

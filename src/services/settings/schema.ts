@@ -120,8 +120,10 @@ export const SettingsSchema = z.object({
   scoring: ScoringWeightsSchema.prefault({}),
   storage: z
     .object({
-      /** Database size the app warns near (D34); cleanup is run by the user. */
+      /** Database size the app warns near (D34). */
       limitMb: z.number().int().min(100).max(100_000).default(1024),
+      /** Daily cleanup of caches and old derived data (D34). */
+      autoCleanup: z.boolean().default(true),
     })
     .prefault({}),
   network: z
