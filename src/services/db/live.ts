@@ -9,7 +9,7 @@ import { logger } from "@/lib/log";
 import { Db, DbError } from ".";
 import { proxyCallback } from "./proxy";
 
-export const DB_FILE = "secretary.db";
+const DB_FILE = "secretary.db";
 
 const open = Effect.tryPromise({
   try: async () => {

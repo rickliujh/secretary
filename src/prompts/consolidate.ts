@@ -8,7 +8,6 @@ import { MEMORY_KINDS } from "@/services/proposals/schema";
 import { overlap } from "@/services/retrieval/ranking";
 import { untrusted } from "./common";
 
-export const CONSOLIDATE_PROMPT_VERSION = 1;
 export const MAX_RULES = 8;
 
 export type ConsolidateContext = {

@@ -39,7 +39,7 @@ const CachedBriefSchema = z.object({
 export type CachedBrief = z.infer<typeof CachedBriefSchema>;
 
 /** FNV-1a; enough to tell whether the facts changed. */
-export function hashFacts(value: unknown): string {
+function hashFacts(value: unknown): string {
   let h = 0x811c9dc5;
   const s = JSON.stringify(value);
   for (let i = 0; i < s.length; i++) {
@@ -56,7 +56,7 @@ const readCache = Effect.map(getState(CACHE_KEY), (v) =>
   readJson(v, CachedBriefSchema.nullable(), null),
 );
 
-export const collectFacts = (
+const collectFacts = (
   dashboard: Dashboard,
   since: string | null,
   today: string,

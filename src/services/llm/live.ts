@@ -68,7 +68,7 @@ const REPAIR_INSTRUCTION = (issues: readonly string[]) =>
     "Choose only from the options given in the original request. Do not add commentary.",
   ].join("\n");
 
-export const makeLlm = Effect.gen(function* () {
+const makeLlm = Effect.gen(function* () {
   const settingsSvc = yield* Settings;
   const secrets = yield* Secrets;
   const factory = yield* ModelFactory;

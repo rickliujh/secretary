@@ -29,7 +29,7 @@ export const ProviderSchema = z.object({
 });
 export type Provider = z.infer<typeof ProviderSchema>;
 
-export const TierBindingSchema = z.object({
+const TierBindingSchema = z.object({
   providerId: z.string().min(1),
   model: z.string().trim().min(1),
 });
@@ -37,7 +37,7 @@ export type TierBinding = z.infer<typeof TierBindingSchema>;
 
 const TierEnum = z.enum(TIERS);
 
-export const TaskOverrideSchema = z.object({
+const TaskOverrideSchema = z.object({
   tier: TierEnum.optional(),
   escalate: z.boolean().optional(),
 });

@@ -21,7 +21,7 @@ export type MigrationTarget = {
 
 export const MIGRATIONS_TABLE = "__secretary_migrations";
 
-export const CREATE_MIGRATIONS_TABLE = `CREATE TABLE IF NOT EXISTS ${MIGRATIONS_TABLE} (
+const CREATE_MIGRATIONS_TABLE = `CREATE TABLE IF NOT EXISTS ${MIGRATIONS_TABLE} (
   tag TEXT PRIMARY KEY NOT NULL,
   applied_at TEXT NOT NULL
 );`;

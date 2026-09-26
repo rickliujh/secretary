@@ -2,7 +2,7 @@ import { z } from "zod";
 import { IssueKey, MESSAGE_INTENTS } from "@/services/proposals/schema";
 
 export const DRAFT_CHANNELS = ["teams", "email"] as const;
-export const DRAFT_VARIANTS = ["short", "standard"] as const;
+const DRAFT_VARIANTS = ["short", "standard"] as const;
 
 /** A new draft from the composer (FR-6.1). */
 export const DraftRequestSchema = z

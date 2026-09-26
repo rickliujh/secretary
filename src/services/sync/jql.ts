@@ -31,7 +31,7 @@ export function buildScopeJql(opts: {
 }
 
 /** Overlap applied to the watermark so clock skew and same-minute updates are not missed. */
-export const WATERMARK_OVERLAP_MS = 5 * 60 * 1000;
+const WATERMARK_OVERLAP_MS = 5 * 60 * 1000;
 
 export function withUpdatedSince(
   scope: string,

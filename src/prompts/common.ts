@@ -22,7 +22,7 @@ export function untrusted(
 }
 
 /** Rough token estimate for budgeting (about four characters per token). */
-export const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+const estimateTokens = (text: string) => Math.ceil(text.length / 4);
 
 /** Keeps items in order until the budget is used; always keeps at least `min`. */
 export function takeWithinBudget<T>(

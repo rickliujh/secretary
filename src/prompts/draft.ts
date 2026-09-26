@@ -8,8 +8,6 @@ import { MONTH_NAMES } from "@/lib/dates";
 import type { MESSAGE_INTENTS } from "@/services/proposals/schema";
 import { untrusted } from "./common";
 
-export const DRAFT_PROMPT_VERSION = 1;
-
 export type DraftContext = {
   today: string;
   language: string;

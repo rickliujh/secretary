@@ -33,7 +33,7 @@ export const listTicketRows = query(
   (db): Promise<TicketRow[]> => db.select(listColumns).from(jiraIssues).all(),
 );
 
-export const SEARCH_LIMIT = 500;
+const SEARCH_LIMIT = 500;
 
 /** Keys matching free text, best first. Exact issue keys always match. */
 export const searchTicketKeys = (text: string) =>

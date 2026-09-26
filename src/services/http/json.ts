@@ -53,7 +53,7 @@ const HTML_HINT =
   "The server answered with HTML instead of JSON. Check the base URL (include any context path such as /jira) and that personal access tokens are enabled.";
 
 /** Jira and Confluence report errors as `{ errorMessages: [], errors: { field: msg } }` or `{ message }`. */
-export function atlassianErrorText(data: unknown): string | undefined {
+function atlassianErrorText(data: unknown): string | undefined {
   if (!data || typeof data !== "object") return undefined;
   const d = data as { errorMessages?: unknown; errors?: unknown; message?: unknown };
   const parts: string[] = [];

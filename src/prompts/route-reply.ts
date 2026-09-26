@@ -6,8 +6,6 @@
 import { z } from "zod";
 import { HARD_RULES, untrusted } from "./common";
 
-export const ROUTE_REPLY_PROMPT_VERSION = 1;
-
 export type RouteItem = { quote: string; proposals: string[] };
 
 export function buildRouteReplySchema(count: number) {

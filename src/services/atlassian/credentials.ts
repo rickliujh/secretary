@@ -25,7 +25,7 @@ export type Resolved = {
   auth: AtlassianAuth;
 };
 
-export class MissingCredentials {
+class MissingCredentials {
   readonly _tag = "MissingCredentials";
   constructor(readonly message: string) {}
 }

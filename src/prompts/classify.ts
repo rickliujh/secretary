@@ -22,7 +22,7 @@ import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
 
 export const CLASSIFY_PROMPT_VERSION = 5;
-export const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
+const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
   key: string;
@@ -105,7 +105,7 @@ const nullableText = (description?: string) =>
   description ? z.string().nullish().describe(description) : z.string().nullish();
 
 /** Fields each proposal kind must fill; the rest stay null (checked in `validateItemOutput`). */
-export const REQUIRED_FIELDS: Record<string, readonly string[]> = {
+const REQUIRED_FIELDS: Record<string, readonly string[]> = {
   create_issue: ["ref", "projectKey", "issueType", "summary"],
   update_issue: ["target"],
   add_comment: ["target", "body"],
@@ -263,7 +263,7 @@ const defined = <T extends Record<string, unknown>>(o: T) =>
   ) as Partial<T>;
 
 /** Maps one model proposal to a canonical payload (throws on shapes the schema should have prevented). */
-export function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
+function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
   const g = (k: string) => p[k];
   switch (p.kind) {
     case "create_issue":

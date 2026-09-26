@@ -76,7 +76,7 @@ export function rankByRelevance<T extends Rankable>(
     .map((x) => x.t);
 }
 
-export const PRIORITY_ORDER = [
+const PRIORITY_ORDER = [
   "Blocker",
   "Highest",
   "Critical",

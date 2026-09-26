@@ -4,8 +4,6 @@
  */
 import { z } from "zod";
 
-export const BRIEF_PROMPT_VERSION = 1;
-
 export const BriefOutputSchema = z.object({
   changed: z.string().describe("Markdown: what changed since the last brief, most important first"),
   doFirst: z.string().describe("Markdown: the few things to do first today, and why"),
@@ -33,7 +31,7 @@ export type BriefFacts = {
 };
 
 /** Identifiers the brief must mention: overdue dependencies, due-soon and top items. */
-export function mustMention(f: BriefFacts): string[] {
+function mustMention(f: BriefFacts): string[] {
   return [
     ...f.overdueDependencies.map((d) => d.ref ?? d.issueKey),
     ...f.dueSoon.slice(0, 3).map((d) => d.key),
