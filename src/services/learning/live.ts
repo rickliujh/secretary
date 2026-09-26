@@ -20,7 +20,7 @@ import { Db, query } from "@/services/db";
 import { replayAgreement } from "@/services/eval/score";
 import { Llm } from "@/services/llm";
 import { listMemories } from "@/services/memory/queries";
-import type { ProposalPayload } from "@/services/proposals/schema";
+import { effectivePayload, type ProposalPayload } from "@/services/proposals/schema";
 import { Learning, LearningError } from ".";
 
 /** Corrections considered at once; the newest first. */
@@ -185,8 +185,6 @@ const make = Effect.gen(function* () {
         onProgress?.(i, items.length);
         const snapshot = item.snapshot as ItemSnapshot;
         const ps = byItem.get(item.id) ?? [];
-        const payload = (p: (typeof ps)[number]) =>
-          (p.editedPayload ?? p.payload) as ProposalPayload;
         const r = yield* llm
           .object<ItemOutput>("classify_item", {
             schema: buildItemSchema(snapshot) as never,
@@ -210,8 +208,8 @@ const make = Effect.gen(function* () {
         scored.push({
           done: ps
             .filter((p) => ["executed", "approved", "failed"].includes(p.status))
-            .map(payload),
-          rejected: ps.filter((p) => p.status === "rejected").map(payload),
+            .map(effectivePayload),
+          rejected: ps.filter((p) => p.status === "rejected").map(effectivePayload),
           got: r,
         });
       }

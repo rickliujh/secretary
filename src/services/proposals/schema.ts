@@ -166,6 +166,12 @@ export const PROPOSAL_LABELS: Record<ProposalKind, string> = {
   needs_clarification: "Question",
 };
 
+/** The payload that runs: the user's edit when there is one, else the proposal as made. */
+export const effectivePayload = (row: {
+  readonly payload: unknown;
+  readonly editedPayload: unknown;
+}): ProposalPayload => (row.editedPayload ?? row.payload) as ProposalPayload;
+
 /** Issue references a payload depends on, for ordering and failure propagation. */
 export function issueRefs(p: ProposalPayload): string[] {
   switch (p.kind) {
