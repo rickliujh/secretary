@@ -2,9 +2,9 @@ import { createRootRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { Search } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
-import { useCleanupScheduler } from "@/app/cleanup";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
 import { useFollowupReminders } from "@/app/reminders";
+import { useStorageWarning } from "@/app/storage";
 import { useSyncScheduler } from "@/app/sync";
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
@@ -30,7 +30,7 @@ const ALL_NAV = [...WORK_NAV, ...CONTEXT_NAV, SETTINGS_NAV];
 function Background() {
   useSyncScheduler();
   useFollowupReminders();
-  useCleanupScheduler();
+  useStorageWarning();
   return null;
 }
 

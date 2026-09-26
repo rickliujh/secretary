@@ -5,7 +5,7 @@ import { ulid } from "ulidx";
 import { inboxItems, intakeItems, jiraComments, jiraIssues, llmCalls } from "@/db/schema";
 import { query } from "@/services/db";
 import { syncedJiraLayer, syncOnce } from "@/test/seed";
-import { cleanup, cleanupIfDue, lastCleanup, ulidAt } from "./retention";
+import { cleanup, lastCleanup, storageLevel, ulidAt } from "./retention";
 
 const NOW = new Date("2026-09-26T12:00:00.000Z");
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000);
@@ -66,10 +66,8 @@ describe("storage cleanup (D34)", () => {
           yield* query((d) => d.insert(intakeItems).values([item(oldId), item(newId)]));
 
           const result = yield* cleanup(NOW);
-          const again = yield* cleanupIfDue(new Date(NOW.getTime() + 3_600_000));
           return {
             result,
-            again,
             last: yield* lastCleanup,
             calls: (yield* query((d) => d.select().from(llmCalls).all())).map((c) => c.id),
             issues: (yield* query((d) =>
@@ -98,9 +96,15 @@ describe("storage cleanup (D34)", () => {
     expect(r.comments).toBe(0);
     expect(r.snapshots.find((s) => s.id === r.oldId)?.snapshot).toEqual({ pruned: true });
     expect(r.snapshots.filter((s) => !(s.snapshot as { pruned?: boolean }).pruned)).toHaveLength(1);
-    // A cleanup an hour later is skipped; the last result is kept for Settings.
-    expect(r.again).toBeNull();
+    // The last result is kept for Settings.
     expect(r.last?.at).toBe(NOW.toISOString());
+  });
+
+  test("storage level against the user's limit", () => {
+    const mb = 1024 * 1024;
+    expect(storageLevel(100 * mb, 500)).toBe("ok");
+    expect(storageLevel(460 * mb, 500)).toBe("near");
+    expect(storageLevel(500 * mb, 500)).toBe("over");
   });
 
   test("ulidAt is the smallest ULID of that moment", () => {

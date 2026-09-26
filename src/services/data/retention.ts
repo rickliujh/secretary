@@ -1,6 +1,7 @@
 /**
- * Cleanup that keeps the database from growing without limit (design.md D34).
- * Only caches and derived data go; the user's own records stay.
+ * Storage limit and the cleanup the user runs from Settings (design.md D34).
+ * Nothing runs on a schedule. Only caches and derived data go; the user's own
+ * records stay.
  */
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { Effect } from "effect";
@@ -13,11 +14,19 @@ export const RETENTION = {
   llmCallsDays: 90,
   staleIssueDays: 30,
   snapshotDays: 180,
-  /** Vacuum when at least this much of the file is free pages. */
-  vacuumFreeBytes: 20 * 1024 * 1024,
-  /** A cleanup this recent is not repeated by the daily schedule. */
-  minHoursBetween: 20,
+  /** Compact the file when at least this much of it is free pages. */
+  vacuumFreeBytes: 1024 * 1024,
+  /** Share of the storage limit at which the app starts warning. */
+  nearLimit: 0.9,
 } as const;
+
+export type StorageLevel = "ok" | "near" | "over";
+
+export function storageLevel(bytes: number, limitMb: number): StorageLevel {
+  const limit = limitMb * 1024 * 1024;
+  if (bytes >= limit) return "over";
+  return bytes >= limit * RETENTION.nearLimit ? "near" : "ok";
+}
 
 /** What stands in for a snapshot once it has been emptied; replay skips these. */
 export const PRUNED_SNAPSHOT = { pruned: true } as const;
@@ -115,14 +124,6 @@ export const cleanup = (now = new Date()) =>
   });
 
 /** Runs the cleanup unless one ran recently (the daily schedule). */
-export const cleanupIfDue = (now = new Date()) =>
-  Effect.gen(function* () {
-    const last = yield* lastCleanup;
-    if (last && now.getTime() - Date.parse(last.at) < RETENTION.minHoursBetween * 3_600_000)
-      return null;
-    return yield* cleanup(now);
-  });
-
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /** The smallest ULID for a moment: its 10-character time prefix, then zeros. */
 export function ulidAt(date: Date): string {

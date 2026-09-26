@@ -529,16 +529,17 @@ Built
   the next model step as an image message. Nothing is saved to disk; the model must
   accept images.
 
-## Storage cleanup (2026-09-26)
+## Storage limit and cleanup (2026-09-26)
 
-- A cleanup runs a minute after start and then daily (design.md D34): model usage
-  records after 90 days, tickets that left the sync scope 30 days ago (with their
-  comments), and inbox context snapshots after 180 days (emptied; threads, proposals and
-  decisions stay; evaluation replay skips them). The database is compacted when more
-  than 20 MB is free. Cleanup waits while a sync is running.
-- Logs rotate at 2 MB and keep three files; import backups keep the newest three.
-- Settings > Data > Storage shows the database size, the last cleanup and a "Clean up
-  now" button. The user's own records are never removed automatically.
+- Settings > Data > Storage shows the database size against a limit you set (default
+  1024 MB). Shortly after launch and after each sync the app checks it and warns at
+  90% and when over, with a link to the page (design.md D34).
+- "Clean up" removes model usage records after 90 days, tickets that left the sync
+  scope 30 days ago (with their comments), inbox context snapshots after 180 days
+  (emptied; threads, proposals and decisions stay; evaluation replay skips them) and
+  all but the newest three import backups, then compacts the database. Nothing is
+  removed automatically; your own records are never removed.
+- Logs rotate at 2 MB and keep three files.
 
 ## Ranked ticket picker in drafts (2026-09-26)
 

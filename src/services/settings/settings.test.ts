@@ -38,6 +38,7 @@ describe("Settings schema", () => {
       confluence: { baseUrl: "", deployment: "auto", email: "" },
       general: { outputLanguage: "English", fiscalYearStartMonth: 1 },
       dependencies: { followupDays: 3, reminders: true },
+      storage: { limitMb: 1024 },
       scoring: {
         priority: 3,
         due: 4,

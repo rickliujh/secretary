@@ -4,10 +4,9 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Effect } from "effect";
-import { Download, Eraser, FolderOpen, Sparkles, Upload } from "lucide-react";
+import { Download, Eraser, FolderOpen, Upload } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { runCleanup } from "@/app/cleanup";
 import { useErrorToast } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
@@ -23,14 +22,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { relativeTime } from "@/lib/time";
-import { pruneImportBackups } from "@/services/data/backups";
-import {
-  type CleanupResult,
-  databaseSize,
-  lastCleanup,
-  RETENTION,
-} from "@/services/data/retention";
 import {
   type ExportFile,
   exportAll,
@@ -40,6 +31,7 @@ import {
 } from "@/services/data/transfer";
 import { Db } from "@/services/db";
 import { SETTINGS_FILE } from "@/services/settings/live";
+import { StorageCard } from "./storage-card";
 
 async function dataPaths(database: string) {
   return [
@@ -51,17 +43,6 @@ async function dataPaths(database: string) {
 
 const stamp = () => new Date().toISOString().slice(0, 19).replaceAll(":", "-");
 
-const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-
-function cleanupSummary(r: CleanupResult) {
-  const parts = [
-    r.llmCalls && `${r.llmCalls} old usage records`,
-    r.staleIssues && `${r.staleIssues} tickets no longer synced`,
-    r.snapshots && `${r.snapshots} old inbox snapshots`,
-  ].filter(Boolean);
-  return parts.length ? `Removed ${parts.join(", ")}.` : "Nothing needed removing.";
-}
-
 const rowCount = (f: ExportFile) => Object.values(f.tables).reduce((n, rows) => n + rows.length, 0);
 
 export function DataSection() {
@@ -70,15 +51,6 @@ export function DataSection() {
   const paths = useQuery({
     queryKey: queryKeys.dataPaths,
     queryFn: async () => dataPaths((await run(Effect.map(Db, (db) => db.location))) ?? ""),
-  });
-  const storage = useQuery({
-    queryKey: queryKeys.storage,
-    queryFn: () => run(Effect.all({ size: databaseSize, last: lastCleanup })),
-  });
-  const cleanMutation = useMutation({
-    mutationFn: () => runCleanup(true),
-    onSuccess: (r) => r && toast.success(cleanupSummary(r)),
-    onError: (e) => onError(e),
   });
   const [pending, setPending] = useState<ExportFile | null>(null);
   const [resetting, setResetting] = useState(false);
@@ -119,7 +91,6 @@ export function DataSection() {
       const backup = await join(await appDataDir(), `backup-before-import-${stamp()}.json`);
       await writeTextFile(backup, JSON.stringify(await run(exportAll)));
       await run(importAll(file));
-      await pruneImportBackups().catch(() => 0);
       return backup;
     },
     onSuccess: (backup) => {
@@ -171,47 +142,7 @@ export function DataSection() {
           ))}
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Storage</CardTitle>
-          <CardDescription>
-            Cleanup runs daily. It removes model usage records after {RETENTION.llmCallsDays} days,
-            tickets that left your sync scope after {RETENTION.staleIssueDays} days, and the ticket
-            context saved with inbox items after {RETENTION.snapshotDays} days. Logs keep at most
-            three files of 2 MB and import backups the newest three. Your threads, notes, memories,
-            chats and drafts are never removed.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-sm">
-            <p>
-              Database{" "}
-              <span className="font-medium">
-                {storage.data ? mb(storage.data.size.bytes) : "..."}
-              </span>
-              {storage.data && storage.data.size.freeBytes > 0 && (
-                <span className="text-muted-foreground">
-                  {" "}
-                  ({mb(storage.data.size.freeBytes)} reusable)
-                </span>
-              )}
-            </p>
-            <p className="text-muted-foreground">
-              {storage.data?.last
-                ? `Last cleanup ${relativeTime(storage.data.last.at)}. ${cleanupSummary(storage.data.last)}`
-                : "Not cleaned up yet."}
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={cleanMutation.isPending}
-            onClick={() => cleanMutation.mutate()}
-          >
-            <Sparkles /> Clean up now
-          </Button>
-        </CardContent>
-      </Card>
+      <StorageCard />
       <Card>
         <CardHeader>
           <CardTitle>Export, import and reset</CardTitle>

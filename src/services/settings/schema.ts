@@ -118,6 +118,12 @@ export const SettingsSchema = z.object({
     })
     .prefault({}),
   scoring: ScoringWeightsSchema.prefault({}),
+  storage: z
+    .object({
+      /** Database size the app warns near (D34); cleanup is run by the user. */
+      limitMb: z.number().int().min(100).max(100_000).default(1024),
+    })
+    .prefault({}),
   network: z
     .object({
       /**
