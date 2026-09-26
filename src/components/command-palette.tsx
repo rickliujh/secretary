@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Building2, Settings2, Ticket, UserRound } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
+import { usePeople, useTeams, useTicketRows } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { SETTINGS_TABS } from "@/app/settings-tabs";
@@ -16,8 +17,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
-import { listPeople, listTeams } from "@/services/directory/queries";
-import { listTicketRows, searchTicketKeys } from "@/services/tickets/queries";
+import { searchTicketKeys } from "@/services/tickets/queries";
 
 const MAX_TICKETS = 20;
 
@@ -32,26 +32,14 @@ export function CommandPalette({
   const navigate = useNavigate();
   const [input, setInput] = useState("");
   const q = useDeferredValue(input.trim());
-  const rows = useQuery({
-    queryKey: queryKeys.ticketRows,
-    queryFn: ({ signal }) => run(listTicketRows, signal),
-    enabled: open,
-  });
+  const rows = useTicketRows({ enabled: open });
   const keys = useQuery({
     queryKey: queryKeys.ticketSearch(q),
     queryFn: ({ signal }) => run(searchTicketKeys(q), signal),
     enabled: open && q.length >= 2,
   });
-  const people = useQuery({
-    queryKey: queryKeys.people,
-    queryFn: ({ signal }) => run(listPeople, signal),
-    enabled: open,
-  });
-  const teams = useQuery({
-    queryKey: queryKeys.teams,
-    queryFn: ({ signal }) => run(listTeams, signal),
-    enabled: open,
-  });
+  const people = usePeople({ enabled: open });
+  const teams = useTeams({ enabled: open });
   const tickets = useMemo(() => {
     if (!keys.data || !rows.data) return [];
     const byKey = new Map(rows.data.map((r) => [r.key, r]));

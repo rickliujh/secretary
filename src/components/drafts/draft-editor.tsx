@@ -2,17 +2,19 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertCircle, Check, Copy, Loader2, RefreshCw, Send, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { describeError, errorIssues } from "@/app/errors";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
+import { CHANNEL_LABELS, intentLabel } from "@/components/labels";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { isSubmitEnter } from "@/lib/keys";
 import { dateTime, relativeTime } from "@/lib/time";
 import { type DraftDetail, draftDetail } from "@/services/comms/queries";
-import { INTENT_LABELS } from "./draft-composer";
 import { useDraftActions } from "./use-drafts";
 
 type Variant = "short" | "standard";
@@ -45,20 +47,18 @@ export function DraftEditor({
   if (!d) return <p className="p-6 text-sm text-muted-foreground">This draft no longer exists.</p>;
 
   const recipient = d.person?.displayName ?? d.team?.name ?? "No recipient";
-  const failure = actions.generate.error as { message?: string; issues?: readonly string[] } | null;
 
   return (
     <div className="flex max-w-3xl flex-col gap-4">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Badge variant="outline">{d.draft.kind === "email" ? "Email" : "Teams"}</Badge>
+          <Badge variant="outline">{CHANNEL_LABELS[d.draft.kind]}</Badge>
           <Badge variant="secondary">{d.draft.status}</Badge>
           {d.draft.language && <span>{d.draft.language}</span>}
           <span title={dateTime(d.draft.createdAt)}>{relativeTime(d.draft.createdAt)}</span>
         </div>
         <h2 className="text-lg font-semibold">
-          {INTENT_LABELS[d.draft.intent as keyof typeof INTENT_LABELS] ?? d.draft.intent} to{" "}
-          {recipient}
+          {intentLabel(d.draft.intent)} to {recipient}
         </h2>
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {d.draft.issueKeys.map((k) => (
@@ -91,21 +91,8 @@ export function DraftEditor({
           <Loader2 className="size-4 animate-spin" /> Writing in {recipient}'s style...
         </p>
       )}
-      {failure && !actions.generate.isPending && (
-        <Alert variant="destructive">
-          <AlertCircle />
-          <AlertTitle>No usable draft this time</AlertTitle>
-          <AlertDescription>
-            <p>{failure.message}</p>
-            {failure.issues?.length ? (
-              <ul className="list-disc pl-4">
-                {failure.issues.map((i) => (
-                  <li key={i}>{i}</li>
-                ))}
-              </ul>
-            ) : null}
-          </AlertDescription>
-        </Alert>
+      {actions.generate.isError && !actions.generate.isPending && (
+        <GenerateFailure error={actions.generate.error} />
       )}
 
       {d.draft.variants ? (
@@ -144,6 +131,36 @@ export function DraftEditor({
   );
 }
 
+/** A failed write, shown once here rather than toasted (the reason and any issues). */
+function GenerateFailure({ error }: { error: unknown }) {
+  const d = describeError(error);
+  const issues = errorIssues(error);
+  return (
+    <Alert variant="destructive">
+      <AlertCircle />
+      <AlertTitle>No usable draft this time</AlertTitle>
+      <AlertDescription>
+        <p>
+          {d.title}
+          {d.description && `: ${d.description}`}
+        </p>
+        {issues.length > 0 && (
+          <ul className="list-disc pl-4">
+            {issues.map((i) => (
+              <li key={i}>{i}</li>
+            ))}
+          </ul>
+        )}
+        {d.settingsTab && (
+          <Link to="/settings" search={{ tab: d.settingsTab }} className="underline">
+            Open settings
+          </Link>
+        )}
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 function Body({
   detail: d,
   actions,
@@ -162,6 +179,11 @@ function Body({
   });
   const [subject, setSubject] = useState(d.draft.subject ?? "");
   const [instruction, setInstruction] = useState("");
+  const rewrite = () => {
+    if (actions.generate.isPending) return;
+    actions.generate.mutate(instruction.trim() || null);
+    setInstruction("");
+  };
   const sent = d.draft.status === "sent";
   const email = d.draft.kind === "email";
   const dirty =
@@ -250,20 +272,10 @@ function Body({
                 value={instruction}
                 onChange={(e) => setInstruction(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !actions.generate.isPending) {
-                    actions.generate.mutate(instruction.trim() || null);
-                    setInstruction("");
-                  }
+                  if (isSubmitEnter(e)) rewrite();
                 }}
               />
-              <Button
-                variant="outline"
-                disabled={actions.generate.isPending}
-                onClick={() => {
-                  actions.generate.mutate(instruction.trim() || null);
-                  setInstruction("");
-                }}
-              >
+              <Button variant="outline" disabled={actions.generate.isPending} onClick={rewrite}>
                 {actions.generate.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                 Rewrite
               </Button>

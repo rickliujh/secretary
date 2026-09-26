@@ -1,9 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Sparkles } from "lucide-react";
 import { CONTEXT_NAV, type NavItem, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
-import { queryKeys } from "@/app/query-client";
-import { run } from "@/app/runtime";
+import { usePendingCount } from "@/app/queries";
 import {
   Sidebar,
   SidebarContent,
@@ -18,7 +16,6 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { pendingCount } from "@/services/inbox/queries";
 
 function NavList({
   items,
@@ -48,9 +45,7 @@ function NavList({
 
 export function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const pending = useQuery({
-    queryKey: queryKeys.pendingCount,
-    queryFn: ({ signal }) => run(pendingCount, signal),
+  const pending = usePendingCount({
     refetchInterval: 30_000,
   });
   return (

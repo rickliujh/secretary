@@ -1,13 +1,9 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Effect } from "effect";
 import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
-import { useErrorToast, useSettings, useUpdateSettings } from "@/app/hooks";
-import { queryKeys } from "@/app/query-client";
-import { run } from "@/app/runtime";
+import { useSettings, useUpdateSettings } from "@/app/hooks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,7 +32,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Llm } from "@/services/llm";
 import { resolveTask } from "@/services/llm/routing";
 import {
   ANTHROPIC_MODEL_SUGGESTIONS,
@@ -48,6 +43,7 @@ import {
 } from "@/services/llm/tasks";
 import type { AppSettings, TaskOverride } from "@/services/settings";
 import { ReplayCard } from "./replay-card";
+import { useLlmTest } from "./use-llm-test";
 
 const NONE = "__none__";
 
@@ -76,8 +72,6 @@ function toForm(s: AppSettings): TiersValues {
 
 function TiersCard({ settings }: { settings: AppSettings }) {
   const update = useUpdateSettings();
-  const client = useQueryClient();
-  const onError = useErrorToast();
   const form = useForm<TiersValues>({
     resolver: zodResolver(TiersForm),
     defaultValues: toForm(settings),
@@ -85,18 +79,10 @@ function TiersCard({ settings }: { settings: AppSettings }) {
   useEffect(() => form.reset(toForm(settings)), [settings, form]);
   const dirty = form.formState.isDirty;
 
-  const test = useMutation({
-    mutationFn: (tier: Tier) => run(Effect.flatMap(Llm, (llm) => llm.test({ tier }))),
-    onSuccess: (r, tier) =>
-      toast.success(`${tier} tier (${r.model}) answered in ${r.durationMs} ms`, {
-        description: `"${r.text.trim().slice(0, 80)}"`,
-      }),
-    onError: (e) => onError(e),
-    onSettled: () => {
-      client.invalidateQueries({ queryKey: queryKeys.usage });
-      client.invalidateQueries({ queryKey: queryKeys.recentCalls });
-    },
-  });
+  const test = useLlmTest(
+    (tier: Tier) => ({ tier }),
+    (r, tier) => `${tier} tier (${r.model})`,
+  );
 
   const onSubmit = form.handleSubmit((v) =>
     update.mutate(

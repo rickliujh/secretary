@@ -1,6 +1,8 @@
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { z } from "zod";
 import { useSettings, useUpdateSettings } from "@/app/hooks";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   DEFAULT_WEIGHTS,
@@ -29,7 +31,26 @@ const LABELS: Record<keyof ScoringWeights, [string, string]> = {
   pinned: ["Pinned", "Added to pinned tickets."],
 };
 
-type Values = Record<keyof ScoringWeights, string>;
+/** A weight typed as text, checked against the limits the settings schema sets. */
+const weight = (k: keyof ScoringWeights) => {
+  const max = ScoringWeightsSchema.shape[k].unwrap().maxValue ?? Number.POSITIVE_INFINITY;
+  return z.coerce
+    .number<string>({ error: "Enter a number" })
+    .min(0, "At least 0")
+    .max(max, `At most ${max}`);
+};
+
+const Form = z.object({
+  priority: weight("priority"),
+  due: weight("due"),
+  blocked: weight("blocked"),
+  blocking: weight("blocking"),
+  stale: weight("stale"),
+  dependency: weight("dependency"),
+  pinned: weight("pinned"),
+});
+type Values = z.input<typeof Form>;
+
 const toValues = (w: ScoringWeights): Values =>
   Object.fromEntries(Object.entries(w).map(([k, v]) => [k, String(v)])) as Values;
 
@@ -37,23 +58,19 @@ const toValues = (w: ScoringWeights): Values =>
 export function RankingSection() {
   const { data: settings } = useSettings();
   const update = useUpdateSettings();
-  const form = useForm<Values>({ defaultValues: toValues(DEFAULT_WEIGHTS) });
+  const form = useForm<Values, unknown, ScoringWeights>({
+    resolver: zodResolver(Form),
+    defaultValues: toValues(DEFAULT_WEIGHTS),
+  });
   useEffect(() => {
     if (settings) form.reset(toValues(settings.scoring));
   }, [settings, form]);
 
-  const save = (values: Values) => {
-    const parsed = ScoringWeightsSchema.safeParse(
-      Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Number(v)])),
-    );
-    if (!parsed.success) {
-      toast.error("Weights must be numbers between 0 and 20 (pinned up to 50).");
-      return;
-    }
-    update.mutate((s) => ({ ...s, scoring: parsed.data }), {
+  const save = (scoring: ScoringWeights) =>
+    update.mutate((s) => ({ ...s, scoring }), {
       onSuccess: () => toast.success("Ranking updated"),
     });
-  };
+  const errors = form.formState.errors;
 
   return (
     <Card>
@@ -67,7 +84,7 @@ export function RankingSection() {
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4">
           {(Object.keys(LABELS) as (keyof ScoringWeights)[]).map((k) => (
-            <Field key={k}>
+            <Field key={k} data-invalid={!!errors[k]}>
               <FieldLabel htmlFor={`w-${k}`}>{LABELS[k][0]}</FieldLabel>
               <Input
                 id={`w-${k}`}
@@ -78,6 +95,7 @@ export function RankingSection() {
                 {...form.register(k)}
               />
               <FieldDescription>{LABELS[k][1]}</FieldDescription>
+              <FieldError errors={[errors[k]]} />
             </Field>
           ))}
         </CardContent>

@@ -1,7 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { Effect } from "effect";
-import { toast } from "sonner";
-import { useErrorToast } from "@/app/hooks";
+import { useAppMutation } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { type AppServices, run } from "@/app/runtime";
 import { dashboardWithBrief, generateBrief } from "@/services/dashboard/brief";
@@ -16,13 +15,7 @@ export function useDashboard() {
 }
 
 export function useGenerateBrief() {
-  const client = useQueryClient();
-  const onError = useErrorToast();
-  return useMutation({
-    mutationFn: () => run(generateBrief()),
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.dashboard }),
-    onError: (e) => onError(e),
-  });
+  return useAppMutation(() => generateBrief(), { invalidate: [queryKeys.dashboard] });
 }
 
 /** Local ticket state change (pin, snooze, override); refreshes rankings. */
@@ -30,14 +23,5 @@ export function useMetaMutation<I>(
   program: (input: I) => Effect.Effect<unknown, unknown, AppServices>,
   success: string,
 ) {
-  const client = useQueryClient();
-  const onError = useErrorToast();
-  return useMutation({
-    mutationFn: (input: I) => run(program(input)),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: queryKeys.tickets });
-      toast.success(success);
-    },
-    onError: (e) => onError(e),
-  });
+  return useAppMutation(program, { invalidate: [queryKeys.tickets], success });
 }

@@ -9,7 +9,7 @@ import { DependencyDialog } from "@/components/dependencies/dependency-dialog";
 import { DependencyRowView } from "@/components/dependencies/dependency-row";
 import { DependencySheet } from "@/components/dependencies/dependency-sheet";
 import { useChaseDraft } from "@/components/drafts/use-drafts";
-import { PageHeader, Planned } from "@/components/page";
+import { EmptyState, PageHeader } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -85,7 +85,7 @@ function WaitingPage() {
         </div>
       </div>
       {list.isSuccess && groups.length === 0 && (
-        <Planned
+        <EmptyState
           icon={Hourglass}
           title={dueOnly ? "Nothing needs chasing today" : "Nothing to wait on"}
           description="Dependencies come from approved inbox proposals, or add one here or on a ticket."

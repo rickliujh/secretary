@@ -2,11 +2,13 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { cn } from "@/lib/utils";
 
 export function PageHeader({
   title,
@@ -28,25 +30,33 @@ export function PageHeader({
   );
 }
 
-/** Placeholder for pages whose feature lands in a later phase. */
-export function Planned({
+/**
+ * What a page or list shows when there is nothing in it (or it cannot work
+ * yet): an icon, a line or two of guidance and an optional action.
+ */
+export function EmptyState({
   icon: Icon,
   title,
   description,
+  action,
+  className,
 }: {
   icon: LucideIcon;
-  title: string;
-  description: string;
+  title?: string;
+  description: ReactNode;
+  action?: ReactNode;
+  className?: string;
 }) {
   return (
-    <Empty className="border border-dashed">
+    <Empty className={cn("border border-dashed", className)}>
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <Icon />
         </EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
+        {title && <EmptyTitle>{title}</EmptyTitle>}
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyHeader>
+      {action && <EmptyContent>{action}</EmptyContent>}
     </Empty>
   );
 }

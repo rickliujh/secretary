@@ -1,5 +1,7 @@
 import { ClipboardPaste, CornerDownLeft, Loader2, Type, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { usePeople } from "@/app/queries";
+import { SOURCE_LABELS } from "@/components/labels";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -9,18 +11,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { isSubmitEnter } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 import { SOURCES, type Source } from "@/services/intake";
 import { SenderPicker } from "./sender-picker";
-import { useLookups } from "./use-inbox";
-
-export const SOURCE_LABELS: Record<Source, string> = {
-  teams: "Teams",
-  email: "Email",
-  meeting: "Meeting notes",
-  typed: "Typed",
-  other: "Other",
-};
 
 export type ComposerMessage = {
   /** The user's own words: instructions the secretary follows. */
@@ -63,7 +57,7 @@ export function Composer({
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [source, setSource] = useState<Source>(defaultSource === "typed" ? "teams" : defaultSource);
   const [sender, setSender] = useState<string | null>(null);
-  const { people } = useLookups();
+  const people = usePeople().data ?? [];
   const canSend = !busy && (typed.trim() !== "" || blocks.length > 0);
 
   const send = () => {
@@ -130,7 +124,7 @@ export function Composer({
           setBlocks((all) => [...all, { id: Date.now() + all.length, text }]);
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+          if (isSubmitEnter(e)) {
             e.preventDefault();
             send();
           }

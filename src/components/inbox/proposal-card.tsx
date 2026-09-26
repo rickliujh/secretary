@@ -1,21 +1,24 @@
 import { Link } from "@tanstack/react-router";
 import { Check, Loader2, Pencil, RotateCcw, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import type { Lookups } from "@/app/queries";
+import { CHANNEL_LABELS, INTENT_LABELS } from "@/components/labels";
 import { Markdown } from "@/components/markdown";
+import { TONE } from "@/components/tone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
 import { NEW_REF_RE, PROPOSAL_LABELS, type ProposalPayload } from "@/services/proposals/schema";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
-import { type Lookups, useDecisions } from "./use-inbox";
+import { useDecisions } from "./use-inbox";
 
 const STATUS_TONE: Record<string, string> = {
-  pending: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-  executed: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  failed: "bg-destructive/15 text-destructive",
-  rejected: "bg-muted text-muted-foreground",
-  approved: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
+  pending: TONE.warning,
+  executed: TONE.success,
+  failed: TONE.danger,
+  rejected: TONE.neutral,
+  approved: TONE.info,
 };
 
 function IssueRef({ value, lookups }: { value: string; lookups: Lookups }) {
@@ -146,7 +149,7 @@ function PayloadView({ p, lookups }: { p: ProposalPayload; lookups: Lookups }) {
         <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-sm">
           <Row label="To">{person(p.recipientPersonId) ?? team(p.recipientTeamId)}</Row>
           <Row label="What">
-            {p.intent.replace("_", " ")} via {p.channel}
+            {INTENT_LABELS[p.intent]} via {CHANNEL_LABELS[p.channel]}
           </Row>
           <Row label="About">
             {p.issueKeys.length > 0 && (

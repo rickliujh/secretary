@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
+import { useLookups } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
-import { useLookups } from "@/components/inbox/use-inbox";
+import { INTENT_LABELS } from "@/components/labels";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import {
@@ -22,15 +23,6 @@ import { listDependencies } from "@/services/dependencies/queries";
 import { MESSAGE_INTENTS } from "@/services/proposals/schema";
 import { type Recipient, RecipientPicker, TicketPicker } from "./pickers";
 import { useCreateDraft } from "./use-drafts";
-
-export const INTENT_LABELS: Record<(typeof MESSAGE_INTENTS)[number], string> = {
-  chase: "Chase",
-  status_update: "Status update",
-  request: "Request",
-  escalation: "Escalation",
-  fyi: "FYI",
-  thank_you: "Thank you",
-};
 
 const NO_DEPENDENCY = "none";
 

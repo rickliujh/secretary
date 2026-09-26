@@ -2,17 +2,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import { Archive, Plus, Search, UserPlus } from "lucide-react";
+import { Archive, Plus, UserPlus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { useErrorToast } from "@/app/hooks";
+import { usePeople, useTeams } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { PersonDialog } from "@/components/directory/person-dialog";
 import { PersonSheet } from "@/components/directory/person-sheet";
 import { useDirectoryMutation } from "@/components/directory/use-directory";
 import { PageHeader } from "@/components/page";
+import { SearchInput } from "@/components/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +24,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -31,12 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  createPerson,
-  jiraUsersWithoutContact,
-  listPeople,
-  listTeams,
-} from "@/services/directory/queries";
+import { createPerson, jiraUsersWithoutContact } from "@/services/directory/queries";
 import type { Profile } from "@/services/directory/schema";
 import { exportDirectory, importDirectory } from "@/services/directory/transfer";
 
@@ -105,14 +101,8 @@ function PeoplePage() {
   const navigate = useNavigate({ from: "/people" });
   const [text, setText] = useState("");
   const [adding, setAdding] = useState(false);
-  const people = useQuery({
-    queryKey: queryKeys.people,
-    queryFn: ({ signal }) => run(listPeople, signal),
-  });
-  const teams = useQuery({
-    queryKey: queryKeys.teams,
-    queryFn: ({ signal }) => run(listTeams, signal),
-  });
+  const people = usePeople();
+  const teams = useTeams();
   const suggestions = useQuery({
     queryKey: queryKeys.jiraUserSuggestions,
     queryFn: ({ signal }) => run(jiraUsersWithoutContact, signal),
@@ -174,16 +164,13 @@ function PeoplePage() {
           </CardContent>
         </Card>
       )}
-      <div className="relative w-72">
-        <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
-        <Input
-          aria-label="Filter contacts"
-          placeholder="Filter"
-          className="pl-8"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-      </div>
+      <SearchInput
+        className="w-72"
+        aria-label="Filter contacts"
+        placeholder="Filter"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
       <div className="rounded-lg border">
         <Table>
           <TableHeader>

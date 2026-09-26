@@ -130,7 +130,7 @@ export function AssignButton({ issue }: { issue: Issue }) {
     return () => clearTimeout(t);
   }, [text]);
   const users = useQuery({
-    queryKey: ["jira", "assignable", issue.key, debounced],
+    queryKey: queryKeys.assignableUsers(issue.key, debounced),
     queryFn: ({ signal }) =>
       run(
         Effect.flatMap(JiraClient, (j) => j.assignableUsers(issue.key, debounced)),

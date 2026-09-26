@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
+import { type Lookups, useLookups } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import {
@@ -18,6 +19,7 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
+import { sourceLabel } from "@/components/labels";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,9 +29,9 @@ import { inboxDetail, type ProposalView, type ThreadMessage } from "@/services/i
 import type { Source } from "@/services/intake";
 import type { MessagePart } from "@/services/intake/thread";
 import { describePayload } from "@/services/proposals/schema";
-import { Composer, type ComposerMessage, SOURCE_LABELS } from "./composer";
+import { Composer, type ComposerMessage } from "./composer";
 import { ProposalCard } from "./proposal-card";
-import { type Lookups, useDecisions, useLookups, useReply } from "./use-inbox";
+import { useDecisions, useReply } from "./use-inbox";
 
 function PastedText({ text, source }: { text: string; source: string | null }) {
   const [open, setOpen] = useState(false);
@@ -39,7 +41,7 @@ function PastedText({ text, source }: { text: string; source: string | null }) {
       <span className="flex items-center gap-1 text-[11px] uppercase tracking-wide">
         <ClipboardPaste className="size-3" />
         Pasted
-        {source && source !== "typed" ? ` · ${SOURCE_LABELS[source as Source] ?? source}` : ""}
+        {source && source !== "typed" ? ` · ${sourceLabel(source)}` : ""}
       </span>
       <p className={cn("whitespace-pre-wrap", long && !open && "line-clamp-6")}>{text}</p>
       {long && (
@@ -220,7 +222,7 @@ export function ThreadView({ id }: { id: string }) {
     <div className="flex h-full min-h-0 flex-col gap-3">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Badge variant="outline">{SOURCE_LABELS[d.item.source as Source] ?? d.item.source}</Badge>
+          <Badge variant="outline">{sourceLabel(d.item.source)}</Badge>
           {d.item.senderName && <span>from {d.item.senderName}</span>}
           <span title={dateTime(d.item.receivedAt)}>{relativeTime(d.item.receivedAt)}</span>
           <Badge variant="secondary">{d.item.status}</Badge>

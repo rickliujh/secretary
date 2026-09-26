@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { Loader2, Play } from "lucide-react";
 import { useRef, useState } from "react";
+import { isInterrupted } from "@/app/errors";
 import { useErrorToast } from "@/app/hooks";
 import { run } from "@/app/runtime";
 import { Button } from "@/components/ui/button";
@@ -57,7 +58,7 @@ export function ReplayCard({ settings }: { settings: AppSettings }) {
       );
     },
     onError: (e) => {
-      if ((e as { _tag?: string })._tag !== "InterruptedException") onError(e);
+      if (!isInterrupted(e)) onError(e);
     },
     onSettled: () => setProgress(null),
   });

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
+import { useSessionUsage } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
-import { run, SESSION_STARTED_AT } from "@/app/runtime";
+import { run } from "@/app/runtime";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -13,15 +14,12 @@ import {
 } from "@/components/ui/table";
 import { formatTokens } from "@/components/usage-indicator";
 import { TIERS } from "@/services/llm/tasks";
-import { recentCalls, usageSince } from "@/services/llm/usage";
+import { recentCalls } from "@/services/llm/usage";
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString();
 
 export function UsageSection() {
-  const session = useQuery({
-    queryKey: queryKeys.usage,
-    queryFn: ({ signal }) => run(usageSince(SESSION_STARTED_AT), signal),
-  });
+  const session = useSessionUsage();
   const calls = useQuery({
     queryKey: queryKeys.recentCalls,
     queryFn: ({ signal }) => run(recentCalls(50), signal),

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
+import type { Lookups } from "@/app/queries";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,7 +27,6 @@ import {
   ProposalPayloadSchema,
 } from "@/services/proposals/schema";
 import { FIELD_SPECS, fieldName, fromFormValues, toFormValues } from "./proposal-fields";
-import type { Lookups } from "./use-inbox";
 
 const UNSET = "__unset__";
 

@@ -1,4 +1,5 @@
 import { AlertTriangle, Loader2, RefreshCw, WifiOff } from "lucide-react";
+import { isSyncBusy } from "@/app/errors";
 import { useErrorToast, useSettings } from "@/app/hooks";
 import { useOnline } from "@/app/online";
 import { runSync, useSyncStatus } from "@/app/sync";
@@ -28,7 +29,7 @@ export function SyncIndicator() {
 
   const sync = () =>
     runSync().catch((e) => {
-      if ((e as { kind?: string }).kind !== "busy") onError(e, sync);
+      if (!isSyncBusy(e)) onError(e, sync);
     });
 
   let label = "Not synced";

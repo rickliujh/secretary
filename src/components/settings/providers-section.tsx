@@ -1,11 +1,7 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Effect } from "effect";
 import { KeyRound, Plus } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
-import { useErrorToast, useSecretStatus, useSettings } from "@/app/hooks";
+import { useAppMutation, useSecretStatus, useSettings } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
-import { run } from "@/app/runtime";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,12 +24,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Llm } from "@/services/llm";
 import { ANTHROPIC_MODEL_SUGGESTIONS, TIERS } from "@/services/llm/tasks";
 import { secretNames } from "@/services/secrets";
 import type { AppSettings, Provider } from "@/services/settings";
 import { deleteProvider } from "@/services/settings/providers";
 import { ProviderDialog } from "./provider-dialog";
+import { useLlmTest } from "./use-llm-test";
 
 function defaultTestModel(provider: Provider, settings: AppSettings) {
   for (const tier of TIERS) {
@@ -52,33 +48,18 @@ function ProviderCard({
   settings: AppSettings;
   onEdit: () => void;
 }) {
-  const client = useQueryClient();
-  const onError = useErrorToast();
   const key = useSecretStatus(secretNames.providerApiKey(provider.id));
   const [model, setModel] = useState(() => defaultTestModel(provider, settings));
   const boundTiers = TIERS.filter((t) => settings.tiers[t]?.providerId === provider.id);
 
-  const test = useMutation({
-    mutationFn: () =>
-      run(Effect.flatMap(Llm, (llm) => llm.test({ providerId: provider.id, model }))),
-    onSuccess: (r) =>
-      toast.success(`${provider.name} answered in ${r.durationMs} ms`, {
-        description: `"${r.text.trim().slice(0, 80)}"`,
-      }),
-    onError: (e) => onError(e),
-    onSettled: () => {
-      client.invalidateQueries({ queryKey: queryKeys.usage });
-      client.invalidateQueries({ queryKey: queryKeys.recentCalls });
-    },
-  });
+  const test = useLlmTest(
+    () => ({ providerId: provider.id, model }),
+    () => provider.name,
+  );
 
-  const remove = useMutation({
-    mutationFn: () => run(deleteProvider(provider.id)),
-    onSuccess: () => {
-      client.invalidateQueries({ queryKey: queryKeys.settings });
-      toast.success(`Removed ${provider.name}`);
-    },
-    onError: (e) => onError(e),
+  const remove = useAppMutation(() => deleteProvider(provider.id), {
+    invalidate: [queryKeys.settings],
+    success: `Removed ${provider.name}`,
   });
 
   return (

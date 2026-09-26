@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
-import { useLookups } from "@/components/inbox/use-inbox";
+import { useLookups } from "@/app/queries";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

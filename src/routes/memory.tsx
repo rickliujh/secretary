@@ -1,16 +1,17 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { Brain, Check, Loader2, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { useErrorToast } from "@/app/hooks";
+import { useAppMutation } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { MemoryDialog } from "@/components/memory/memory-dialog";
 import { useMemoryMutation } from "@/components/memory/use-memory";
-import { PageHeader } from "@/components/page";
+import { WEIGHT_OPTIONS, type WeightName, weightName } from "@/components/memory/weight";
+import { EmptyState, PageHeader } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,30 +35,26 @@ import {
 } from "@/services/memory/queries";
 
 export const Route = createFileRoute("/memory")({
-  validateSearch: z.object({ tab: z.enum(["memories", "corrections"]).optional() }),
+  validateSearch: z.object({ tab: z.enum(["memories", "corrections"]).catch("memories") }),
   component: MemoryPage,
 });
 
 /** FR-7: what the secretary remembers, where it came from and how often it helps. */
 function MemoryPage() {
-  const { tab = "memories" } = Route.useSearch();
-  const navigate = Route.useNavigate();
-  const navigateTo = useNavigate();
+  const { tab } = Route.useSearch();
+  const navigate = useNavigate({ from: "/memory" });
   const list = useQuery({
     queryKey: queryKeys.memories,
     queryFn: ({ signal }) => run(listMemories, signal),
   });
   const [editing, setEditing] = useState<MemoryView | null | undefined>(undefined);
-  const onError = useErrorToast();
-  const consolidate = useMutation({
-    mutationFn: () => run(Effect.flatMap(Learning, (l) => l.consolidate)),
+  const consolidate = useAppMutation(() => Effect.flatMap(Learning, (l) => l.consolidate), {
     onSuccess: (r) => {
       if (r.inboxItemId) {
         toast.success(`${r.rules} rule${r.rules === 1 ? "" : "s"} to review`);
-        void navigateTo({ to: "/inbox", search: { item: r.inboxItemId } });
+        void navigate({ to: "/inbox", search: { item: r.inboxItemId } });
       } else toast.info(`No clear pattern in ${r.corrections} corrections yet.`);
     },
-    onError: (e) => onError(e),
   });
   const all = list.data ?? [];
   const kept = all.filter((m) => m.kind !== "example");
@@ -84,10 +81,10 @@ function MemoryPage() {
             <MemoryCard key={m.id} memory={m} onEdit={() => setEditing(m)} />
           ))}
           {list.isSuccess && kept.length === 0 && (
-            <Empty>
-              Nothing yet. Add a rule such as “anything about the billing migration goes under
-              PAY-1”, or approve a “remember” proposal in the Inbox.
-            </Empty>
+            <EmptyState
+              icon={Brain}
+              description="Nothing yet. Add a rule such as “anything about the billing migration goes under PAY-1”, or approve a “remember” proposal in the Inbox."
+            />
           )}
         </TabsContent>
         <TabsContent value="corrections" className="mt-4 flex flex-col gap-2">
@@ -107,10 +104,10 @@ function MemoryPage() {
             <CorrectionCard key={m.id} memory={m} />
           ))}
           {list.isSuccess && corrections.length === 0 && (
-            <Empty>
-              When you edit, reject or ask for a change to a proposal, the change is kept here and
-              shown to the model next time something similar comes in.
-            </Empty>
+            <EmptyState
+              icon={Brain}
+              description="When you edit, reject or ask for a change to a proposal, the change is kept here and shown to the model next time something similar comes in."
+            />
           )}
         </TabsContent>
       </Tabs>
@@ -119,15 +116,6 @@ function MemoryPage() {
         onOpenChange={(o) => !o && setEditing(undefined)}
         memory={editing}
       />
-    </div>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-      <Brain className="size-6" />
-      <p className="max-w-md">{children}</p>
     </div>
   );
 }
@@ -156,7 +144,6 @@ function MemoryCard({ memory: m, onEdit }: { memory: MemoryView; onEdit: () => v
   const weight = useMemoryMutation((w: number) => setWeight(m.id, w));
   const confirm = useMemoryMutation(() => setConfirmed(m.id, true), "Confirmed");
   const remove = useMemoryMutation(() => deleteMemory(m.id), "Forgotten");
-  const preset = Object.entries(WEIGHTS).find(([, w]) => w === m.weight)?.[0] ?? "normal";
   return (
     <article
       className={cn("flex flex-col gap-2 rounded-lg border p-3", !m.confirmed && "border-dashed")}
@@ -169,16 +156,18 @@ function MemoryCard({ memory: m, onEdit }: { memory: MemoryView; onEdit: () => v
         {!m.confirmed && <Badge variant="outline">not confirmed, not used</Badge>}
         <span className="ml-auto flex items-center gap-1">
           <Select
-            value={preset}
-            onValueChange={(v) => weight.mutate(WEIGHTS[v as keyof typeof WEIGHTS])}
+            value={weightName(m.weight)}
+            onValueChange={(v) => weight.mutate(WEIGHTS[v as WeightName])}
           >
             <SelectTrigger size="sm" className="w-28" aria-label="Importance">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="normal">Normal</SelectItem>
-              <SelectItem value="high">High</SelectItem>
+              {WEIGHT_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Button size="icon" variant="ghost" aria-label="Edit" onClick={onEdit}>

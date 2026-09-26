@@ -11,10 +11,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
+import { useLookups } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { useChaseDraft } from "@/components/drafts/use-drafts";
-import { useLookups } from "@/components/inbox/use-inbox";
 import { Markdown } from "@/components/markdown";
 import {
   AlertDialog,

@@ -1,3 +1,4 @@
+import { TONE } from "@/components/tone";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { DependencyTiming } from "@/services/dependencies/logic";
@@ -23,10 +24,7 @@ export function TimingBadges({
         </Badge>
       ) : null}
       {timing.followupDue && (
-        <Badge
-          variant="secondary"
-          className={cn("border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-300")}
-        >
+        <Badge variant="secondary" className={cn("border-transparent", TONE.warning)}>
           {timing.followupLateDays > 0
             ? `follow up (${timing.followupLateDays}d late)`
             : "follow up today"}

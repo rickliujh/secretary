@@ -51,7 +51,7 @@ const PROFILE_LABELS: [keyof Profile, string][] = [
   ["language", "Language"],
 ];
 
-export function ProfileBadges({ profile }: { profile: Profile }) {
+function ProfileBadges({ profile }: { profile: Profile }) {
   const known = PROFILE_LABELS.filter(([k]) => profile[k]);
   if (known.length === 0) return <span className="text-muted-foreground">No profile yet.</span>;
   return (
