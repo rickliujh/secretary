@@ -6,6 +6,7 @@ import { jiraIssues, proposals } from "@/db/schema";
 import { query } from "@/services/db";
 import { createDependency } from "@/services/dependencies/queries";
 import { createTeam } from "@/services/directory/queries";
+import { FIXTURE_VAULT_DIR, loadVaultFromDisk } from "@/services/sources/test";
 import { getState, SYNC_KEYS, setState } from "@/services/sync/state";
 import { drainStream, promptOf } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
@@ -247,6 +248,85 @@ describe("story points (D35)", () => {
       done: 3,
       remaining: 5,
       unestimated: ["OPS-7"],
+    });
+  });
+});
+
+describe("notes from an Obsidian vault (D41)", () => {
+  const vault = {
+    id: "v1",
+    kind: "obsidian" as const,
+    name: "Work",
+    vault: "Work",
+    enabled: true,
+  };
+
+  test("search_vault indexes and finds the note; read_vault_note returns it with backlinks", async () => {
+    const { layer, models } = intakeTestLayer(
+      {
+        "std-m": [
+          { toolCall: { name: "search_vault", input: { query: "ledger export retention" } } },
+          {
+            toolCall: {
+              name: "read_vault_note",
+              input: { sourceId: "v1", path: "Projects/Ledger export.md" },
+            },
+          },
+          { text: "Generated files are kept for 90 days (Ledger export)." },
+        ],
+      },
+      [],
+      {
+        vaults: { Work: loadVaultFromDisk(FIXTURE_VAULT_DIR) },
+        dataSources: [vault],
+      },
+    );
+    const chunks = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const stream = yield* (yield* Chat).stream({
+            messages: ask("how long do we keep the ledger export files?"),
+          });
+          return yield* Effect.promise(() => drainStream(stream));
+        }),
+        layer,
+      ),
+    );
+    const [found, note] = toolOutputs(chunks) as [
+      { notes: { title: string; path: string; excerpt: string }[] },
+      { title: string; text: string; linkedFrom: string[]; tags: string[] },
+    ];
+    expect(found.notes[0]).toMatchObject({
+      title: "Ledger export",
+      path: "Projects/Ledger export.md",
+    });
+    expect(note.title).toBe("Ledger export");
+    expect(note.text).toContain("Retention of generated files is 90 days");
+    expect(note.tags).toContain("finance/ledger");
+    expect(note.linkedFrom.length).toBeGreaterThan(0);
+    expect(promptOf(models.calls, 0)).toContain("search_vault");
+  });
+
+  test("with no vault connected the tool says where to add one", async () => {
+    const { layer } = intakeTestLayer({
+      "std-m": [
+        { toolCall: { name: "search_vault", input: { query: "ledger" } } },
+        { text: "No notes are connected." },
+      ],
+    });
+    const chunks = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const stream = yield* (yield* Chat).stream({
+            messages: ask("what did I note about ledger?"),
+          });
+          return yield* Effect.promise(() => drainStream(stream));
+        }),
+        layer,
+      ),
+    );
+    expect(toolOutputs(chunks)[0]).toMatchObject({
+      error: expect.stringContaining("Settings > Data sources"),
     });
   });
 });

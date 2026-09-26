@@ -613,3 +613,21 @@ Built
 - The report covers only tickets in the active sprint, like Top focus (design.md
   D40); a "Current sprint only" switch widens it to all your tickets. The report
   header says which sprint it covers.
+
+## Data sources: Obsidian vaults (2026-09-26)
+
+- Settings > Data sources connects Obsidian vaults by name (design.md D41). The chat
+  searches and reads them through Obsidian's command line interface (Obsidian
+  1.12.7+, turned on in Obsidian's Settings > General > Advanced); Secretary keeps no
+  index. A "Test" button checks each vault; the CLI's path can be set if Obsidian is
+  installed somewhere unusual.
+- Chat gets `search_vault` (Obsidian's search, ranked by Secretary: notes named after
+  the query words first, with their matching lines) and `read_vault_note` (a note by
+  path or name with its properties, tags and backlinks). Note text is untrusted input
+  and reaches the model only when the chat reads it.
+- When Obsidian is closed, Secretary starts it on its own and waits until its CLI
+  answers, instead of running the command as Obsidian itself.
+- Checked against a real Obsidian 1.13.7 (opt-in tests: `SECRETARY_OBSIDIAN_VAULT`);
+  fixed reading the tab-separated `file` output and repeated search lines.
+- Live eval (GLM 5.3 Flash) answers a decision-and-owner question from a test vault,
+  naming the notes.

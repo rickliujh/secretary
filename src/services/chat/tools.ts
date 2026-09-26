@@ -20,12 +20,19 @@ import { pickSprint, sprintPoints } from "@/services/planning/points";
 import { describePayload, type ProposalPayload } from "@/services/proposals/schema";
 import { retrievalFtsQuery, tokens } from "@/services/retrieval/ranking";
 import { Settings, settingsOrDefault } from "@/services/settings";
+import { Sources } from "@/services/sources";
 import { getState, parseFieldIds, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { searchTicketKeys, ticketDetail } from "@/services/tickets/queries";
 import { type AttachmentRef, type ImageForModel, pickImages, prepareImage } from "./images";
 
-export type ToolDeps = Db | Settings | Intake | ConfluenceClient | JiraClient;
+export type ToolDeps = Db | Settings | Intake | ConfluenceClient | JiraClient | Sources;
 type Exec = <A, E>(effect: Effect.Effect<A, E, ToolDeps>) => Promise<A | { error: string }>;
+
+/** How much of one note the chat reads at once. */
+const NOTE_CHARS = 8000;
+const noSources = {
+  error: "No notes are connected. The user can add an Obsidian vault in Settings > Data sources.",
+};
 
 const clip = (s: string | null | undefined, n: number) =>
   !s ? null : s.length > n ? `${s.slice(0, n)}…` : s;
@@ -399,6 +406,57 @@ export function chatTools(
                 r.tickets.length > 0 && r.estimated === 0
                   ? "None of these tickets has an estimate in Jira."
                   : undefined,
+            };
+          }),
+        ),
+    }),
+
+    search_vault: tool({
+      description:
+        "Search the user's own notes (their Obsidian vaults): projects, meeting notes, decisions, how-tos, people and anything they wrote down. Returns the best matching notes with their matching lines. Use read_vault_note to read one.",
+      inputSchema: z.object({
+        query: z.string().describe("Words to look for; names, project terms, topics"),
+      }),
+      execute: ({ query: text }) =>
+        exec(
+          Effect.gen(function* () {
+            const settings = yield* settingsOrDefault(yield* Settings);
+            if (!settings.dataSources.some((s) => s.enabled)) return noSources;
+            const hits = yield* (yield* Sources).search(text, { limit: 8 });
+            return {
+              notes: hits.map((h) => ({
+                vault: h.sourceName,
+                sourceId: h.sourceId,
+                path: h.path,
+                title: h.title,
+                matchingLines: h.matches,
+                excerpt: h.snippet,
+              })),
+            };
+          }),
+        ),
+    }),
+
+    read_vault_note: tool({
+      description:
+        "Read one of the user's notes from search_vault, by its path (or its name, or a [[link]] target), with its properties, tags and the notes linking to it.",
+      inputSchema: z.object({
+        sourceId: z.string().describe("sourceId from search_vault"),
+        path: z.string().describe("path from search_vault, or the note's file name (not an alias)"),
+      }),
+      execute: ({ sourceId, path }) =>
+        exec(
+          Effect.gen(function* () {
+            const n = yield* (yield* Sources).read(sourceId, path);
+            return {
+              vault: n.sourceName,
+              path: n.path,
+              title: n.title,
+              properties: n.properties,
+              tags: n.tags,
+              text: clip(n.body, NOTE_CHARS),
+              truncated: n.body.length > NOTE_CHARS,
+              linkedFrom: n.backlinks.slice(0, 30),
             };
           }),
         ),

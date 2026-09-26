@@ -50,6 +50,8 @@ import { secretNames } from "@/services/secrets";
 import { makeSecretsTest } from "@/services/secrets/test";
 import { ProviderSchema, type TierBindings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
+import { SourcesLive } from "@/services/sources/live";
+import { FIXTURE_VAULT_DIR, loadVaultFromDisk, makeObsidianCliTest } from "@/services/sources/test";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
 import { getState, parseSprintState, SYNC_KEYS, setState } from "@/services/sync/state";
@@ -71,6 +73,14 @@ const selected = env.SECRETARY_EVAL_CASE
   ? EVAL_CASES.filter((c) => c.name.includes(env.SECRETARY_EVAL_CASE ?? ""))
   : EVAL_CASES;
 
+const EVAL_VAULT = {
+  id: "vault",
+  kind: "obsidian" as const,
+  name: "Work",
+  vault: "Work",
+  enabled: true,
+};
+
 function layerFor(tiers: TierBindings, extraRoutes: StubRoute[] = []) {
   const provider = ProviderSchema.parse({
     id: "eval",
@@ -87,6 +97,7 @@ function layerFor(tiers: TierBindings, extraRoutes: StubRoute[] = []) {
   const base = Layer.mergeAll(
     makeSettingsTest({
       ...jiraSettings({ trackedEpics: ["PAY-1"] }),
+      dataSources: [EVAL_VAULT],
       providers: [provider],
       tiers,
     }),
@@ -104,7 +115,20 @@ function layerFor(tiers: TierBindings, extraRoutes: StubRoute[] = []) {
     ChatLive,
     Layer.provideMerge(
       Layer.mergeAll(CommsLive, PlanningLive, ReportsLive),
-      Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, withConfluence)),
+      Layer.provideMerge(
+        IntakeLive,
+        Layer.provideMerge(
+          Layer.merge(
+            RetrievalLive,
+            SourcesLive.pipe(
+              Layer.provide(
+                makeObsidianCliTest({ Work: loadVaultFromDisk(FIXTURE_VAULT_DIR) }).layer,
+              ),
+            ),
+          ),
+          withConfluence,
+        ),
+      ),
     ),
   );
 }
@@ -605,5 +629,42 @@ describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live report eval (D39
     expect(r.talkTrack).toContain("PAY-3");
     expect(r.talkTrack).toContain("PAY-2");
     expect(r.tickets.find((t) => t.key === "PAY-4")?.happened).not.toBe("");
+  }, 600_000);
+});
+
+describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live vault chat eval (D41)", () => {
+  test("answers from the user's notes and names the note", async () => {
+    const model = env.SECRETARY_EVAL_STANDARD_MODEL ?? "";
+    const bind = { providerId: "eval", model };
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const stream = yield* (yield* Chat).stream({
+            messages: [
+              {
+                id: "u",
+                role: "user",
+                parts: [
+                  {
+                    type: "text",
+                    text: "What did we decide about the ledger export, and who owns it?",
+                  },
+                ],
+              },
+            ],
+          });
+          const chunks = yield* Effect.promise(() => drainStream(stream));
+          return {
+            text: chunks.map((c) => (c.type === "text-delta" ? c.delta : "")).join(""),
+            tools: chunks.flatMap((c) => (c.type === "tool-input-available" ? [c.toolName] : [])),
+          };
+        }),
+        layerFor({ fast: bind, standard: bind, strong: null }),
+      ),
+    );
+    console.log(`\nvault chat: tools ${r.tools.join(", ")}\n${r.text}`);
+    expect(r.tools).toContain("search_vault");
+    expect(r.text).toMatch(/UTC/);
+    expect(r.text).toMatch(/Dana/);
   }, 600_000);
 });

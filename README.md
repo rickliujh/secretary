@@ -21,8 +21,11 @@ machine as a desktop app and keeps everything local.
 - **People and teams**: who does what, how they like to be contacted, notes and
   imported Confluence pages.
 - **Memory**: rules and preferences it follows, and the corrections it learns from.
-- **Chat**: ask about your tickets, dependencies and contacts; ask for a change and it
-  prepares proposals in the Inbox.
+- **Chat**: ask about your tickets, dependencies, contacts and your own notes; ask for a
+  change and it prepares proposals in the Inbox.
+- **Data sources**: connect Obsidian vaults (Settings -> Data sources) and the chat
+  searches and reads your notes through Obsidian's command line interface
+  (Obsidian 1.12.7+, turned on in Obsidian: Settings -> General -> Advanced).
 
 Works with Jira and Confluence **Cloud** and **Data Center**, and any model provider
 with an Anthropic or OpenAI-compatible API (Claude, Gemini through a proxy, OpenRouter,
@@ -107,6 +110,8 @@ It acts as you, so it can do only what your account can.
   messages and exports.
 - The app only talks to the Jira, Confluence and model hosts you configured; any other
   request is refused before it leaves the app.
+- Notes stay in Obsidian; the chat sends a note to your model provider only when it
+  searches or reads it for a question. Obsidian's "Excluded files" setting applies.
 - Pasted text is treated as untrusted: instructions inside a pasted message are never
   followed. Every Jira write is a proposal you approve.
 

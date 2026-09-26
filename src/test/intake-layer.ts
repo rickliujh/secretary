@@ -10,6 +10,9 @@ import { makeScriptedModels, type Scripted } from "@/services/llm/test";
 import { PlanningLive } from "@/services/planning/live";
 import { ReportsLive } from "@/services/report/live";
 import { RetrievalLive } from "@/services/retrieval/live";
+import type { DataSource } from "@/services/settings/schema";
+import { SourcesLive } from "@/services/sources/live";
+import { type MemoryVaults, makeObsidianCliTest } from "@/services/sources/test";
 import { testProvider } from "./helpers";
 import { syncedJiraLayer } from "./seed";
 import type { StubRoute } from "./stub-fetch";
@@ -18,8 +21,10 @@ import type { StubRoute } from "./stub-fetch";
 export function intakeTestLayer(
   scripts: Record<string, Scripted[]>,
   extraRoutes: StubRoute[] = [],
+  opts: { vaults?: MemoryVaults; dataSources?: DataSource[] } = {},
 ) {
   const jira = syncedJiraLayer(extraRoutes, {
+    dataSources: opts.dataSources ?? [],
     providers: [testProvider],
     tiers: {
       fast: { providerId: "p1", model: "fast-m" },
@@ -34,7 +39,16 @@ export function intakeTestLayer(
   );
   const layer = Layer.provideMerge(
     Layer.mergeAll(CommsLive, LearningLive, ChatLive, PlanningLive, ReportsLive),
-    Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, llm)),
+    Layer.provideMerge(
+      IntakeLive,
+      Layer.provideMerge(
+        Layer.merge(
+          RetrievalLive,
+          SourcesLive.pipe(Layer.provide(makeObsidianCliTest(opts.vaults).layer)),
+        ),
+        llm,
+      ),
+    ),
   );
   return { layer, models, seen: jira.seen };
 }

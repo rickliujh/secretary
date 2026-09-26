@@ -1,3 +1,4 @@
+mod obsidian;
 mod secrets;
 
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -102,7 +103,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             secrets::secret_get,
             secrets::secret_set,
-            secrets::secret_delete
+            secrets::secret_delete,
+            obsidian::obsidian_cli
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

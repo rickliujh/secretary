@@ -89,6 +89,18 @@ export const ScoringWeightsSchema = z.object({
 export type ScoringWeights = z.infer<typeof ScoringWeightsSchema>;
 export const DEFAULT_WEIGHTS: ScoringWeights = ScoringWeightsSchema.parse({});
 
+/** A vault of notes the secretary can search through the Obsidian CLI (D41). */
+export const DataSourceSchema = z.object({
+  id: z.string().min(1),
+  kind: z.literal("obsidian"),
+  /** Shown in Settings and to the model. */
+  name: z.string().trim().min(1),
+  /** The vault's name as Obsidian lists it (`obsidian vaults`). */
+  vault: z.string().trim().min(1),
+  enabled: z.boolean().default(true),
+});
+export type DataSource = z.infer<typeof DataSourceSchema>;
+
 export const SettingsSchema = z.object({
   version: z.literal(1).default(1),
   providers: z.array(ProviderSchema).default([]),
@@ -118,6 +130,13 @@ export const SettingsSchema = z.object({
     })
     .prefault({}),
   scoring: ScoringWeightsSchema.prefault({}),
+  dataSources: z.array(DataSourceSchema).default([]),
+  obsidian: z
+    .object({
+      /** Full path of the `obsidian` command when it is not where Obsidian installs it. */
+      cliPath: z.string().trim().default(""),
+    })
+    .prefault({}),
   report: z
     .object({
       /** The report style shown and copied (D39). */

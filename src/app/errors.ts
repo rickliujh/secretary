@@ -97,6 +97,10 @@ export function describeError(error: unknown): Described {
       return { title: "Draft not available", description };
     case "SecretsError":
       return { title: "Keychain problem", description };
+    case "SourceError":
+      return error.kind === "unavailable"
+        ? { title: "Obsidian isn't reachable", description, settingsTab: "sources" }
+        : { title: "Note not found", description };
     case "DbError":
       return { title: "Database error", description, settingsTab: "data" };
     default:
