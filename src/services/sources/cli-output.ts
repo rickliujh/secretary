@@ -73,7 +73,11 @@ const parseJson = <T>(schema: z.ZodType<T>, stdout: string, what: string): T => 
 
 export function parseSearch(stdout: string): CliSearchResult[] {
   if (EMPTY.test(stdout.trim())) return [];
-  return parseJson(SearchResultSchema, stdout, "search");
+  // Obsidian lists a line once for every query word it contains.
+  return parseJson(SearchResultSchema, stdout, "search").map((r) => ({
+    file: r.file,
+    matches: r.matches.filter((m, i, all) => all.findIndex((x) => x.line === m.line) === i),
+  }));
 }
 
 /** A `format=json` table (backlinks, tags): one column's values. */
@@ -93,10 +97,13 @@ export function parseLines(stdout: string): string[] {
     .filter(Boolean);
 }
 
-/** `file` output: "key value" lines; returns the note's path. */
+/** `file` output: "key<TAB>value" lines; returns the note's path. */
 export function parseFilePath(stdout: string): string | null {
-  const line = stdout.split(/\r?\n/).find((l) => l.startsWith("path "));
-  return line ? line.slice(5).trim() : null;
+  for (const line of stdout.split(/\r?\n/)) {
+    const m = /^path[\t ]+(.+)$/.exec(line);
+    if (m?.[1]) return m[1].trim();
+  }
+  return null;
 }
 
 /** `files total`: a count. */

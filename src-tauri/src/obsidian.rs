@@ -1,7 +1,9 @@
 //! Runs the official Obsidian CLI (Obsidian 1.12.7+) for data sources (D41).
 //!
-//! The `obsidian` binary talks to the running Obsidian app (starting it when
-//! needed) and prints the command's text result. Only read-only subcommands and
+//! The `obsidian` binary is Obsidian's own executable: with Obsidian running it
+//! connects to the app's CLI socket, prints the command's text result and
+//! exits; without it, it becomes Obsidian and never runs the command. So the
+//! app is started first, detached, and the command runs once the socket answers. Only read-only subcommands and
 //! a fixed set of options are allowed; the check lives here, not in the webview.
 //! The command runs without a shell.
 
@@ -16,6 +18,8 @@ use serde::Serialize;
 
 /// The first call may have to start Obsidian.
 const TIMEOUT: Duration = Duration::from_secs(30);
+/// How long Obsidian gets to start and open its CLI socket.
+const START_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long to wait for output pipes to close once the command has exited.
 const PIPE_GRACE: Duration = Duration::from_secs(2);
 const MAX_ARGS: usize = 20;
@@ -277,6 +281,97 @@ fn run_blocking(bin: &Path, args: &[String], timeout: Duration) -> Result<CliOut
     })
 }
 
+/// Where the running Obsidian listens for CLI commands (Obsidian 1.13 main.js):
+/// a named pipe per user on Windows, `~/.obsidian-cli.sock` on macOS, and
+/// `$XDG_RUNTIME_DIR/.obsidian-cli.sock` (or the home folder) on Linux.
+pub fn cli_socket(
+    os: &str,
+    home: Option<&Path>,
+    runtime_dir: Option<&Path>,
+    user: Option<&str>,
+) -> Option<PathBuf> {
+    match os {
+        "windows" => user.map(|u| PathBuf::from(format!(r"\\.\pipe\obsidian-cli-{u}"))),
+        "macos" => home.map(|h| h.join(".obsidian-cli.sock")),
+        _ => runtime_dir.or(home).map(|d| d.join(".obsidian-cli.sock")),
+    }
+}
+
+fn socket_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from);
+    let user = std::env::var("USERNAME").ok();
+    cli_socket(
+        std::env::consts::OS,
+        home.as_deref(),
+        runtime.as_deref(),
+        user.as_deref(),
+    )
+}
+
+/// Whether Obsidian answers on its CLI socket. The probe connection sends no
+/// command; Obsidian drops it after its header timeout.
+fn obsidian_running() -> bool {
+    let Some(path) = socket_path() else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        std::os::unix::net::UnixStream::connect(&path).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .is_ok()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// Starts Obsidian on its own, not tied to this app, and waits for its socket.
+fn ensure_running(bin: &Path) -> Result<(), String> {
+    if obsidian_running() {
+        return Ok(());
+    }
+    let mut cmd = Command::new(bin);
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("could not start Obsidian ({}): {e}", bin.display()))?;
+    // Reap it whenever it quits, without holding this call up.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    let started = Instant::now();
+    while started.elapsed() < START_TIMEOUT {
+        std::thread::sleep(Duration::from_millis(250));
+        if obsidian_running() {
+            return Ok(());
+        }
+    }
+    Err(format!(
+        "timeout: Obsidian did not start within {} seconds",
+        START_TIMEOUT.as_secs()
+    ))
+}
+
 /// Runs one read-only `obsidian` command. Errors start with "not_installed:",
 /// "timeout:" or describe a refused argument or a failed start.
 #[tauri::command]
@@ -286,9 +381,73 @@ pub async fn obsidian_cli(
 ) -> Result<CliOutput, String> {
     validate_args(&args)?;
     let bin = find_binary(cli_path.as_deref())?;
-    tauri::async_runtime::spawn_blocking(move || run_blocking(&bin, &args, TIMEOUT))
-        .await
-        .map_err(|e| format!("the obsidian command failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_running(&bin)?;
+        run_blocking(&bin, &args, TIMEOUT)
+    })
+    .await
+    .map_err(|e| format!("the obsidian command failed: {e}"))?
+}
+
+/// Against a real, running Obsidian with its CLI on. Opt in:
+/// `SECRETARY_OBSIDIAN_VAULT=<vault> cargo test real_obsidian -- --ignored`.
+#[cfg(test)]
+mod real_obsidian {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn real_obsidian_answers() {
+        let vault = std::env::var("SECRETARY_OBSIDIAN_VAULT").expect("SECRETARY_OBSIDIAN_VAULT");
+        let bin = find_binary(None).expect("obsidian binary");
+        ensure_running(&bin).expect("Obsidian running");
+        let args: Vec<String> = [
+            format!("vault={vault}"),
+            "files".into(),
+            "ext=md".into(),
+            "total".into(),
+        ]
+        .into();
+        validate_args(&args).expect("allowed");
+        let out = run_blocking(&bin, &args, TIMEOUT).expect("ran");
+        assert!(
+            out.stdout.trim().parse::<u32>().is_ok(),
+            "expected a count, got {:?}",
+            out.stdout
+        );
+    }
+}
+
+#[cfg(test)]
+mod socket_tests {
+    use super::cli_socket;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn socket_per_os() {
+        let home = Path::new("/home/rick");
+        assert_eq!(
+            cli_socket("linux", Some(home), Some(Path::new("/run/user/1000")), None),
+            Some(PathBuf::from("/run/user/1000/.obsidian-cli.sock"))
+        );
+        assert_eq!(
+            cli_socket("linux", Some(home), None, None),
+            Some(PathBuf::from("/home/rick/.obsidian-cli.sock"))
+        );
+        assert_eq!(
+            cli_socket(
+                "macos",
+                Some(Path::new("/Users/rick")),
+                Some(Path::new("/tmp/x")),
+                None
+            ),
+            Some(PathBuf::from("/Users/rick/.obsidian-cli.sock"))
+        );
+        assert_eq!(
+            cli_socket("windows", None, None, Some("rick")),
+            Some(PathBuf::from(r"\\.\pipe\obsidian-cli-rick"))
+        );
+    }
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { makeSettingsTest } from "@/services/settings/test";
 import { SourceError, Sources } from ".";
-import { cliError, parseSearch, parseTable, splitFrontmatter } from "./cli-output";
+import { cliError, parseFilePath, parseSearch, parseTable, splitFrontmatter } from "./cli-output";
 import { SourcesLive } from "./live";
 import { queryWords, rankResults, searchQueries } from "./rank";
 import { FIXTURE_VAULT_DIR, loadVaultFromDisk, makeObsidianCliTest } from "./test";
@@ -36,6 +36,13 @@ describe("CLI output", () => {
       { file: "a.md", matches: [{ line: 2, text: "x" }] },
     ]);
     expect(() => parseSearch("unexpected")).toThrow(SourceError);
+    // Obsidian repeats a line for every query word it contains (seen on 1.13.7).
+    expect(
+      parseSearch(
+        '[{"file":"a.md","matches":[{"line":3,"text":"x y"},{"line":3,"text":"x y"},{"line":6,"text":"y"}]}]',
+      )[0]?.matches.map((m) => m.line),
+    ).toEqual([3, 6]);
+    expect(parseFilePath("path\tA/B c.md\nname\tB c\nextension\tmd")).toBe("A/B c.md");
     expect(parseTable('[{"file":"b.md"}]', "file")).toEqual(["b.md"]);
     expect(parseTable("No backlinks found.", "file")).toEqual([]);
     expect(splitFrontmatter("---\ntitle: X\n---\nBody")).toEqual({

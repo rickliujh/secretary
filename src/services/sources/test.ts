@@ -71,10 +71,14 @@ function search(files: Record<string, string>, query: string, excluded: string[]
     const hay = `${path}\n${text}`.toLowerCase();
     const group = groups.find((g) => g.every((t) => hay.includes(t)));
     if (!group) continue;
+    // Like Obsidian, a line is listed once for every term it contains.
     const matches = text
       .split("\n")
-      .map((l, i) => ({ line: i + 1, text: l.trim() }))
-      .filter((l) => group.some((t) => l.text.toLowerCase().includes(t)));
+      .flatMap((l, i) =>
+        group
+          .filter((t) => l.toLowerCase().includes(t))
+          .map(() => ({ line: i + 1, text: l.trim() })),
+      );
     out.push({ file: path, matches });
   }
   return out;
@@ -118,7 +122,7 @@ export function makeObsidianCliTest(initial: MemoryVaults = {}, opts: Options = 
         }
         case "file": {
           const path = target();
-          return `path ${path}\nname ${base(path)}\nextension md\nsize ${(files[path] ?? "").length}`;
+          return `path\t${path}\nname\t${base(path)}\nextension\tmd\nsize\t${(files[path] ?? "").length}`;
         }
         case "read":
           return files[target()] ?? "";
