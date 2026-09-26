@@ -580,3 +580,20 @@ Built
 - Ctrl+W no longer closes the window; in any text field it deletes the word before
   the cursor, like a terminal (design.md D38). On macOS Cmd+W does the same and the
   Close Window menu item has no shortcut.
+
+## Report styles with the detail to answer questions (2026-09-26)
+
+- The report comes in four styles, picked on the page and remembered (design.md
+  D39): talk track + details (default), yesterday/today/blockers, catch-up by epic,
+  and a day-by-day timeline. Switching style is instant.
+- Each ticket now carries its timeline (status moves with times, reassignments,
+  comments, your follow-ups), what it waits on (owner, how long, expected date,
+  last chase), who waits on you, and a model-written line on what happened and the
+  next step. Sprint health, epic progress and risks are computed in code.
+
+## Collapsible chat list, new app icon (2026-09-26)
+
+- The chat's conversation list can be collapsed to a thin strip (remembered on this
+  machine).
+- New app icon: the macOS version with its inset rounded tile, the Windows and Linux
+  version full-bleed.
