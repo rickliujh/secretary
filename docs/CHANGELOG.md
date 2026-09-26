@@ -382,3 +382,35 @@ Checklist (GLM 5.3 Flash)
   yes ("two corrections teach the third" eval case).
 - Chat answers "what am I waiting on from team X" from local data and turns "comment
   on ABC-12 that we are blocked" into a pending proposal: yes (live chat eval).
+
+## Phase 8: hardening and packaging (2026-09-26)
+
+Why: the implementation plan's last phase (design.md D27).
+
+Built
+- Request guard in the `Fetcher`: only configured Jira, Confluence and model hosts
+  (plus a URL being tested in settings); anything else is refused before it leaves the
+  app. Offline, requests fail at once with a clear message.
+- CSP adds `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`,
+  `form-action 'none'`.
+- Settings -> Data: export everything to one JSON file (no keys, no Jira cache),
+  import with zod and per-row checks after saving a backup of the current data, and
+  clear the Jira cache.
+- Every service error has its own toast title; network failures link to the network
+  settings. A test fails when a new service error has none.
+- Offline: an "Offline" badge replaces the sync status, the sync timer skips runs and
+  syncs when the network returns; cached pages keep working.
+- Tests that the log and exports never contain keychain values, bearer tokens or API
+  keys.
+- README (setup, Jira and Confluence permissions, troubleshooting) and a CI workflow:
+  typecheck, lint and tests, then `tauri build` on Linux, Windows and macOS with the
+  bundles as artifacts.
+
+Checklist
+- `bun run tauri build` on this Arch machine: the release binary, `.deb` and `.rpm`
+  build; the AppImage step fails in linuxdeploy here (a local tooling issue; CI builds
+  on Ubuntu 22.04).
+- No secret string in the log file or the export: covered by `log.test.ts` and
+  `transfer.test.ts`.
+- Fresh install reaching a working dashboard: to be checked by the user on the built
+  bundle.
