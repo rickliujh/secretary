@@ -23,6 +23,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { dateTime } from "@/lib/time";
+import { storyPointFields } from "@/services/jira/fields";
 import { ISSUE_KEY_RE } from "@/services/proposals/schema";
 import type { AppSettings } from "@/services/settings";
 import { Sync } from "@/services/sync";
@@ -224,9 +225,17 @@ function FieldsCard({ settings }: { settings: AppSettings }) {
             <div key={k} className="grid grid-cols-[8rem_10rem_1fr] items-center gap-3">
               <span className="text-sm font-medium">{FIELD_LABELS[k]}</span>
               {info.data?.discovered[k] ? (
-                <Badge variant="secondary" className="font-mono">
-                  {info.data.discovered[k]}
-                </Badge>
+                <div className="flex flex-wrap gap-1">
+                  {/* Story points may come from two fields on Cloud (D35). */}
+                  {(k === "storyPoints"
+                    ? storyPointFields(info.data.discovered)
+                    : [info.data.discovered[k]]
+                  ).map((id) => (
+                    <Badge key={id} variant="secondary" className="font-mono">
+                      {id}
+                    </Badge>
+                  ))}
+                </div>
               ) : (
                 <span className="text-xs text-muted-foreground">Not discovered</span>
               )}

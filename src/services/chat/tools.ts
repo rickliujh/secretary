@@ -3,7 +3,7 @@
  * `propose_actions`, which hands a request to the intake pipeline.
  */
 import { tool } from "ai";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { Effect } from "effect";
 import { z } from "zod";
 import { contextNotes, jiraIssues, people, proposals, teams } from "@/db/schema";
@@ -15,9 +15,12 @@ import { listDependencies } from "@/services/dependencies/queries";
 import { searchNoteIds } from "@/services/directory/notes";
 import { Intake } from "@/services/intake";
 import { AttachmentSchema, JiraClient } from "@/services/jira";
+import { effectiveFieldIds, storyPointFields } from "@/services/jira/fields";
+import { pickSprint, sprintPoints } from "@/services/planning/points";
 import { describePayload, type ProposalPayload } from "@/services/proposals/schema";
 import { retrievalFtsQuery, tokens } from "@/services/retrieval/ranking";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
+import { getState, parseFieldIds, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { searchTicketKeys, ticketDetail } from "@/services/tickets/queries";
 import { type AttachmentRef, type ImageForModel, pickImages, prepareImage } from "./images";
 
@@ -75,6 +78,8 @@ export function chatTools(
                   status: r.status,
                   assignee: r.assigneeDisplay,
                   priority: r.priority,
+                  storyPoints: r.storyPoints,
+                  sprint: r.sprint,
                   due: r.dueDate,
                   epic: r.epicKey,
                   updated: r.updated.slice(0, 10),
@@ -104,6 +109,7 @@ export function chatTools(
               priority: i.priority,
               due: i.dueDate,
               sprint: i.sprint,
+              storyPoints: i.storyPoints,
               epic: i.epicKey,
               parent: i.parentKey,
               labels: i.labels,
@@ -316,6 +322,85 @@ export function chatTools(
               .slice(0, 10)
               .map((f) => ({ key: f.issue.key, summary: f.issue.summary, why: f.reasons })),
           })),
+        ),
+    }),
+
+    sprint_points: tool({
+      description:
+        "Story points in a sprint, added up in code: total, done, remaining, and which tickets have no estimate. Defaults to the user's active sprint and the user's own tickets. Use it for any question about points, capacity or how much work is in a sprint.",
+      inputSchema: z.object({
+        sprint: z
+          .string()
+          .describe("Sprint name or part of it; empty for the active sprint")
+          .default(""),
+        who: z
+          .enum(["me", "everyone"])
+          .describe("The user's tickets only, or everyone's in the sprint")
+          .default("me"),
+      }),
+      execute: ({ sprint, who }) =>
+        exec(
+          Effect.gen(function* () {
+            const settings = yield* settingsOrDefault(yield* Settings);
+            const fields = effectiveFieldIds(
+              parseFieldIds(yield* getState(SYNC_KEYS.fields)),
+              settings.jira.fields,
+            );
+            if (!storyPointFields(fields).length)
+              return {
+                error:
+                  "No story point field is known for this Jira. The user can set it in Settings > Jira > Fields; until then points cannot be counted.",
+              };
+            const me = (yield* getState(SYNC_KEYS.username)) ?? null;
+            const sprints = parseSprintState(yield* getState(SYNC_KEYS.sprints)).sprints;
+            const issues = yield* query((d) =>
+              d
+                .select({
+                  key: jiraIssues.key,
+                  summary: jiraIssues.summary,
+                  issueType: jiraIssues.issueType,
+                  isSubtask: jiraIssues.isSubtask,
+                  status: jiraIssues.status,
+                  statusCategory: jiraIssues.statusCategory,
+                  assignee: jiraIssues.assignee,
+                  assigneeDisplay: jiraIssues.assigneeDisplay,
+                  sprint: jiraIssues.sprint,
+                  storyPoints: jiraIssues.storyPoints,
+                })
+                .from(jiraIssues)
+                .where(and(eq(jiraIssues.stale, false), isNotNull(jiraIssues.sprint)))
+                .all(),
+            );
+            const picked = pickSprint(sprints, issues, me, sprint);
+            if (!picked)
+              return {
+                error: sprint
+                  ? `No sprint matches "${sprint}".`
+                  : "There is no active sprint in the synced data.",
+                knownSprints: sprints
+                  .filter((s) => s.state !== "closed")
+                  .map((s) => `${s.name} (${s.state})`)
+                  .slice(0, 20),
+              };
+            if (who === "me" && !me)
+              return { error: "The Jira user is not known yet; run a sync." };
+            const r = sprintPoints(issues, picked.name, who === "me" ? me : null);
+            return {
+              sprint: {
+                name: picked.name,
+                state: picked.state,
+                start: picked.start,
+                end: picked.end,
+              },
+              who,
+              ...r,
+              tickets: r.tickets.slice(0, 40),
+              note:
+                r.tickets.length > 0 && r.estimated === 0
+                  ? "None of these tickets has an estimate in Jira."
+                  : undefined,
+            };
+          }),
         ),
     }),
 

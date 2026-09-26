@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { jiraComments, jiraIssues } from "@/db/schema";
 import { datePart, type SprintInfo } from "@/services/sprints/calendar";
 import { jiraDateToIso, jiraDateToIsoOrNull } from "./dates";
-import type { FieldIds } from "./fields";
+import { type FieldIds, storyPointFields } from "./fields";
 import {
   CommentSchema,
   IssueTypeSchema,
@@ -56,9 +56,8 @@ export function issueFields(fieldIds: FieldIds): string[] {
     "issuelinks",
     "attachment",
     "comment",
-    ...[fieldIds.epicLink, fieldIds.epicName, fieldIds.sprint, fieldIds.storyPoints].filter(
-      (f): f is string => !!f,
-    ),
+    ...[fieldIds.epicLink, fieldIds.epicName, fieldIds.sprint].filter((f): f is string => !!f),
+    ...storyPointFields(fieldIds),
   ];
 }
 
@@ -226,7 +225,10 @@ export function mapIssue(raw: RawIssue, ctx: MapContext): MappedIssue {
       labels: strings(f.labels),
       components: names(f.components),
       sprint: ctx.fieldIds.sprint ? currentSprint(f[ctx.fieldIds.sprint]) : null,
-      storyPoints: ctx.fieldIds.storyPoints ? parseStoryPoints(f[ctx.fieldIds.storyPoints]) : null,
+      storyPoints:
+        storyPointFields(ctx.fieldIds)
+          .map((id) => parseStoryPoints(f[id]))
+          .find((p) => p !== null) ?? null,
       dueDate: typeof f.duedate === "string" ? f.duedate : null,
       created: jiraDateToIso(String(f.created)),
       updated: jiraDateToIso(String(f.updated)),

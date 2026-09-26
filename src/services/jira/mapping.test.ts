@@ -62,7 +62,7 @@ describe("field discovery", () => {
     expect(discoverFieldIds(dc).storyPoints).toBe("customfield_2");
   });
 
-  test("Story Points on Cloud: the exact type wins over a legacy Story Points field", () => {
+  test("Story Points on Cloud: both fields are read, the exact type first (D35)", () => {
     const cloud = [
       field(
         "customfield_10028",
@@ -77,8 +77,34 @@ describe("field discovery", () => {
         "com.pyxis.greenhopper.jira:jsw-story-points",
       ),
     ];
-    expect(discoverFieldIds(cloud).storyPoints).toBe("customfield_10016");
-    expect(discoverFieldIds(cloud.slice(0, 1)).storyPoints).toBe("customfield_10028");
+    const ids = discoverFieldIds(cloud);
+    expect(ids.storyPoints).toBe("customfield_10016");
+    expect(ids.storyPointsAlt).toEqual(["customfield_10028"]);
+    expect(issueFields(ids)).toEqual(
+      expect.arrayContaining(["customfield_10016", "customfield_10028"]),
+    );
+    expect(discoverFieldIds(cloud.slice(0, 1))).toEqual({ storyPoints: "customfield_10028" });
+    // A field chosen by hand is the only one read.
+    expect(effectiveFieldIds(ids, { storyPoints: "customfield_10028" })).toEqual({
+      storyPoints: "customfield_10028",
+    });
+
+    // A company-managed project fills "Story Points"; the estimate field is empty.
+    const raw = issues.find((i) => i.key === "PAY-3");
+    if (!raw) throw new Error("PAY-3");
+    const withPoints = (f: Record<string, unknown>) => ({
+      ...raw,
+      fields: { ...raw.fields, ...f },
+    });
+    const cloudCtx = { ...ctx, fieldIds: ids };
+    expect(
+      mapIssue(withPoints({ customfield_10016: null, customfield_10028: 8 }), cloudCtx).issue
+        .storyPoints,
+    ).toBe(8);
+    expect(
+      mapIssue(withPoints({ customfield_10016: 3, customfield_10028: 8 }), cloudCtx).issue
+        .storyPoints,
+    ).toBe(3);
   });
 
   test("Story Points by name prefers a number field and ignores unrelated names", () => {

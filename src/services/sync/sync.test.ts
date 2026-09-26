@@ -4,6 +4,7 @@ import { Clock, Effect, Layer } from "effect";
 import { jiraComments, jiraIssues } from "@/db/schema";
 import { query } from "@/services/db";
 import { SearchPageSchema } from "@/services/jira";
+import { Settings } from "@/services/settings";
 import comments from "@/test/fixtures/jira/comments-PAY-2.json";
 import fields from "@/test/fixtures/jira/field.json";
 import myself from "@/test/fixtures/jira/myself.json";
@@ -103,6 +104,27 @@ describe("Sync", () => {
     expect(second?.startAt).toBe(3);
     expect(subtasks?.jql).toStartWith("(parent in (PAY-2, PAY-4))");
     expect(r.fts.map((x) => x.key)).toEqual(["OPS-7", "PAY-2", "PAY-3"]);
+  });
+
+  test("a change in the fields used makes the next run full, once (D35)", async () => {
+    const { layer } = setup();
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sync = yield* Sync;
+          yield* sync.run();
+          const settings = yield* Settings;
+          yield* settings.update((s) => ({
+            ...s,
+            jira: { ...s.jira, fields: { ...s.jira.fields, storyPoints: "customfield_10999" } },
+          }));
+          return { changed: yield* sync.run(), after: yield* sync.run() };
+        }),
+        layer,
+      ),
+    );
+    expect(r.changed.full).toBe(true);
+    expect(r.after.full).toBe(false);
   });
 
   test("the next run is incremental from the watermark in the Jira user's time zone", async () => {

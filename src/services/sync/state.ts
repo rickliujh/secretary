@@ -13,6 +13,8 @@ export const SYNC_KEYS = {
   lastSyncAt: "jira.lastSyncAt",
   lastFullSyncAt: "jira.lastFullSyncAt",
   fields: "jira.fields",
+  /** JSON of the effective field ids the last full sync used; a change forces a full sync. */
+  fieldsSynced: "jira.fieldsSynced",
   timeZone: "jira.timeZone",
   username: "jira.username",
   /** JSON { [projectKey]: { issueTypes: string[], statuses: string[] } } from /project/{key}/statuses. */
@@ -41,6 +43,7 @@ const FieldIdsSchema = z.object({
   epicName: z.string().optional(),
   sprint: z.string().optional(),
   storyPoints: z.string().optional(),
+  storyPointsAlt: z.array(z.string()).optional(),
 }) satisfies z.ZodType<FieldIds>;
 
 export const parseFieldIds = (value: string | undefined): FieldIds =>

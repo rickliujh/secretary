@@ -233,7 +233,7 @@ const make = Effect.gen(function* () {
         Effect.mapError((e) => new SyncError({ kind: "scope", message: e.message })),
       );
       const lastFull = yield* withDb(getState(SYNC_KEYS.lastFullSyncAt));
-      const full =
+      let full =
         opts.full || !lastFull || Date.now() - new Date(lastFull).getTime() > FULL_RESYNC_MS;
       yield* patch({
         running: true,
@@ -249,6 +249,13 @@ const make = Effect.gen(function* () {
       if (me.timeZone) yield* withDb(setState(SYNC_KEYS.timeZone, me.timeZone));
       yield* withDb(setState(SYNC_KEYS.username, me.id));
       const { effective: fieldIds } = yield* discoverFields;
+      // New or changed fields (a story point field found, an override set) only reach
+      // tickets that are fetched again, so a change makes this run a full one.
+      const fieldsKey = JSON.stringify(fieldIds);
+      if (!full && fieldsKey !== (yield* withDb(getState(SYNC_KEYS.fieldsSynced)))) {
+        full = true;
+        yield* patch({ full });
+      }
 
       const tracked = new Set(settings.jira.trackedEpics);
       const scope = yield* Effect.try({
@@ -356,7 +363,10 @@ const make = Effect.gen(function* () {
         yield* withDb(setState(SYNC_KEYS.watermark, maxUpdated));
       const finishedAt = nowIso();
       yield* withDb(setState(SYNC_KEYS.lastSyncAt, finishedAt));
-      if (full) yield* withDb(setState(SYNC_KEYS.lastFullSyncAt, finishedAt));
+      if (full) {
+        yield* withDb(setState(SYNC_KEYS.lastFullSyncAt, finishedAt));
+        yield* withDb(setState(SYNC_KEYS.fieldsSynced, fieldsKey));
+      }
 
       const result: SyncResult = { full, fetched, staleMarked, durationMs: Date.now() - started };
       yield* patch({

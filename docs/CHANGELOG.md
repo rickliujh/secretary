@@ -549,3 +549,14 @@ Built
   (same ranking as the dashboard, sprint-aware), blocked, other open tickets by
   priority, then done. Each row shows its blocker, priority or status. Tickets that
   left the sync scope are no longer offered.
+
+## Story points in chat, both Cloud point fields (2026-09-26)
+
+- Chat can answer "how many points do I have this sprint" with `sprint_points`
+  (design.md D35): total, done and remaining points, computed in code, plus the tickets
+  without an estimate. It works for the active sprint or a named one, for you or
+  everyone in it. Ticket search and details show each ticket's points.
+- Story points come from both Cloud fields ("Story point estimate" and "Story
+  Points"), whichever a ticket has filled. Settings > Jira shows every field found.
+- When the fields in use change, the next sync is a full one, so existing tickets
+  pick up their points without being edited in Jira.
