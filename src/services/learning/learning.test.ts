@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { memories, proposals } from "@/db/schema";
 import { query } from "@/services/db";
 import { Intake } from "@/services/intake";
+import { TODAY } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { Learning } from ".";
@@ -112,6 +113,7 @@ describe("Learning.replay", () => {
             text: "PAY-2 is blocked on INC0012345, move it back to To Do.",
             source: "teams",
             senderPersonId: null,
+            today: TODAY,
           });
           const ps = yield* query((d) =>
             d.select().from(proposals).where(eq(proposals.inboxItemId, t.inboxItemId)).all(),

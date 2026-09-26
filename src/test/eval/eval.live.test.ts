@@ -12,7 +12,6 @@
  * Jira is a stub over the fixtures, so nothing is written anywhere.
  */
 import { describe, expect, test } from "bun:test";
-import type { UIMessageChunk } from "ai";
 import { asc, eq, inArray } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { dependencies, intakeItems, memories, proposals } from "@/db/schema";
@@ -40,13 +39,10 @@ import { ProviderSchema, type TierBindings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
-import boardSprints from "@/test/fixtures/jira/board-7-sprints.json";
-import comments from "@/test/fixtures/jira/comments-PAY-2.json";
-import fields from "@/test/fixtures/jira/field.json";
-import myself from "@/test/fixtures/jira/myself.json";
-import { jiraSettings } from "@/test/layers";
-import { fixtureIssues } from "@/test/seed";
-import { json, stubFetch } from "@/test/stub-fetch";
+import { drainStream, TODAY } from "@/test/helpers";
+import { JIRA_BASE, jiraSettings } from "@/test/layers";
+import { fixtureRoutes } from "@/test/seed";
+import { stubFetch } from "@/test/stub-fetch";
 import { EVAL_CASES, type EvalCase } from "./cases";
 
 const env = process.env;
@@ -56,8 +52,6 @@ const configured = !!(
   env.SECRETARY_EVAL_STANDARD_MODEL
 );
 const PASS_RATE = 0.75;
-/** The fixtures' "today": Payments 15 is the active sprint (2026-09-14 to 2026-09-28). */
-const EVAL_TODAY = "2026-09-24";
 
 const selected = env.SECRETARY_EVAL_CASE
   ? EVAL_CASES.filter((c) => c.name.includes(env.SECRETARY_EVAL_CASE ?? ""))
@@ -70,53 +64,11 @@ function layerFor(tiers: TierBindings) {
     kind: env.SECRETARY_EVAL_KIND === "openai-compatible" ? "openai-compatible" : "anthropic",
     baseUrl: env.SECRETARY_EVAL_BASE_URL,
   });
-  const jiraStub = stubFetch([
-    { match: (u) => u.pathname.endsWith("/myself"), respond: () => json(myself) },
-    { match: (u) => u.pathname.endsWith("/field"), respond: () => json(fields) },
-    {
-      match: (u) => u.pathname.endsWith("/rest/agile/1.0/board/7/sprint"),
-      respond: () => json(boardSprints),
-    },
-    { match: (u) => u.pathname.endsWith("/comment"), respond: () => json(comments) },
-    // Project metadata as a real sync reads it (every issue type and status per project).
-    {
-      match: (u) => /\/project\/[A-Z]+\/statuses$/.test(u.pathname),
-      respond: (r) => {
-        const pay = r.url.pathname.includes("/PAY/");
-        const statuses = (names: string[]) => names.map((name) => ({ name }));
-        return json(
-          pay
-            ? ["Epic", "Story", "Task", "Bug", "Sub-task"].map((name) => ({
-                name,
-                statuses: statuses(["To Do", "In Progress", "Blocked", "In Review", "Done"]),
-              }))
-            : ["Task", "Sub-task"].map((name) => ({
-                name,
-                statuses: statuses(["To Do", "In Progress", "Done"]),
-              })),
-        );
-      },
-    },
-    {
-      match: (u) => u.pathname.endsWith("/search"),
-      respond: (r) => {
-        const b = r.body as { startAt: number; jql: string };
-        const src = b.jql.startsWith("(parent in") ? [] : fixtureIssues;
-        return json({
-          startAt: b.startAt,
-          maxResults: 100,
-          total: src.length,
-          issues: src.slice(b.startAt),
-        });
-      },
-    },
-  ]);
+  const jiraStub = stubFetch(fixtureRoutes());
   // Jira goes to the stub; the model provider gets real network access.
   const fetcher = makeFetcherTest((input, init) => {
     const url = input instanceof Request ? input.url : String(input);
-    return url.startsWith("https://jira.example.com")
-      ? jiraStub.fetch(input, init)
-      : fetch(input, init);
+    return url.startsWith(JIRA_BASE) ? jiraStub.fetch(input, init) : fetch(input, init);
   });
   const base = Layer.mergeAll(
     makeSettingsTest({
@@ -195,13 +147,13 @@ const runCases = (cases: EvalCase[]) =>
             source: c.source,
             senderPersonId: c.sender ? senders[c.sender] : null,
             // Fixed, so relative dates and the sprint calendar match the fixtures.
-            today: EVAL_TODAY,
+            today: TODAY,
           });
           if (c.followUp)
             yield* intake.reply({
               inboxItemId: first.inboxItemId,
               instruction: c.followUp,
-              today: EVAL_TODAY,
+              today: TODAY,
             });
           return first;
         }),
@@ -353,7 +305,7 @@ describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live drafting eval (P
                 .where(eq(dependencies.id, dep)),
             );
             const id = yield* requestChaseDraft(dep);
-            const r = yield* Effect.either((yield* Comms).generate(id, { today: EVAL_TODAY }));
+            const r = yield* Effect.either((yield* Comms).generate(id, { today: TODAY }));
             const v = (yield* draftDetail(id))?.draft.variants;
             out.push(
               r._tag === "Left"
@@ -393,13 +345,7 @@ describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live chat eval (Phase
         const stream = yield* (yield* Chat).stream({
           messages: [{ id: "u", role: "user", parts: [{ type: "text", text }] }],
         });
-        const chunks: UIMessageChunk[] = [];
-        const reader = stream.getReader();
-        for (;;) {
-          const r = yield* Effect.promise(() => reader.read());
-          if (r.done) break;
-          chunks.push(r.value);
-        }
+        const chunks = yield* Effect.promise(() => drainStream(stream));
         return {
           text: chunks.map((c) => (c.type === "text-delta" ? c.delta : "")).join(""),
           tools: chunks.flatMap((c) => (c.type === "tool-input-available" ? [c.toolName] : [])),

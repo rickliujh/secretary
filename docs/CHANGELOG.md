@@ -427,3 +427,30 @@ Built
 - Chats stay in memory while the app runs, so leaving the Chat page and coming back
   shows the same conversation, even mid-answer; the page reopens the last one.
 - Chat page: a list of past conversations with delete, and "New chat".
+||||||| 7e19e3b
+
+## Cleanup: tests, tooling, docs (2026-09-26)
+
+Why: duplicated test setup had drifted, and the docs still described the pre-D19 plan.
+
+Changed
+- Tests: one fake Jira (`fixtureRoutes()` in `src/test/seed.ts`, now with project
+  statuses and board sprints) replaces four drifted copies; `src/test/helpers.ts`
+  holds `promptOf`, `readThread`, `drainStream`, `testProvider` and `TODAY`, and tests
+  that triage, reply or draft pass the fixtures' today. Three unused Jira fixtures
+  deleted. The mock-Jira test groups each get their own server.
+- `bun run mock:jira` serves `/rest/agile/1.0/board/{id}/sprint` (two boards,
+  two-week sprints from 2026-06-29, active around today) and `/project/{KEY}/statuses`;
+  issues' Sprint field carries start and end dates.
+- `bun run typecheck` also checks `vite.config.ts` and `drizzle.config.ts`.
+  `.gitignore` covers `*.tsbuildinfo` and `.tanstack`.
+- CI: Bun pinned to 1.4.2 with an install cache; the Linux build runs `cargo test` and
+  `cargo clippy -D warnings`; bundles build only on pushes to `main` and manual runs.
+- Rust: unused `serde` and `serde_json` removed. The JS http plugin is pinned to
+  `~2.6` like the Rust one.
+- Webview title is "Secretary"; the missing Vite favicon link is gone (the default
+  Tauri icons stay).
+- Docs: requirements cover Cloud and point NFR-3 at D27; design.md has "Now:" notes
+  where D19–D28 overtook it, plus a corrected data model, endpoint list, task table,
+  error types and testing section; the implementation plan is marked as history;
+  README lists install caveats for the unsigned bundles.

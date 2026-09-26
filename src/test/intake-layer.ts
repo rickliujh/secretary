@@ -8,16 +8,9 @@ import { LearningLive } from "@/services/learning/live";
 import { LlmLive } from "@/services/llm/live";
 import { makeScriptedModels, type Scripted } from "@/services/llm/test";
 import { RetrievalLive } from "@/services/retrieval/live";
-import { ProviderSchema } from "@/services/settings/schema";
+import { testProvider } from "./helpers";
 import { syncedJiraLayer } from "./seed";
 import type { StubRoute } from "./stub-fetch";
-
-export const testProvider = ProviderSchema.parse({
-  id: "p1",
-  name: "Test",
-  kind: "anthropic",
-  baseUrl: "https://llm.test/v1",
-});
 
 /** fast -> "fast-m", standard -> "std-m", no strong tier (so no escalation). */
 export function intakeTestLayer(

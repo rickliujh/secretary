@@ -8,23 +8,10 @@ import { secretNames } from "@/services/secrets";
 import { makeSecretsTest } from "@/services/secrets/test";
 import { defaultSettings, type TierBindings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
+import { promptOf, testProvider } from "@/test/helpers";
 import { Llm, type LlmError } from ".";
 import { LlmLive } from "./live";
 import { makeScriptedModels, type Scripted } from "./test";
-
-const provider = {
-  id: "p1",
-  name: "Test",
-  kind: "anthropic" as const,
-  baseUrl: "https://llm.test/v1",
-  headerNames: [],
-  authStyle: "x-api-key" as const,
-  thinking: "default" as const,
-  effort: "default" as const,
-  structuredOutputMode: "auto" as const,
-  jsonSchemaOutputs: true,
-  sendTemperature: true,
-};
 
 const allTiers: TierBindings = {
   fast: { providerId: "p1", model: "fast-m" },
@@ -35,7 +22,7 @@ const allTiers: TierBindings = {
 function setup(scripts: Record<string, Scripted[]>, tiers: TierBindings = allTiers) {
   const models = makeScriptedModels(scripts);
   const deps = Layer.mergeAll(
-    makeSettingsTest({ ...defaultSettings(), providers: [provider], tiers }),
+    makeSettingsTest({ ...defaultSettings(), providers: [testProvider], tiers }),
     makeSecretsTest({ [secretNames.providerApiKey("p1")]: "key-from-keychain" }),
     DbTest,
     models.layer,
@@ -107,7 +94,7 @@ describe("Llm.object", () => {
       ["repair_output", true, true],
     ]);
     // The repair prompt carries the previous answer and the errors.
-    expect(JSON.stringify(models.calls[1]?.prompt)).toContain("failed validation");
+    expect(promptOf(models.calls, 1)).toContain("failed validation");
   });
 
   test("out-of-candidate targets fail validation, then escalate to the stronger tier", async () => {

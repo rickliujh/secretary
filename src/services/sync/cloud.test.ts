@@ -14,8 +14,7 @@ import { makeSecretsTest } from "@/services/secrets/test";
 import { defaultSettings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
 import fields from "@/test/fixtures/jira/field.json";
-import page1 from "@/test/fixtures/jira/search-page-1.json";
-import page2 from "@/test/fixtures/jira/search-page-2.json";
+import { fixtureIssues } from "@/test/seed";
 import { json, noContent, stubFetch } from "@/test/stub-fetch";
 import { Sync } from ".";
 import { SyncLive } from "./live";
@@ -44,7 +43,7 @@ function cloudify(value: unknown): unknown {
   return value;
 }
 
-const issues = cloudify([...page1.issues, ...page2.issues]) as { key: string }[];
+const issues = cloudify(fixtureIssues) as { key: string }[];
 
 function setup() {
   const stub = stubFetch([

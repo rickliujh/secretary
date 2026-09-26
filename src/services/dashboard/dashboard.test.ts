@@ -5,6 +5,7 @@ import { jiraIssues, llmCalls } from "@/db/schema";
 import { query } from "@/services/db";
 import { createDependency } from "@/services/dependencies/queries";
 import { DEFAULT_WEIGHTS } from "@/services/settings/schema";
+import { promptOf } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { dashboardWithBrief, generateBrief } from "./brief";
@@ -133,7 +134,7 @@ describe("daily brief", () => {
       ["daily_brief", false],
       ["repair_output", true],
     ]);
-    const prompt = JSON.stringify(models.calls[0]?.prompt);
+    const prompt = promptOf(models.calls, 0);
     expect(prompt).toContain(
       "PAY-2 waits on Platform fix (INC0012345), owner No owner, 3 days overdue",
     );

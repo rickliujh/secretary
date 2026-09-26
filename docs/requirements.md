@@ -2,12 +2,13 @@
 
 Status: approved for implementation. Date: 2026-09-23.
 Owner: Rick Liu. Executor: Claude Opus 5.5 (see `implementation-plan.md`).
+Now: built. Later changes to scope are decisions D19–D28 in `design.md` section 12.
 
 ## 1. Vision
 
 A personal desktop AI secretary for one knowledge worker whose work is tracked in
-Jira Data Center as Epics, Stories and Tasks. The secretary keeps the tracker up to
-date from messy inputs (pasted messages, spoken-style descriptions), tracks external
+Jira (Cloud or Data Center) as Epics, Stories and Tasks. The secretary keeps the
+tracker up to date from messy inputs (pasted messages, spoken-style descriptions), tracks external
 dependencies (people, teams, ServiceNow incidents), holds organisational context
 (teams, people, personalities, Confluence pages), tells the user what matters most
 right now, drafts outbound Teams messages and emails in the right tone for the
@@ -61,8 +62,9 @@ scope; "Should" is v1 if time permits; "Could" is later.
 
 ### FR-1 Connect and sync Jira
 
-- FR-1.1 (Must) Configure Jira base URL and PAT; test connection shows the current
-  user's display name.
+- FR-1.1 (Must) Configure the Jira base URL and credentials: a Personal Access Token
+  on Data Center, or account email and API token on Cloud (design.md D19). Test
+  connection shows the current user's display name.
 - FR-1.2 (Must) Configure a sync scope: a JQL string (default provided) plus a list of
   tracked Epic keys. Children of tracked epics are always synced.
 - FR-1.3 (Must) Incremental sync on demand and on a timer while the app is open
@@ -75,7 +77,7 @@ scope; "Should" is v1 if time permits; "Could" is later.
   comments, links, attachments list, dependencies, secretary notes.
 - FR-1.7 (Must) Manual actions from the detail view: add comment, transition status,
   edit summary/description/priority/assignee/due date, set parent or epic link.
-- AC: after configuring against a real Jira DC instance, all issues matching scope
+- AC: after configuring against a real Jira instance, all issues matching scope
   appear within one sync; editing a field in the app is visible in Jira within seconds.
 
 ### FR-2 Intake: turn messy input into tracker actions
@@ -133,9 +135,11 @@ scope; "Should" is v1 if time permits; "Could" is later.
   level, responsiveness, preferred channel, language), free notes.
 - FR-4.3 (Must) The user can add or edit all of this directly. The secretary can also
   propose profile updates from intake text (approved like any proposal).
-- FR-4.4 (Must) Confluence: configure base URL and PAT; search pages with CQL or free
-  text; open a page in the browser; **import** a page as a context note attached to a
-  team, contact or ticket (stored as Markdown, with source URL and version).
+- FR-4.4 (Must) Confluence: configure the base URL and credentials (a PAT on Data
+  Center; account email and API token on Cloud, where the Jira token is reused for the
+  same site); search pages with CQL or free text; open a page in the browser;
+  **import** a page as a context note attached to a team, contact or ticket (stored
+  as Markdown, with source URL and version).
 - FR-4.5 (Should) Context notes are included in LLM retrieval for intake, briefs and
   message drafting.
 - FR-4.6 (Could) Import/export of teams and contacts as JSON for backup.
@@ -225,7 +229,9 @@ scope; "Should" is v1 if time permits; "Could" is later.
   fail fast with a retry button. v1: fail fast.
 - NFR-2 Startup under 2 seconds on a typical laptop; UI stays responsive during sync
   and LLM calls (async, cancellable).
-- NFR-3 All outbound HTTP restricted by Tauri capabilities to configured hosts.
+- NFR-3 All outbound HTTP goes only to configured hosts. The `Fetcher` enforces the
+  host allow-list in code, because configured hosts are runtime settings that Tauri
+  capability scopes cannot list (design.md D27).
 - NFR-4 Pasted content is untrusted. Prompts label it as data. Proposals require
   approval, which is the primary defence against prompt injection.
 - NFR-5 Unit tests for scoring, retrieval, Jira payload building and proposal
@@ -245,15 +251,17 @@ scope; "Should" is v1 if time permits; "Could" is later.
 - Sending Teams messages or emails automatically; reading mail or chats.
 - ServiceNow API integration.
 - Multi-user or server deployment.
-- Jira Cloud support (design keeps a provider seam, but no implementation).
 - Voice input.
 
-## 7. Assumptions to confirm with the user during Phase 0
+## 7. Assumptions (settled)
 
-- Jira DC version is 8.14 or newer (PAT support). The thin REST v2 client
-  (`design.md` D11) works on all such versions.
-- Epic-to-story relation uses the "Epic Link" custom field (classic) rather than
-  `parent`. The sync handles both.
-- Confluence DC 7.9 or newer (PAT support).
-- The user's Jira account can create issues in the target projects.
+These were open at Phase 0. All are settled; the list stays for the record.
+
+- Jira Data Center 8.14 or newer (PAT support), or Jira Cloud (D19; the user's
+  company runs Cloud). The thin REST v2 client (`design.md` D11) serves both.
+- Epics: the sync reads both the Epic Link field and `parent`, and writes whichever
+  the create or edit metadata accepts. Cloud uses `parent` only.
+- Confluence Data Center 7.9 or newer (PAT support), or Confluence Cloud.
+- The app acts as the user and can do only what the user's Jira account allows; the
+  README lists the permissions each feature needs.
 - Default output language English; UI English only.

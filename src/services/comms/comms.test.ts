@@ -11,12 +11,11 @@ import {
 } from "@/services/dependencies/queries";
 import { createPerson, createTeam } from "@/services/directory/queries";
 import type { LlmError } from "@/services/llm";
+import { promptOf, TODAY } from "@/test/helpers";
 import { intakeTestLayer } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { Comms } from ".";
 import { createDraft, draftDetail, markSent } from "./queries";
-
-const prompt = (calls: { prompt: unknown }[], i: number) => JSON.stringify(calls[i]?.prompt);
 
 /** A formal, slow-to-answer Platform engineer and an incident PAY-2 waits on. */
 const setup = Effect.gen(function* () {
@@ -82,7 +81,7 @@ describe("Comms.generate", () => {
     });
     expect(d?.bodyMd).toBe(good(r.requested).standard);
     expect(d).toMatchObject({ variant: "standard", subject: null, language: "English" });
-    const p = prompt(models.calls, 0);
+    const p = promptOf(models.calls, 0);
     expect(p).toContain(`First requested on ${r.requested}`);
     expect(p).toContain("INC0012345");
     expect(p).toContain("Formal: a proper greeting");
@@ -110,16 +109,14 @@ describe("Comms.generate", () => {
         Effect.gen(function* () {
           const s = yield* setup;
           requested = s.requested;
-          yield* (yield* Comms).generate(s.draftId);
+          yield* (yield* Comms).generate(s.draftId, { today: TODAY });
           return yield* draftDetail(s.draftId);
         }),
         layer,
       ),
     );
     expect(r?.draft.variants?.short).toContain("INC0012345");
-    expect(JSON.stringify(models.calls[1]?.prompt)).toContain(
-      "The short variant must name INC0012345.",
-    );
+    expect(promptOf(models.calls, 1)).toContain("The short variant must name INC0012345.");
   });
 
   test("regenerating keeps every instruction; sending logs a follow-up and locks the draft", async () => {
@@ -136,9 +133,12 @@ describe("Comms.generate", () => {
           const s = yield* setup;
           requested = s.requested;
           const comms = yield* Comms;
-          yield* comms.generate(s.draftId);
-          yield* comms.generate(s.draftId, { instruction: "mention the Friday release" });
-          yield* comms.generate(s.draftId, { instruction: "shorter" });
+          yield* comms.generate(s.draftId, { today: TODAY });
+          yield* comms.generate(s.draftId, {
+            instruction: "mention the Friday release",
+            today: TODAY,
+          });
+          yield* comms.generate(s.draftId, { instruction: "shorter", today: TODAY });
           yield* markSent(s.draftId, "2026-09-26");
           const logged = yield* query((d) =>
             d.select().from(followups).where(eq(followups.dependencyId, s.depId)).all(),
@@ -158,7 +158,7 @@ describe("Comms.generate", () => {
         layer,
       ),
     );
-    expect(prompt(models.calls, 2)).toContain("1. mention the Friday release\\n2. shorter");
+    expect(promptOf(models.calls, 2)).toContain("1. mention the Friday release\\n2. shorter");
     expect(r.logged).toHaveLength(1);
     expect(r.logged[0]).toMatchObject({ channel: "teams", communicationId: r.draftId });
     expect(r.dep?.dependency.nextFollowupAt).toBe("2026-09-30");

@@ -11,8 +11,9 @@ this repository.
 Personal AI secretary desktop app for a single user whose work is tracked in Jira
 (Cloud or Data Center). It turns messy inputs into approved Jira actions, tracks external
 dependencies, holds team and people context, ranks what matters, and drafts Teams
-messages and emails. Read `docs/requirements.md` (what), `docs/design.md` (how) and
-`docs/implementation-plan.md` (order of work) before changing anything.
+messages and emails. Read `docs/requirements.md` (what) and `docs/design.md` (how;
+decisions in section 12) before changing anything. `docs/implementation-plan.md` is
+the history of how it was built, not a to-do list.
 
 ## Stack
 
@@ -50,9 +51,9 @@ keychain command using the `keyring` crate. No sidecar.
 bun install                 # deps
 bun run tauri dev           # run the app
 bun run dev                 # webview only (no Tauri APIs)
-bun run typecheck           # tsc --noEmit
+bun run typecheck           # tsc for src and scripts, then vite/drizzle configs
 bun test                    # unit and service tests
-bun run lint                # biome/eslint
+bun run lint                # biome
 bun run db:generate         # drizzle-kit migrations from src/db/schema.ts
 bun run mock:jira           # fake Jira DC on :8089 for UI work (--issues N)
 bun run mock:confluence     # fake Confluence DC on :8090 (--cloud for Cloud shape)
@@ -61,10 +62,13 @@ bun run tauri build         # release bundle
 
 ## Layout
 
-`src/services/<name>/` one Effect service per folder (Tag, Live layer, Test layer,
-errors). `src/db/` drizzle schema and bundled migrations. `src/prompts/` prompt
-builders and zod output schemas. `src/routes/` TanStack Router pages.
-`src/components/ui/` shadcn output (theme only). `src-tauri/` Rust shell.
+`src/services/<name>/` one folder per area: an Effect service (Tag, live layer,
+typed errors, test layer where tests need one) where there is state or I/O, plain
+query and logic modules otherwise. `src/db/` drizzle schema and bundled migrations.
+`src/prompts/` prompt builders and zod output schemas. `src/routes/` TanStack Router
+pages.
+`src/components/ui/` shadcn output (theme only). `src/test/` fixtures, test layers
+and helpers. `scripts/` mock Jira and Confluence servers. `src-tauri/` Rust shell.
 
 ## Conventions
 
