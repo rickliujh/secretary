@@ -1,5 +1,6 @@
-import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, WifiOff } from "lucide-react";
 import { useErrorToast, useSettings } from "@/app/hooks";
+import { useOnline } from "@/app/online";
 import { runSync, useSyncStatus } from "@/app/sync";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -9,7 +10,21 @@ export function SyncIndicator() {
   const status = useSyncStatus();
   const { data: settings } = useSettings();
   const onError = useErrorToast();
+  const online = useOnline();
   if (!settings?.jira.baseUrl) return null;
+  if (!online)
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="sm" className="text-amber-700 dark:text-amber-300" disabled>
+            <WifiOff /> Offline
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          Showing cached data. Jira and model requests wait until the network is back.
+        </TooltipContent>
+      </Tooltip>
+    );
 
   const sync = () =>
     runSync().catch((e) => {

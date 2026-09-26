@@ -28,10 +28,14 @@ export function describeError(error: unknown): Described {
       if (error.kind === "refusal") return { title: "The model declined", description };
       if (error.kind === "rate_limit") return { title: "Rate limited", description };
       if (error.kind === "timeout") return { title: "The model timed out", description };
+      if (error.kind === "network")
+        return { title: "Can't reach the model provider", description, settingsTab: "general" };
       if (error.kind === "schema")
         return { title: "The model's answer was not usable", description };
       return { title: "Model request failed", description };
     case "JiraError":
+      if (error.kind === "network")
+        return { title: "Can't reach Jira", description, settingsTab: "general" };
       return {
         title: "Jira request failed",
         description,
@@ -46,6 +50,19 @@ export function describeError(error: unknown): Described {
       };
     case "SettingsError":
       return { title: "Settings problem", description, settingsTab: "general" };
+    case "ExecutorError":
+      return { title: "That action cannot run", description };
+    case "ProposalError":
+      return { title: "Proposal not available", description };
+    case "IntakeError":
+      return {
+        title: error.kind === "empty" ? "Nothing to read" : "Thread not found",
+        description,
+      };
+    case "SyncError":
+      return error.kind === "busy"
+        ? { title: "A sync is already running", description }
+        : { title: "Sync scope problem", description, settingsTab: "jira" };
     case "TransferError":
       return { title: "Import refused", description };
     case "LearningError":

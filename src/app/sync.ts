@@ -53,13 +53,18 @@ export function useSyncScheduler() {
   const minutes = settings?.jira.syncIntervalMinutes ?? 10;
   useEffect(() => {
     if (!configured) return;
-    // Failures show in the sync indicator; the timer keeps going.
-    const tick = () => void runSync().catch(() => undefined);
+    // Failures show in the sync indicator; the timer keeps going. Offline, cached
+    // data stays usable and the next run waits for the network to return.
+    const tick = () => {
+      if (navigator.onLine) void runSync().catch(() => undefined);
+    };
     const first = setTimeout(tick, STARTUP_DELAY_MS);
     const every = setInterval(tick, minutes * 60 * 1000);
+    window.addEventListener("online", tick);
     return () => {
       clearTimeout(first);
       clearInterval(every);
+      window.removeEventListener("online", tick);
     };
   }, [configured, minutes]);
 }
