@@ -1,0 +1,70 @@
+{
+  "maxResults": 50,
+  "startAt": 0,
+  "isLast": true,
+  "values": [
+    {
+      "id": 32,
+      "self": "https://jira.example.com/rest/agile/1.0/sprint/9",
+      "state": "closed",
+      "name": "Payments 9",
+      "startDate": "2026-06-22T09:00:00.000+01:00",
+      "endDate": "2026-07-06T17:00:00.000+01:00",
+      "originBoardId": 7
+    },
+    {
+      "id": 33,
+      "self": "https://jira.example.com/rest/agile/1.0/sprint/10",
+      "state": "closed",
+      "name": "Payments 10",
+      "startDate": "2026-07-06T09:00:00.000+01:00",
+      "endDate": "2026-07-20T17:00:00.000+01:00",
+      "originBoardId": 7
+    },
+    {
+      "id": 34,
+      "self": "https://jira.example.com/rest/agile/1.0/sprint/11",
+      "state": "closed",
+      "name": "Payments 11",
+      "startDate": "2026-07-20T09:00:00.000+01:00",
+      "endDate": "2026-08-03T17:00:00.000+01:00",
+      "originBoardId": 7
+    },
+    {
+      "id": 35,
+      "self": "https://jira.example.com/rest/agile/1.0/sprint/12",
+      "state": "closed",
+      "name": "Payments 12",
+      "startDate": "2026-08-03T09:00:00.000+01:00",
+      "endDate": "2026-08-17T17:00:00.000+01:00",
+      "originBoardId": 7
+    },
+    {
+      "id": 36,
+      "self": "https://jira.example.com/rest/agile/1.0/sprint/13",
+      "state": "closed",
+      "name": "Payments 13",
+      "startDate": "2026-08-17T09:00:00.000+01:00",
+      "endDate": "2026-08-31T17:00:00.000+01:00",
+      "originBoardId": 7
+    },
+    {
+      "id": 41,
+      "self": "https://jira.example.com/rest/agile/1.0/sprint/14",
+      "state": "closed",
+      "name": "Payments 14",
+      "startDate": "2026-08-31T09:00:00.000+01:00",
+      "endDate": "2026-09-14T17:00:00.000+01:00",
+      "originBoardId": 7
+    },
+    {
+      "id": 42,
+      "self": "https://jira.example.com/rest/agile/1.0/sprint/15",
+      "state": "active",
+      "name": "Payments 15",
+      "startDate": "2026-09-14T09:00:00.000+01:00",
+      "endDate": "2026-09-28T17:00:00.000+01:00",
+      "originBoardId": 7
+    }
+  ]
+}

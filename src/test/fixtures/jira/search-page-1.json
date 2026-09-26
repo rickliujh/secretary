@@ -1,0 +1,256 @@
+{
+  "expand": "schema,names",
+  "startAt": 0,
+  "maxResults": 3,
+  "total": 5,
+  "issues": [
+    {
+      "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+      "id": "20001",
+      "self": "https://jira.example.com/rest/api/2/issue/20001",
+      "key": "PAY-1",
+      "fields": {
+        "summary": "Billing migration",
+        "issuetype": {
+          "self": "https://jira.example.com/rest/api/2/issuetype/10000",
+          "id": "10000",
+          "description": "Created by Jira Software",
+          "name": "Epic",
+          "subtask": false
+        },
+        "project": {
+          "self": "https://jira.example.com/rest/api/2/project/10200",
+          "id": "10200",
+          "key": "PAY",
+          "name": "Payments"
+        },
+        "status": {
+          "self": "https://jira.example.com/rest/api/2/status/3",
+          "description": "",
+          "name": "In Progress",
+          "id": "3",
+          "statusCategory": {
+            "self": "https://jira.example.com/rest/api/2/statuscategory/4",
+            "id": 4,
+            "key": "indeterminate",
+            "colorName": "yellow",
+            "name": "In Progress"
+          }
+        },
+        "priority": {
+          "self": "https://jira.example.com/rest/api/2/priority/2",
+          "name": "High",
+          "id": "2"
+        },
+        "assignee": {
+          "self": "https://jira.example.com/rest/api/2/user?username=rliu",
+          "name": "rliu",
+          "key": "JIRAUSER10100",
+          "emailAddress": "rick@example.com",
+          "displayName": "Rick Liu",
+          "active": true,
+          "timeZone": "Europe/London"
+        },
+        "reporter": {
+          "self": "https://jira.example.com/rest/api/2/user?username=rliu",
+          "name": "rliu",
+          "key": "JIRAUSER10100",
+          "emailAddress": "rick@example.com",
+          "displayName": "Rick Liu",
+          "active": true,
+          "timeZone": "Europe/London"
+        },
+        "description": "Move invoicing to the new *billing* platform.\r\n\r\nh3. Scope\r\n* invoices\r\n* refunds",
+        "labels": ["billing"],
+        "components": [
+          {
+            "self": "https://jira.example.com/rest/api/2/component/10300",
+            "id": "10300",
+            "name": "Invoicing"
+          }
+        ],
+        "duedate": "2026-12-15",
+        "created": "2026-07-01T09:00:00.000+0100",
+        "updated": "2026-09-20T10:15:00.000+0100",
+        "resolutiondate": null,
+        "customfield_10100": null,
+        "customfield_10102": "Billing migration",
+        "customfield_10104": null,
+        "issuelinks": [],
+        "attachment": [],
+        "comment": { "comments": [], "maxResults": 0, "total": 0, "startAt": 0 }
+      },
+      "renderedFields": {
+        "description": "<p>Move invoicing to the new <b>billing</b> platform.</p>\n\n<h3><a name=\"Scope\"></a>Scope</h3>\n<ul>\n\t<li>invoices</li>\n\t<li>refunds</li>\n</ul>",
+        "comment": { "comments": [], "maxResults": 0, "total": 0, "startAt": 0 }
+      }
+    },
+    {
+      "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+      "id": "20002",
+      "self": "https://jira.example.com/rest/api/2/issue/20002",
+      "key": "PAY-2",
+      "fields": {
+        "summary": "Export invoices to the new ledger",
+        "issuetype": { "id": "10001", "name": "Story", "subtask": false },
+        "project": { "id": "10200", "key": "PAY", "name": "Payments" },
+        "status": {
+          "name": "Blocked",
+          "id": "10400",
+          "statusCategory": { "id": 4, "key": "indeterminate", "name": "In Progress" }
+        },
+        "priority": { "name": "Medium", "id": "3" },
+        "assignee": {
+          "name": "ana.b",
+          "key": "JIRAUSER10200",
+          "displayName": "Ana Bell",
+          "active": true
+        },
+        "reporter": {
+          "name": "rliu",
+          "key": "JIRAUSER10100",
+          "displayName": "Rick Liu",
+          "active": true
+        },
+        "description": "Waiting on {{INC0012345}} from the platform team.",
+        "labels": [],
+        "components": [],
+        "duedate": null,
+        "created": "2026-08-03T11:20:00.000+0100",
+        "updated": "2026-09-21T16:40:12.000+0100",
+        "resolutiondate": null,
+        "customfield_10100": "PAY-1",
+        "customfield_10102": null,
+        "customfield_10106": 5,
+        "customfield_10104": [
+          "com.atlassian.greenhopper.service.sprint.Sprint@6b1c2e7[id=41,rapidViewId=7,state=CLOSED,name=Payments 14,startDate=2026-08-31T09:00:00.000+01:00,endDate=2026-09-14T17:00:00.000+01:00,completeDate=2026-09-14T17:05:00.000+01:00,sequence=41,goal=]",
+          "com.atlassian.greenhopper.service.sprint.Sprint@3f2a9d1[id=42,rapidViewId=7,state=ACTIVE,name=Payments 15,startDate=2026-09-14T09:00:00.000+01:00,endDate=2026-09-28T17:00:00.000+01:00,completeDate=<null>,sequence=42,goal=Ship exports]"
+        ],
+        "issuelinks": [
+          {
+            "id": "30001",
+            "self": "https://jira.example.com/rest/api/2/issueLink/30001",
+            "type": {
+              "id": "10000",
+              "name": "Blocks",
+              "inward": "is blocked by",
+              "outward": "blocks"
+            },
+            "inwardIssue": {
+              "id": "20010",
+              "key": "OPS-7",
+              "fields": {
+                "summary": "Open firewall to ledger",
+                "status": { "name": "To Do", "statusCategory": { "key": "new", "name": "To Do" } },
+                "issuetype": { "name": "Task", "subtask": false }
+              }
+            }
+          }
+        ],
+        "attachment": [
+          {
+            "self": "https://jira.example.com/rest/api/2/attachment/40001",
+            "id": "40001",
+            "filename": "ledger-mapping.xlsx",
+            "author": { "name": "ana.b", "displayName": "Ana Bell" },
+            "created": "2026-09-02T10:00:00.000+0100",
+            "size": 18240,
+            "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "content": "https://jira.example.com/secure/attachment/40001/ledger-mapping.xlsx"
+          }
+        ],
+        "comment": {
+          "comments": [
+            {
+              "self": "https://jira.example.com/rest/api/2/issue/20002/comment/50001",
+              "id": "50001",
+              "author": { "name": "ana.b", "displayName": "Ana Bell", "active": true },
+              "body": "Raised {{INC0012345}} with platform.",
+              "updateAuthor": { "name": "ana.b", "displayName": "Ana Bell" },
+              "created": "2026-09-10T09:00:00.000+0100",
+              "updated": "2026-09-10T09:00:00.000+0100"
+            },
+            {
+              "self": "https://jira.example.com/rest/api/2/issue/20002/comment/50002",
+              "id": "50002",
+              "author": { "name": "rliu", "displayName": "Rick Liu", "active": true },
+              "body": "Chased on Teams.",
+              "created": "2026-09-15T14:00:00.000+0100",
+              "updated": "2026-09-15T14:00:00.000+0100"
+            }
+          ],
+          "maxResults": 2,
+          "total": 3,
+          "startAt": 0
+        }
+      },
+      "renderedFields": {
+        "description": "<p>Waiting on <tt>INC0012345</tt> from the platform team.</p>",
+        "comment": {
+          "comments": [
+            {
+              "id": "50001",
+              "body": "<p>Raised <tt>INC0012345</tt> with platform.</p>",
+              "created": "10/Sep/26 9:00 AM",
+              "updated": "10/Sep/26 9:00 AM"
+            },
+            {
+              "id": "50002",
+              "body": "<p>Chased on Teams.</p>",
+              "created": "15/Sep/26 2:00 PM",
+              "updated": "15/Sep/26 2:00 PM"
+            }
+          ],
+          "maxResults": 2,
+          "total": 3,
+          "startAt": 0
+        }
+      }
+    },
+    {
+      "id": "20003",
+      "key": "PAY-3",
+      "fields": {
+        "summary": "Map ledger account codes",
+        "issuetype": { "id": "10003", "name": "Sub-task", "subtask": true },
+        "project": { "id": "10200", "key": "PAY", "name": "Payments" },
+        "parent": {
+          "id": "20002",
+          "key": "PAY-2",
+          "fields": {
+            "summary": "Export invoices to the new ledger",
+            "status": { "name": "Blocked", "statusCategory": { "key": "indeterminate" } },
+            "priority": { "name": "Medium" },
+            "issuetype": { "id": "10001", "name": "Story", "subtask": false }
+          }
+        },
+        "status": {
+          "name": "Done",
+          "id": "10002",
+          "statusCategory": { "id": 3, "key": "done", "name": "Done" }
+        },
+        "priority": null,
+        "assignee": null,
+        "reporter": { "name": "ana.b", "displayName": "Ana Bell" },
+        "description": null,
+        "labels": [],
+        "components": [],
+        "duedate": null,
+        "created": "2026-08-10T09:00:00.000+0100",
+        "updated": "2026-09-22T08:05:00.000+0100",
+        "resolutiondate": "2026-09-22T08:05:00.000+0100",
+        "customfield_10100": null,
+        "customfield_10102": null,
+        "customfield_10106": null,
+        "customfield_10104": null,
+        "issuelinks": [],
+        "attachment": [],
+        "comment": { "comments": [], "maxResults": 0, "total": 0, "startAt": 0 }
+      },
+      "renderedFields": {
+        "description": null,
+        "comment": { "comments": [], "maxResults": 0, "total": 0, "startAt": 0 }
+      }
+    }
+  ]
+}

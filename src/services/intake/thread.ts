@@ -1,0 +1,93 @@
+/**
+ * Thread messages and the pure rules for replies (design.md D22): which text is
+ * input and which is instruction, and which items a revision must include.
+ */
+import { z } from "zod";
+import { issueRefs, type ProposalPayload } from "@/services/proposals/schema";
+import { SOURCES } from ".";
+
+const MessagePartSchema = z.object({
+  /** typed: the user's own words (trusted). pasted: someone else's text (untrusted). */
+  type: z.enum(["typed", "pasted"]),
+  text: z.string(),
+});
+export type MessagePart = z.infer<typeof MessagePartSchema>;
+
+export const UserContentSchema = z.object({
+  parts: z.array(MessagePartSchema),
+  /** Where pasted text came from. */
+  source: z.enum(SOURCES).optional(),
+  /** The question proposal this message answers. */
+  answers: z.string().nullable().optional(),
+  /**
+   * Set when a feature, not pasted input, started the thread (sprint planner,
+   * rule suggestions). Such threads are reviewed and approved but not revised by
+   * replying, because they have no input to classify again.
+   */
+  origin: z.enum(["planner", "rules"]).optional(),
+});
+export type UserContent = z.infer<typeof UserContentSchema>;
+
+export const AssistantContentSchema = z.object({
+  summary: z.string().nullable(),
+});
+
+const joined = (parts: readonly MessagePart[], type: MessagePart["type"], sep: string) =>
+  parts
+    .filter((p) => p.type === type)
+    .map((p) => p.text.trim())
+    .filter(Boolean)
+    .join(sep);
+
+/**
+ * Splits a message: pasted text is the input and typed text instructs it. With
+ * nothing pasted, typed text is the input when `typedIsInput` (a new thread),
+ * and an instruction otherwise (a reply).
+ */
+export function splitMessage(parts: readonly MessagePart[], typedIsInput: boolean) {
+  const pasted = joined(parts, "pasted", "\n\n");
+  const typed = joined(parts, "typed", "\n");
+  if (pasted) return { input: pasted, instruction: typed || null };
+  return typedIsInput
+    ? { input: typed, instruction: null }
+    : { input: "", instruction: typed || null };
+}
+
+/** Parts for a message made from plain input and an optional instruction. */
+export function partsOf(input: string, instruction: string | null, inputIsTyped: boolean) {
+  const parts: MessagePart[] = [];
+  if (input.trim()) parts.push({ type: inputIsTyped ? "typed" : "pasted", text: input });
+  if (instruction?.trim()) parts.push({ type: "typed", text: instruction });
+  return parts;
+}
+
+/**
+ * Items to revise: the chosen ones plus every item linked to them through a `$new`
+ * ref in their pending proposals, since refs are renumbered when proposals are
+ * replaced.
+ */
+export function withLinkedItems(
+  chosen: Iterable<number>,
+  pendingByItem: ReadonlyMap<number, readonly ProposalPayload[]>,
+): number[] {
+  const refs = new Map<number, Set<string>>();
+  for (const [item, payloads] of pendingByItem)
+    refs.set(
+      item,
+      new Set(payloads.flatMap((p) => issueRefs(p, { only: "new", includeOwn: true }))),
+    );
+  const out = new Set(chosen);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [item, own] of refs) {
+      if (out.has(item)) continue;
+      const linked = [...out].some((o) => [...(refs.get(o) ?? [])].some((r) => own.has(r)));
+      if (linked) {
+        out.add(item);
+        grew = true;
+      }
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}

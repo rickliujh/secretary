@@ -1,0 +1,52 @@
+{
+  "maxResults": 50,
+  "startAt": 0,
+  "total": 5,
+  "isLast": true,
+  "values": [
+    {
+      "required": true,
+      "schema": { "type": "project", "system": "project" },
+      "name": "Project",
+      "fieldId": "project",
+      "hasDefaultValue": false,
+      "operations": ["set"]
+    },
+    {
+      "required": true,
+      "schema": { "type": "issuetype", "system": "issuetype" },
+      "name": "Issue Type",
+      "fieldId": "issuetype",
+      "hasDefaultValue": false,
+      "operations": []
+    },
+    {
+      "required": true,
+      "schema": { "type": "string", "system": "summary" },
+      "name": "Summary",
+      "fieldId": "summary",
+      "hasDefaultValue": false,
+      "operations": ["set"]
+    },
+    {
+      "required": false,
+      "schema": { "type": "string", "system": "description" },
+      "name": "Description",
+      "fieldId": "description",
+      "hasDefaultValue": false,
+      "operations": ["set"]
+    },
+    {
+      "required": false,
+      "schema": {
+        "type": "any",
+        "custom": "com.pyxis.greenhopper.jira:gh-epic-link",
+        "customId": 10100
+      },
+      "name": "Epic Link",
+      "fieldId": "customfield_10100",
+      "hasDefaultValue": false,
+      "operations": ["set"]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "type": "known",
+  "username": "rliu",
+  "userKey": "8a8b8c8d7f000001017f0000abcd0001",
+  "profilePicture": {
+    "path": "/images/icons/profilepics/default.svg",
+    "width": 48,
+    "height": 48,
+    "isDefault": true
+  },
+  "displayName": "Rick Liu",
+  "_links": { "base": "https://confluence.example.com", "context": "" }
+}

@@ -1,0 +1,79 @@
+import { AlertTriangle, Loader2, RefreshCw, WifiOff } from "lucide-react";
+import { isSyncBusy } from "@/app/errors";
+import { useErrorToast, useSettings } from "@/app/hooks";
+import { useOnline } from "@/app/online";
+import { runSync, useSyncStatus } from "@/app/sync";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { relativeTime } from "@/lib/time";
+
+export function SyncIndicator() {
+  const status = useSyncStatus();
+  const { data: settings } = useSettings();
+  const onError = useErrorToast();
+  const online = useOnline();
+  if (!settings?.jira.baseUrl) return null;
+  if (!online)
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="sm" className="text-amber-700 dark:text-amber-300" disabled>
+            <WifiOff /> Offline
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          Showing cached data. Jira and model requests wait until the network is back.
+        </TooltipContent>
+      </Tooltip>
+    );
+
+  const sync = () =>
+    runSync().catch((e) => {
+      if (!isSyncBusy(e)) onError(e, sync);
+    });
+
+  let label = "Not synced";
+  if (status?.running)
+    label = status.total
+      ? `Syncing ${status.fetched}/${status.total}`
+      : (status.phase ?? "Syncing");
+  else if (status?.lastError) label = "Sync failed";
+  else if (status?.lastSyncAt) label = `Synced ${relativeTime(status.lastSyncAt)}`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={
+            status?.lastError && !status.running ? "text-destructive" : "text-muted-foreground"
+          }
+          onClick={sync}
+          disabled={status?.running}
+        >
+          {status?.running ? (
+            <Loader2 className="animate-spin" />
+          ) : status?.lastError ? (
+            <AlertTriangle />
+          ) : (
+            <RefreshCw />
+          )}
+          <span className="tabular-nums">{label}</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs text-xs">
+        {status?.lastError ? (
+          <p>{status.lastError}</p>
+        ) : status?.lastResult ? (
+          <p>
+            Last {status.lastResult.full ? "full" : "incremental"} sync: {status.lastResult.fetched}{" "}
+            issues in {(status.lastResult.durationMs / 1000).toFixed(1)}s.
+          </p>
+        ) : (
+          <p>Sync Jira now.</p>
+        )}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
