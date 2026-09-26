@@ -57,6 +57,13 @@
       "when": 1790376328959,
       "tag": "0007_goofy_mad_thinker",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790383019331,
+      "tag": "0008_goofy_makkari",
+      "breakpoints": true
     }
   ]
 }

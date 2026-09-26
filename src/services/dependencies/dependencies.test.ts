@@ -208,7 +208,7 @@ describe("dependencies", () => {
       status: "draft",
       issueKeys: ["PAY-2"],
     });
-    expect(row?.bodyMd).toMatch(
+    expect(row?.notesMd).toMatch(
       /^Chase Platform fix \(INC0012345\) for PAY-2\. First requested on \d{4}-\d{2}-\d{2}\. Was expected by 2026-09-24\.$/,
     );
   });

@@ -214,7 +214,16 @@ export const communications = sqliteTable(
     dependencyId: text("dependency_id").references(() => dependencies.id, {
       onDelete: "set null",
     }),
+    /** What the message should say: the request from the composer, a proposal or a chase (D24). */
+    notesMd: text("notes_md"),
+    /** Generated `{ short, standard }` bodies; null until the first generation. */
+    variants: text("variants", { mode: "json" }).$type<{ short: string; standard: string }>(),
+    /** Regeneration instructions so far, oldest first. */
+    instructions: text("instructions", { mode: "json" }).$type<string[]>().notNull().default([]),
+    language: text("language"),
+    generatedAt: text("generated_at"),
     subject: text("subject"),
+    /** The text the user sends: the chosen variant, possibly edited. */
     bodyMd: text("body_md").notNull(),
     variant: text("variant", { enum: ["short", "standard"] }),
     status: text("status", { enum: ["draft", "copied", "sent"] })

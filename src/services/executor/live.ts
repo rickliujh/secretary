@@ -335,7 +335,8 @@ const make = Effect.gen(function* () {
             recipientPersonId: payload.recipientPersonId,
             recipientTeamId: payload.recipientTeamId,
             issueKeys: payload.issueKeys,
-            bodyMd: payload.notes,
+            notesMd: payload.notes,
+            bodyMd: "",
             status: "draft" as const,
             createdAt: nowIso(),
           };
