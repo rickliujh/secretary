@@ -1,6 +1,7 @@
 import { ClipboardPaste, CornerDownLeft, Loader2, Type, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { usePeople } from "@/app/queries";
+import { SOURCE_LABELS } from "@/components/labels";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -13,14 +14,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { SOURCES, type Source } from "@/services/intake";
 import { SenderPicker } from "./sender-picker";
-
-export const SOURCE_LABELS: Record<Source, string> = {
-  teams: "Teams",
-  email: "Email",
-  meeting: "Meeting notes",
-  typed: "Typed",
-  other: "Other",
-};
 
 export type ComposerMessage = {
   /** The user's own words: instructions the secretary follows. */

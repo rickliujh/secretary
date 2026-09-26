@@ -4,6 +4,7 @@ import { AlertCircle, Check, Copy, Loader2, RefreshCw, Send, Sparkles, Trash2 } 
 import { useEffect, useRef, useState } from "react";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
+import { CHANNEL_LABELS, intentLabel } from "@/components/labels";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { dateTime, relativeTime } from "@/lib/time";
 import { type DraftDetail, draftDetail } from "@/services/comms/queries";
-import { INTENT_LABELS } from "./draft-composer";
 import { useDraftActions } from "./use-drafts";
 
 type Variant = "short" | "standard";
@@ -51,14 +51,13 @@ export function DraftEditor({
     <div className="flex max-w-3xl flex-col gap-4">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Badge variant="outline">{d.draft.kind === "email" ? "Email" : "Teams"}</Badge>
+          <Badge variant="outline">{CHANNEL_LABELS[d.draft.kind]}</Badge>
           <Badge variant="secondary">{d.draft.status}</Badge>
           {d.draft.language && <span>{d.draft.language}</span>}
           <span title={dateTime(d.draft.createdAt)}>{relativeTime(d.draft.createdAt)}</span>
         </div>
         <h2 className="text-lg font-semibold">
-          {INTENT_LABELS[d.draft.intent as keyof typeof INTENT_LABELS] ?? d.draft.intent} to{" "}
-          {recipient}
+          {intentLabel(d.draft.intent)} to {recipient}
         </h2>
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {d.draft.issueKeys.map((k) => (

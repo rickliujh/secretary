@@ -1,11 +1,12 @@
+import { TONE } from "@/components/tone";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { TicketRow } from "@/services/tickets/tree";
 
-const TONE: Record<TicketRow["statusCategory"], string> = {
-  new: "bg-muted text-muted-foreground",
-  indeterminate: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
-  done: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+const CATEGORY_TONE: Record<TicketRow["statusCategory"], string> = {
+  new: TONE.neutral,
+  indeterminate: TONE.info,
+  done: TONE.success,
 };
 
 export function StatusBadge({
@@ -16,7 +17,10 @@ export function StatusBadge({
   category: TicketRow["statusCategory"];
 }) {
   return (
-    <Badge variant="secondary" className={cn("border-transparent font-normal", TONE[category])}>
+    <Badge
+      variant="secondary"
+      className={cn("border-transparent font-normal", CATEGORY_TONE[category])}
+    >
       {status}
     </Badge>
   );

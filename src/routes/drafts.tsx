@@ -4,13 +4,15 @@ import { Plus } from "lucide-react";
 import { z } from "zod";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
-import { DraftComposer, INTENT_LABELS } from "@/components/drafts/draft-composer";
+import { DraftComposer } from "@/components/drafts/draft-composer";
 import { DraftEditor } from "@/components/drafts/draft-editor";
+import { CHANNEL_LABELS, intentLabel } from "@/components/labels";
+import { TONE } from "@/components/tone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import { listDrafts } from "@/services/comms/queries";
+import { type DraftListItem, listDrafts } from "@/services/comms/queries";
 
 export const Route = createFileRoute("/drafts")({
   validateSearch: z.object({
@@ -21,11 +23,11 @@ export const Route = createFileRoute("/drafts")({
   component: DraftsPage,
 });
 
-const STATUS_TONE = {
+const STATUS_TONE: Record<DraftListItem["status"], string> = {
   draft: "",
-  copied: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
-  sent: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-} as const;
+  copied: TONE.info,
+  sent: TONE.success,
+};
 
 /** Drafts (FR-6): Teams messages and emails in each recipient's style. */
 function DraftsPage() {
@@ -56,7 +58,7 @@ function DraftsPage() {
               >
                 <span className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>{relativeTime(d.sentAt ?? d.createdAt)}</span>
-                  <span>· {d.kind === "email" ? "Email" : "Teams"}</span>
+                  <span>· {CHANNEL_LABELS[d.kind]}</span>
                   <Badge
                     variant="secondary"
                     className={cn("ml-auto h-4 border-transparent px-1.5", STATUS_TONE[d.status])}
@@ -65,8 +67,7 @@ function DraftsPage() {
                   </Badge>
                 </span>
                 <span className="line-clamp-1 text-sm font-medium">
-                  {INTENT_LABELS[d.intent as keyof typeof INTENT_LABELS] ?? d.intent} to{" "}
-                  {d.recipient ?? "someone"}
+                  {intentLabel(d.intent)} to {d.recipient ?? "someone"}
                 </span>
                 {d.preview && (
                   <span className="line-clamp-1 text-xs text-muted-foreground">{d.preview}</span>
