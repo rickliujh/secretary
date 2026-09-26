@@ -23,9 +23,9 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { dateTime } from "@/lib/time";
+import { ISSUE_KEY_RE } from "@/services/proposals/schema";
 import type { AppSettings } from "@/services/settings";
 import { Sync } from "@/services/sync";
-import { ISSUE_KEY } from "@/services/sync/jql";
 
 const splitKeys = (text: string) =>
   text
@@ -44,7 +44,7 @@ const ScopeForm = z
       .max(1440, "At most 1440"),
   })
   .superRefine((v, ctx) => {
-    const bad = splitKeys(v.trackedEpics).filter((k) => !ISSUE_KEY.test(k));
+    const bad = splitKeys(v.trackedEpics).filter((k) => !ISSUE_KEY_RE.test(k));
     if (bad.length)
       ctx.addIssue({
         code: "custom",

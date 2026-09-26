@@ -29,6 +29,7 @@ import {
   updateMemory,
   WEIGHTS,
 } from "@/services/memory/queries";
+import { ISSUE_KEY_RE } from "@/services/proposals/schema";
 import { useMemoryMutation } from "./use-memory";
 
 const KIND_HELP: Record<(typeof EDITABLE_KINDS)[number], string> = {
@@ -51,7 +52,7 @@ const Form = z
     path: ["subjectId"],
     message: "Choose who or what it is about",
   })
-  .refine((f) => f.about !== "issue" || /^[A-Z][A-Z0-9_]+-\d+$/.test(f.subjectId), {
+  .refine((f) => f.about !== "issue" || ISSUE_KEY_RE.test(f.subjectId), {
     path: ["subjectId"],
     message: "Use an issue key like PAY-12",
   });
