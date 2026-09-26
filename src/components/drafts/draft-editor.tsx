@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { isSubmitEnter } from "@/lib/keys";
 import { dateTime, relativeTime } from "@/lib/time";
 import { type DraftDetail, draftDetail } from "@/services/comms/queries";
+import { HandoffButton, HandoffHint } from "./handoff-button";
 import { useDraftActions } from "./use-drafts";
 
 type Variant = "short" | "standard";
@@ -242,6 +243,19 @@ function Body({
             >
               <Copy /> Copy message
             </Button>
+            <HandoffButton
+              detail={d}
+              pending={actions.handoff.isPending}
+              onOpen={async (to) => {
+                await save();
+                actions.handoff.mutate({
+                  channel: d.draft.kind,
+                  to,
+                  subject: email ? subject : null,
+                  body: texts[variant],
+                });
+              }}
+            />
             {email && (
               <Button variant="outline" onClick={() => actions.copy.mutate(subject)}>
                 <Copy /> Copy subject
@@ -264,6 +278,7 @@ function Body({
               <Trash2 /> Delete
             </Button>
           </div>
+          <HandoffHint detail={d} />
           <div className="flex flex-col gap-1">
             <div className="flex gap-2">
               <Input

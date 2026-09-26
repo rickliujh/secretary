@@ -96,3 +96,24 @@ export const handoffLink = (
     bodyIncluded: false,
   };
 };
+
+/** Why a draft cannot be handed off: a team, a person without an email, or no one. */
+export type HandoffBlock = "team" | "no-email" | "no-recipient";
+
+/**
+ * The addresses to hand a draft to, or why there are none. Teams chats and emails
+ * need a person's email from the People directory; a team has none.
+ */
+export const handoffRecipients = ({
+  person,
+  team,
+}: {
+  person: { email: string | null } | null;
+  team: unknown;
+}): { to: string[] } | { blocked: HandoffBlock } => {
+  if (person) {
+    const email = person.email?.trim();
+    return email ? { to: [email] } : { blocked: "no-email" };
+  }
+  return { blocked: team ? "team" : "no-recipient" };
+};

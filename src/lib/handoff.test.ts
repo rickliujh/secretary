@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   handoffFits,
   handoffLink,
+  handoffRecipients,
   MAILTO_MAX_LENGTH,
   mailtoUrl,
   TEAMS_MAX_LENGTH,
@@ -157,4 +158,23 @@ describe("handoffLink", () => {
         body: "Hi",
       }),
     ).toEqual({ url: "mailto:a@x.com", bodyIncluded: false }));
+});
+
+describe("handoffRecipients", () => {
+  test("a person with an email", () =>
+    expect(handoffRecipients({ person: { email: " anna@example.com " }, team: null })).toEqual({
+      to: ["anna@example.com"],
+    }));
+  test("a person without an email", () => {
+    expect(handoffRecipients({ person: { email: null }, team: null })).toEqual({
+      blocked: "no-email",
+    });
+    expect(handoffRecipients({ person: { email: "  " }, team: null })).toEqual({
+      blocked: "no-email",
+    });
+  });
+  test("a team has no address", () =>
+    expect(handoffRecipients({ person: null, team: { id: "t1" } })).toEqual({ blocked: "team" }));
+  test("no recipient", () =>
+    expect(handoffRecipients({ person: null, team: null })).toEqual({ blocked: "no-recipient" }));
 });
