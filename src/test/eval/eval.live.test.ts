@@ -14,7 +14,7 @@
 import { describe, expect, test } from "bun:test";
 import { asc, eq, inArray } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { dependencies, intakeItems, memories, proposals } from "@/db/schema";
+import { dependencies, intakeItems, jiraIssues, memories, proposals } from "@/db/schema";
 import { Chat } from "@/services/chat";
 import { ChatLive } from "@/services/chat/live";
 import { Comms } from "@/services/comms";
@@ -31,6 +31,8 @@ import { Intake } from "@/services/intake";
 import { IntakeLive } from "@/services/intake/live";
 import { JiraClientLive } from "@/services/jira/live";
 import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
+import { Planning } from "@/services/planning";
+import { PlanningLive } from "@/services/planning/live";
 import { describePayload, type ProposalPayload } from "@/services/proposals/schema";
 import { RetrievalLive } from "@/services/retrieval/live";
 import { secretNames } from "@/services/secrets";
@@ -39,6 +41,7 @@ import { ProviderSchema, type TierBindings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
+import { getState, parseSprintState, SYNC_KEYS, setState } from "@/services/sync/state";
 import { drainStream, TODAY } from "@/test/helpers";
 import { JIRA_BASE, jiraSettings } from "@/test/layers";
 import { fixtureRoutes } from "@/test/seed";
@@ -89,7 +92,7 @@ function layerFor(tiers: TierBindings) {
   return Layer.provideMerge(
     ChatLive,
     Layer.provideMerge(
-      CommsLive,
+      Layer.merge(CommsLive, PlanningLive),
       Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, withConfluence)),
     ),
   );
@@ -390,5 +393,62 @@ describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live chat eval (Phase
         (p) => p.kind === "add_comment" && (p.payload as { target?: string }).target === "PAY-4",
       ),
     ).toBe(true);
+  }, 600_000);
+});
+
+describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live planning eval (D30)", () => {
+  test("drafts a sprint plan that passes the checks", async () => {
+    const model = env.SECRETARY_EVAL_STANDARD_MODEL ?? "";
+    const bind = { providerId: "eval", model };
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const set = (key: string, v: Partial<typeof jiraIssues.$inferInsert>) =>
+            query((d) => d.update(jiraIssues).set(v).where(eq(jiraIssues.key, key)));
+          yield* set("PAY-2", { assignee: "rliu", sprint: "Payments 15" });
+          yield* set("PAY-3", {
+            assignee: "rliu",
+            resolved: "2026-09-10T10:00:00.000Z",
+            storyPoints: 3,
+          });
+          yield* set("OPS-7", { assignee: null, epicKey: "PAY-1" });
+          const state = parseSprintState(yield* getState(SYNC_KEYS.sprints));
+          yield* setState(
+            SYNC_KEYS.sprints,
+            JSON.stringify({
+              ...state,
+              sprints: [
+                ...state.sprints,
+                {
+                  id: 43,
+                  name: "Payments 16",
+                  state: "future",
+                  boardId: 7,
+                  start: "2026-09-28",
+                  end: "2026-10-12",
+                },
+              ],
+            }),
+          );
+          return yield* Effect.either(
+            (yield* Planning).draft({
+              capacity: 6,
+              instructions: ["Friday is a release freeze"],
+              today: TODAY,
+            }),
+          );
+        }),
+        layerFor({ fast: bind, standard: bind, strong: null }),
+      ),
+    );
+    if (r._tag === "Right") {
+      const p = r.right.plan;
+      console.log(
+        `\nplan: goal "${p.goal}"; picks ${p.picks.map((x) => `${x.key} (${x.reason})`).join(", ")}; deferred ${p.deferred.map((x) => x.key).join(", ") || "none"}; ${p.points} points; risks: ${p.risks.join(" | ")}`,
+      );
+    } else console.log(`\nplan failed: ${r.left.message}`);
+    // The plan's checks (carry-over decided, capacity, blockers named) ran in code.
+    expect(r._tag).toBe("Right");
   }, 600_000);
 });
