@@ -15,6 +15,7 @@ import { Route as DraftsRouteImport } from './routes/drafts'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as PeopleRouteImport } from './routes/people'
+import { Route as PlanningRouteImport } from './routes/planning'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TeamsRouteImport } from './routes/teams'
 import { Route as TicketsRouteImport } from './routes/tickets'
@@ -50,6 +51,11 @@ const PeopleRoute = PeopleRouteImport.update({
   path: '/people',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlanningRoute = PlanningRouteImport.update({
+  id: '/planning',
+  path: '/planning',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -78,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof InboxRoute
   '/memory': typeof MemoryRoute
   '/people': typeof PeopleRoute
+  '/planning': typeof PlanningRoute
   '/settings': typeof SettingsRoute
   '/teams': typeof TeamsRoute
   '/tickets': typeof TicketsRoute
@@ -90,6 +97,7 @@ export interface FileRoutesByTo {
   '/inbox': typeof InboxRoute
   '/memory': typeof MemoryRoute
   '/people': typeof PeopleRoute
+  '/planning': typeof PlanningRoute
   '/settings': typeof SettingsRoute
   '/teams': typeof TeamsRoute
   '/tickets': typeof TicketsRoute
@@ -103,6 +111,7 @@ export interface FileRoutesById {
   '/inbox': typeof InboxRoute
   '/memory': typeof MemoryRoute
   '/people': typeof PeopleRoute
+  '/planning': typeof PlanningRoute
   '/settings': typeof SettingsRoute
   '/teams': typeof TeamsRoute
   '/tickets': typeof TicketsRoute
@@ -117,6 +126,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/memory'
     | '/people'
+    | '/planning'
     | '/settings'
     | '/teams'
     | '/tickets'
@@ -129,6 +139,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/memory'
     | '/people'
+    | '/planning'
     | '/settings'
     | '/teams'
     | '/tickets'
@@ -141,6 +152,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/memory'
     | '/people'
+    | '/planning'
     | '/settings'
     | '/teams'
     | '/tickets'
@@ -154,6 +166,7 @@ export interface RootRouteChildren {
   InboxRoute: typeof InboxRoute
   MemoryRoute: typeof MemoryRoute
   PeopleRoute: typeof PeopleRoute
+  PlanningRoute: typeof PlanningRoute
   SettingsRoute: typeof SettingsRoute
   TeamsRoute: typeof TeamsRoute
   TicketsRoute: typeof TicketsRoute
@@ -204,6 +217,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PeopleRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/planning': {
+      id: '/planning'
+      path: '/planning'
+      fullPath: '/planning'
+      preLoaderRoute: typeof PlanningRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -242,6 +262,7 @@ const rootRouteChildren: RootRouteChildren = {
   InboxRoute: InboxRoute,
   MemoryRoute: MemoryRoute,
   PeopleRoute: PeopleRoute,
+  PlanningRoute: PlanningRoute,
   SettingsRoute: SettingsRoute,
   TeamsRoute: TeamsRoute,
   TicketsRoute: TicketsRoute,

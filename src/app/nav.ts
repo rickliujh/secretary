@@ -1,6 +1,7 @@
 import {
   Brain,
   Building2,
+  CalendarRange,
   Hourglass,
   Inbox,
   LayoutDashboard,
@@ -18,6 +19,7 @@ export type NavItem = {
     | "/inbox"
     | "/tickets"
     | "/waiting"
+    | "/planning"
     | "/people"
     | "/teams"
     | "/drafts"
@@ -33,6 +35,7 @@ export const WORK_NAV: NavItem[] = [
   { to: "/inbox", label: "Inbox", icon: Inbox },
   { to: "/tickets", label: "Tickets", icon: ListTree },
   { to: "/waiting", label: "Waiting on", icon: Hourglass },
+  { to: "/planning", label: "Planning", icon: CalendarRange },
   { to: "/drafts", label: "Drafts", icon: PenLine },
   { to: "/chat", label: "Chat", icon: MessagesSquare },
 ];
