@@ -5,6 +5,7 @@ import { usePendingCount } from "@/app/queries";
 import { BriefPanel } from "@/components/dashboard/brief-panel";
 import { EpicHealth } from "@/components/dashboard/epic-health";
 import { FocusList } from "@/components/dashboard/focus-list";
+import { PlanCard } from "@/components/dashboard/plan-card";
 import { useDashboard } from "@/components/dashboard/use-dashboard";
 import { QuickThread } from "@/components/inbox/quick-thread";
 import { StatusBadge } from "@/components/tickets/status-badge";
@@ -99,6 +100,7 @@ function Dashboard() {
           </Section>
         </div>
         <div className="flex flex-col gap-4">
+          <PlanCard />
           <Section
             title="Waiting on me"
             description="New comments and mentions since you last looked."
