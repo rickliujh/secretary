@@ -1,49 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import type { ReportTicket } from "@/services/report";
-import {
-  dateRange,
-  groupTickets,
-  markdownToText,
-  ReportForm,
-  reportMarkdown,
-  reportText,
-  statLabels,
-} from "./format";
-
-const report = {
-  periodLabel: "Since Friday",
-  sections: {
-    summary: "Shipped the **login** fix; the import is in review.",
-    done: "- ABC-1 Login fix\n- ABC-2 *Docs* update",
-    inProgress: "- ABC-3 Import, in `review`",
-    changes: "",
-    blockers: "  ",
-    next: "1. ABC-4 Export\n2. ABC-5 Cleanup",
-  },
-};
-
-describe("report as Markdown", () => {
-  test("puts a title line and the summary first, then a heading per non-empty section", () => {
-    expect(reportMarkdown(report)).toBe(
-      [
-        "# Update: Since Friday",
-        "Shipped the **login** fix; the import is in review.",
-        "## Done\n\n- ABC-1 Login fix\n- ABC-2 *Docs* update",
-        "## In progress\n\n- ABC-3 Import, in `review`",
-        "## Next\n\n1. ABC-4 Export\n2. ABC-5 Cleanup",
-      ].join("\n\n"),
-    );
-  });
-
-  test("leaves the summary out when it is empty", () => {
-    const md = reportMarkdown({ ...report, sections: { ...report.sections, summary: "" } });
-    expect(md.startsWith("# Update: Since Friday\n\n## Done")).toBe(true);
-  });
-});
+import { dateRange, markdownToText, ReportForm, statLabels } from "./format";
 
 describe("report as plain text", () => {
   test("has headings as lines, bullets as dots and no Markdown syntax", () => {
-    expect(reportText(report)).toBe(
+    const md = [
+      "# Update: Since Friday",
+      "Shipped the **login** fix; the import is in review.",
+      "## Done\n\n- ABC-1 Login fix\n- ABC-2 *Docs* update",
+      "## Next\n\n1. ABC-4 Export\n2. ABC-5 `Cleanup`",
+    ].join("\n\n");
+    expect(markdownToText(md)).toBe(
       [
         "Update: Since Friday",
         "",
@@ -53,14 +19,17 @@ describe("report as plain text", () => {
         "• ABC-1 Login fix",
         "• ABC-2 Docs update",
         "",
-        "In progress",
-        "• ABC-3 Import, in review",
-        "",
         "Next",
         "1. ABC-4 Export",
         "2. ABC-5 Cleanup",
       ].join("\n"),
     );
+  });
+
+  test("keeps a list written right under a line tight, and blank lines where the source has them", () => {
+    expect(
+      markdownToText("**ABC-1 Login** · DONE\n- moved to Done\n\n**ABC-2 Docs**\n- next"),
+    ).toBe("ABC-1 Login · DONE\n• moved to Done\n\nABC-2 Docs\n• next");
   });
 
   test("indents nested lists and keeps a link's address", () => {
@@ -115,21 +84,5 @@ describe("display helpers", () => {
     expect(statLabels({ done: 2, pointsDone: 5, inProgress: 0, new: 0, comments: 4 })[0]).toBe(
       "2 done · 5 points",
     );
-  });
-
-  test("groups tickets in a fixed order and drops empty groups", () => {
-    const t = (key: string, group: ReportTicket["group"]): ReportTicket => ({
-      key,
-      summary: key,
-      status: "Open",
-      points: null,
-      group,
-      notes: [],
-    });
-    const groups = groupTickets([t("A-1", "next"), t("A-2", "done"), t("A-3", "next")]);
-    expect(groups.map((g) => [g.label, g.tickets.map((x) => x.key)])).toEqual([
-      ["Done", ["A-2"]],
-      ["Next", ["A-1", "A-3"]],
-    ]);
   });
 });

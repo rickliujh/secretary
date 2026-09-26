@@ -1,35 +1,43 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { Effect, Either, Layer } from "effect";
 import { z } from "zod";
-import { jiraComments, jiraIssues } from "@/db/schema";
+import { followups, jiraComments, jiraIssues } from "@/db/schema";
 import { localDate } from "@/lib/dates";
 import { readJson } from "@/lib/json";
 import {
   buildReportPrompt,
+  buildReportSchema,
   isQuiet,
   type ReportFacts,
-  ReportOutputSchema,
+  type ReportOutput,
   validateReport,
 } from "@/prompts/report";
 import { loadDashboardInputs } from "@/services/dashboard/data";
 import { blockInfo, buildDashboard } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
+import { listDependencies } from "@/services/dependencies/queries";
 import { JiraClient } from "@/services/jira";
 import { IssueLinkSchema } from "@/services/jira/schemas";
 import { Llm } from "@/services/llm";
-import { sprintPoints } from "@/services/planning/points";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, parseSprintState, SYNC_KEYS, setState } from "@/services/sync/state";
 import { type Report, ReportError, type ReportRequest, Reports } from ".";
-import { buildRecapFacts, type HistoryEntry, type RecapIssue, reportWindow } from "./facts";
+import {
+  askText,
+  buildRecapFacts,
+  type HistoryEntry,
+  type RecapIssue,
+  reportWindow,
+} from "./facts";
 
 const CACHE_KEY = "report.last";
 /** Jira history is read for at most this many recently updated tickets, a few at a time. */
 const HISTORY_LIMIT = 40;
 const HISTORY_CONCURRENCY = 4;
 
+// Reports from before D39 have no talk track; they are not shown.
 const Cached = z.custom<Report>(
-  (v) => typeof v === "object" && v !== null && "sections" in v && "tickets" in v,
+  (v) => typeof v === "object" && v !== null && "talkTrack" in v && "tickets" in v,
 );
 
 const linksOf = (value: unknown) =>
@@ -142,65 +150,119 @@ const make = Effect.gen(function* () {
         else historyMissing.push(key);
       }
 
+      const today = localDate(now);
       const inputs = yield* withDb(loadDashboardInputs(now)).pipe(
         Effect.provideService(Settings, settingsSvc),
       );
-      const dashboard = buildDashboard(inputs, settings.scoring, localDate(now), now.toISOString());
+      const dashboard = buildDashboard(inputs, settings.scoring, today, now.toISOString());
       const sprints = parseSprintState(yield* withDb(getState(SYNC_KEYS.sprints))).sprints;
       const active = sprints.filter((s) => s.state === "active");
+      const mySprint =
+        active.find((s) => issues.some((i) => i.sprint === s.name && i.assignee === me)) ?? null;
+
+      // Waiting-on items and the follow-ups logged on them (FR-3).
+      const deps = yield* withDb(listDependencies({}));
+      const logged = deps.length
+        ? yield* q((d) =>
+            d
+              .select()
+              .from(followups)
+              .where(
+                inArray(
+                  followups.dependencyId,
+                  deps.map((x) => x.id),
+                ),
+              )
+              .all(),
+          )
+        : [];
+      logged.sort((a, b) => a.at.localeCompare(b.at));
+
+      // Older asks from the dashboard, quoting the latest comment by someone else.
+      const askKeys = dashboard.waitingOnMe.map((w) => w.issue.key);
+      const askComments = askKeys.length
+        ? yield* q((d) =>
+            d
+              .select({
+                issueKey: jiraComments.issueKey,
+                author: jiraComments.author,
+                authorDisplay: jiraComments.authorDisplay,
+                body: jiraComments.body,
+                created: jiraComments.created,
+              })
+              .from(jiraComments)
+              .where(inArray(jiraComments.issueKey, askKeys))
+              .all(),
+          )
+        : [];
+      // Only questions and mentions are asks; other unread comments are in the tickets.
+      const asks = dashboard.waitingOnMe.flatMap((w) => {
+        const latest = askComments
+          .filter((c) => c.issueKey === w.issue.key && c.author !== me)
+          .sort((a, b) => b.created.localeCompare(a.created))[0];
+        const mentioned = w.reasons.some((r) => r.endsWith("mentioned you"));
+        if (!latest || (!latest.body.includes("?") && !mentioned)) return [];
+        return [
+          {
+            key: w.issue.key,
+            who: latest.authorDisplay ?? latest.author ?? "Someone",
+            what: askText(latest.body),
+            at: latest.created,
+          },
+        ];
+      });
+
       const facts = buildRecapFacts({
         me,
         since,
         until,
+        today,
         tracked,
         activeSprints: new Set(active.map((s) => s.name)),
+        sprint: mySprint,
         focus: dashboard.topFocus.map((f) => f.key),
         issues,
         comments,
         history,
+        dependencies: deps.map((x) => ({
+          issueKey: x.issueKey,
+          label: x.label,
+          owner: x.owner.name,
+          externalRef: x.externalRef,
+          status: x.status,
+          requestedAt: x.requestedAt,
+          expectedAt: x.expectedAt,
+          nextFollowupAt: x.nextFollowupAt,
+          followups: logged
+            .filter((f) => f.dependencyId === x.id)
+            .map((f) => ({ at: f.at, channel: f.channel, summary: f.summary })),
+        })),
+        asks,
       });
-
-      const mySprint = active.find((s) =>
-        issues.some((i) => i.sprint === s.name && i.assignee === me),
-      );
-      const points = mySprint ? sprintPoints(issues, mySprint.name, me) : null;
       const reportFacts: ReportFacts = {
         ...facts,
         periodLabel: label,
         since,
-        today: localDate(now),
+        today,
         outputLanguage: settings.general.outputLanguage,
-        sprint:
-          mySprint && points && points.estimated > 0
-            ? {
-                name: mySprint.name,
-                total: points.total,
-                done: points.done,
-                unestimated: points.unestimated.length,
-              }
-            : null,
       };
 
-      let sections: Report["sections"];
+      let written: ReportOutput = {
+        talkTrack: "Nothing to report for this period.",
+        headline: "A quiet period.",
+        tickets: [],
+      };
       let model: string | null = null;
-      if (isQuiet(reportFacts)) {
-        sections = {
-          summary: "Nothing to report for this period.",
-          done: "",
-          inProgress: "",
-          changes: "",
-          blockers: "",
-          next: "",
-        };
-      } else {
-        const r = yield* llm.object("write_report", {
-          schema: ReportOutputSchema,
+      if (!isQuiet(reportFacts)) {
+        const r = yield* llm.object<ReportOutput>("write_report", {
+          schema: buildReportSchema(facts.tickets.map((t) => t.key)),
           ...buildReportPrompt(reportFacts),
           validate: (out) => validateReport(out, reportFacts),
         });
-        sections = r.value;
+        written = r.value;
         model = r.model;
       }
+      const lines = new Map(written.tickets.map((t) => [t.key, t]));
 
       const report: Report = {
         generatedAt: now.toISOString(),
@@ -208,8 +270,17 @@ const make = Effect.gen(function* () {
         until,
         periodLabel: label,
         scope: req.scope,
-        sections,
-        tickets: facts.tickets.map(({ quote: _, ...t }) => t),
+        talkTrack: written.talkTrack.trim(),
+        headline: written.headline.trim(),
+        tickets: facts.tickets.map(({ comments: _, ...t }) => ({
+          ...t,
+          happened: lines.get(t.key)?.happened.trim() ?? "",
+          next: lines.get(t.key)?.next.trim() ?? "",
+        })),
+        epics: facts.epics,
+        sprint: facts.sprint,
+        risks: facts.risks,
+        asks: facts.asks,
         stats: facts.stats,
         historyMissing,
         model,

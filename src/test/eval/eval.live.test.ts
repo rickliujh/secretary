@@ -14,7 +14,16 @@
 import { describe, expect, test } from "bun:test";
 import { asc, eq, inArray } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { dependencies, intakeItems, jiraIssues, memories, proposals } from "@/db/schema";
+import { renderReport } from "@/components/report/render";
+import {
+  dependencies,
+  followups,
+  intakeItems,
+  jiraComments,
+  jiraIssues,
+  memories,
+  proposals,
+} from "@/db/schema";
 import { Chat } from "@/services/chat";
 import { ChatLive } from "@/services/chat/live";
 import { Comms } from "@/services/comms";
@@ -34,6 +43,8 @@ import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
 import { Planning } from "@/services/planning";
 import { PlanningLive } from "@/services/planning/live";
 import { describePayload, type ProposalPayload } from "@/services/proposals/schema";
+import { REPORT_STYLES, Reports } from "@/services/report";
+import { ReportsLive } from "@/services/report/live";
 import { RetrievalLive } from "@/services/retrieval/live";
 import { secretNames } from "@/services/secrets";
 import { makeSecretsTest } from "@/services/secrets/test";
@@ -45,7 +56,7 @@ import { getState, parseSprintState, SYNC_KEYS, setState } from "@/services/sync
 import { drainStream, TODAY } from "@/test/helpers";
 import { JIRA_BASE, jiraSettings } from "@/test/layers";
 import { fixtureRoutes } from "@/test/seed";
-import { stubFetch } from "@/test/stub-fetch";
+import { json, type StubRoute, stubFetch } from "@/test/stub-fetch";
 import { EVAL_CASES, type EvalCase } from "./cases";
 
 const env = process.env;
@@ -60,14 +71,14 @@ const selected = env.SECRETARY_EVAL_CASE
   ? EVAL_CASES.filter((c) => c.name.includes(env.SECRETARY_EVAL_CASE ?? ""))
   : EVAL_CASES;
 
-function layerFor(tiers: TierBindings) {
+function layerFor(tiers: TierBindings, extraRoutes: StubRoute[] = []) {
   const provider = ProviderSchema.parse({
     id: "eval",
     name: "Eval",
     kind: env.SECRETARY_EVAL_KIND === "openai-compatible" ? "openai-compatible" : "anthropic",
     baseUrl: env.SECRETARY_EVAL_BASE_URL,
   });
-  const jiraStub = stubFetch(fixtureRoutes());
+  const jiraStub = stubFetch([...extraRoutes, ...fixtureRoutes()]);
   // Jira goes to the stub; the model provider gets real network access.
   const fetcher = makeFetcherTest((input, init) => {
     const url = input instanceof Request ? input.url : String(input);
@@ -92,7 +103,7 @@ function layerFor(tiers: TierBindings) {
   return Layer.provideMerge(
     ChatLive,
     Layer.provideMerge(
-      Layer.merge(CommsLive, PlanningLive),
+      Layer.mergeAll(CommsLive, PlanningLive, ReportsLive),
       Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, withConfluence)),
     ),
   );
@@ -450,5 +461,149 @@ describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live planning eval (D
     } else console.log(`\nplan failed: ${r.left.message}`);
     // The plan's checks (carry-over decided, capacity, blockers named) ran in code.
     expect(r._tag).toBe("Right");
+  }, 600_000);
+});
+
+describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live report eval (D39)", () => {
+  test("writes a talk track and ticket lines that pass the checks, in every style", async () => {
+    const model = env.SECRETARY_EVAL_STANDARD_MODEL ?? "";
+    const bind = { providerId: "eval", model };
+    const now = Date.now();
+    const ago = (h: number) => new Date(now - h * 3_600_000).toISOString();
+    const day = (d: number) => new Date(now + d * 86_400_000).toISOString().slice(0, 10);
+    const history = (
+      key: string,
+      entries: { h: number; from: string; to: string }[],
+    ): StubRoute => ({
+      match: (u) =>
+        u.pathname.endsWith(`/issue/${key}`) &&
+        (u.searchParams.get("expand") ?? "").includes("changelog"),
+      respond: () =>
+        json({
+          key,
+          fields: {},
+          changelog: {
+            histories: entries.map((e, n) => ({
+              id: String(n),
+              author: { name: "rliu", displayName: "Rick Liu" },
+              created: ago(e.h),
+              items: [{ field: "status", fieldtype: "jira", fromString: e.from, toString: e.to }],
+            })),
+          },
+        }),
+    });
+    const routes = [
+      history("PAY-3", [{ h: 20, from: "In Review", to: "Done" }]),
+      history("PAY-4", [{ h: 24, from: "In Progress", to: "In Review" }]),
+    ];
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const set = (key: string, v: Partial<typeof jiraIssues.$inferInsert>) =>
+            query((d) => d.update(jiraIssues).set(v).where(eq(jiraIssues.key, key)));
+          yield* set("PAY-3", {
+            assignee: "rliu",
+            isSubtask: false,
+            issueType: "Story",
+            status: "Done",
+            statusCategory: "done",
+            resolved: ago(20),
+            updated: ago(18),
+            storyPoints: 3,
+            sprint: "Payments 15",
+          });
+          yield* set("PAY-4", {
+            assignee: "rliu",
+            status: "In Review",
+            statusCategory: "indeterminate",
+            updated: ago(22),
+            storyPoints: 5,
+            sprint: "Payments 15",
+          });
+          // PAY-2 is blocked by OPS-7 in the fixtures.
+          yield* set("PAY-2", {
+            assignee: "rliu",
+            storyPoints: 3,
+            sprint: "Payments 15",
+            updated: ago(30),
+          });
+          const state = parseSprintState(yield* getState(SYNC_KEYS.sprints));
+          yield* setState(
+            SYNC_KEYS.sprints,
+            JSON.stringify({
+              ...state,
+              sprints: [
+                {
+                  id: 42,
+                  name: "Payments 15",
+                  state: "active",
+                  boardId: 7,
+                  start: day(-12),
+                  end: day(2),
+                },
+              ],
+            }),
+          );
+          yield* query((d) =>
+            d.insert(jiraComments).values([
+              {
+                id: "c-ana",
+                issueKey: "PAY-3",
+                author: "ana.b",
+                authorDisplay: "Ana Bell",
+                body: "Verified on staging, all four rounding cases pass. Can we ship this in the 1 October release?",
+                created: ago(17),
+                updated: ago(17),
+              },
+              {
+                id: "c-tom",
+                issueKey: "PAY-4",
+                author: "tom.k",
+                authorDisplay: "Tom Kay",
+                body: "Export looks right. Excel users need UTF-8 with a BOM though, otherwise names with accents break. Can you add it?",
+                created: ago(21),
+                updated: ago(21),
+              },
+            ]),
+          );
+          const network = yield* createTeam({ name: "Network", function: "Firewalls" });
+          const dep = yield* createDependency({
+            issueKey: "PAY-2",
+            kind: "incident",
+            label: "Firewall rule for the bank endpoint",
+            externalRef: "INC0012345",
+            ownerTeamId: network,
+            expectedAt: day(-2),
+            status: "blocked",
+          });
+          yield* query((d) =>
+            d
+              .update(dependencies)
+              .set({ requestedAt: ago(96), nextFollowupAt: day(0) })
+              .where(eq(dependencies.id, dep)),
+          );
+          yield* query((d) =>
+            d.insert(followups).values({
+              id: "f1",
+              dependencyId: dep,
+              at: ago(26),
+              channel: "teams",
+              summary: "Asked Priya for an ETA; no reply yet",
+            }),
+          );
+          return yield* (yield* Reports).generate({
+            period: { kind: "days", days: 3 },
+            scope: "mine",
+          });
+        }),
+        layerFor({ fast: bind, standard: bind, strong: null }, routes),
+      ),
+    );
+    for (const style of REPORT_STYLES)
+      console.log(`\n===== ${style} =====\n${renderReport(r, style)}`);
+    expect(r.talkTrack).toContain("PAY-3");
+    expect(r.talkTrack).toContain("PAY-2");
+    expect(r.tickets.find((t) => t.key === "PAY-4")?.happened).not.toBe("");
   }, 600_000);
 });

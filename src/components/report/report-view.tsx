@@ -1,6 +1,7 @@
-import { ChevronRight, ClipboardCopy, Copy, TriangleAlert } from "lucide-react";
+import { ClipboardCopy, Copy, TriangleAlert } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useSettings, useUpdateSettings } from "@/app/hooks";
 import { Markdown } from "@/components/markdown";
-import { TicketLink } from "@/components/tickets/ticket-link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,22 +13,36 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { relativeTime } from "@/lib/time";
-import type { Report } from "@/services/report";
-import {
-  dateRange,
-  groupTickets,
-  reportMarkdown,
-  reportText,
-  SECTIONS,
-  statLabels,
-} from "./format";
+import { REPORT_STYLES, type Report, type ReportStyle } from "@/services/report";
+import { dateRange, markdownToText, statLabels } from "./format";
+import { renderReport, STYLE_LABELS } from "./render";
 import { useCopy } from "./use-report";
 
-/** A written report: stats, the prose sections, and the tickets it is based on. */
+const isStyle = (v: string): v is ReportStyle => (REPORT_STYLES as readonly string[]).includes(v);
+
+/**
+ * The style the report reads in (D39): the saved setting, switched instantly on
+ * screen and saved in the background.
+ */
+function useReportStyle() {
+  const { data: settings } = useSettings();
+  const update = useUpdateSettings();
+  const [picked, setPicked] = useState<ReportStyle | null>(null);
+  const style = picked ?? settings?.report.style ?? "talk_track";
+  const change = (next: ReportStyle) => {
+    setPicked(next);
+    update.mutate((s) => ({ ...s, report: { ...s.report, style: next } }));
+  };
+  return [style, change] as const;
+}
+
+/** A written report: stats, the style picker, and the report in that style. */
 export function ReportView({ report }: { report: Report }) {
   const copy = useCopy();
+  const [style, setStyle] = useReportStyle();
+  const markdown = useMemo(() => renderReport(report, style), [report, style]);
   const missing = report.historyMissing.length;
   return (
     <Card>
@@ -43,7 +58,7 @@ export function ReportView({ report }: { report: Report }) {
             size="sm"
             variant="outline"
             disabled={copy.isPending}
-            onClick={() => copy.mutate(reportMarkdown(report))}
+            onClick={() => copy.mutate(markdown)}
           >
             <Copy /> Copy
           </Button>
@@ -51,7 +66,7 @@ export function ReportView({ report }: { report: Report }) {
             size="sm"
             variant="outline"
             disabled={copy.isPending}
-            onClick={() => copy.mutate(reportText(report))}
+            onClick={() => copy.mutate(markdownToText(markdown))}
           >
             <ClipboardCopy /> Copy as text
           </Button>
@@ -74,59 +89,23 @@ export function ReportView({ report }: { report: Report }) {
             </AlertDescription>
           </Alert>
         )}
-        {report.sections.summary.trim() && (
-          <Markdown linkTickets className="text-base">
-            {report.sections.summary}
-          </Markdown>
-        )}
-        {SECTIONS.filter(([key]) => report.sections[key].trim()).map(([key, title]) => (
-          <section key={key}>
-            <h3 className="mb-1 text-sm font-medium">{title}</h3>
-            <Markdown linkTickets>{report.sections[key]}</Markdown>
-          </section>
-        ))}
-        {report.tickets.length > 0 && <BasedOn tickets={report.tickets} />}
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          value={style}
+          onValueChange={(v) => isStyle(v) && v !== style && setStyle(v)}
+          className="flex-wrap"
+          aria-label="Report style"
+        >
+          {REPORT_STYLES.map((s) => (
+            <ToggleGroupItem key={s} value={s}>
+              {STYLE_LABELS[s]}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <Markdown linkTickets>{markdown}</Markdown>
       </CardContent>
     </Card>
-  );
-}
-
-/** The tickets behind the prose, by group, collapsed by default. */
-function BasedOn({ tickets }: { tickets: Report["tickets"] }) {
-  return (
-    <Collapsible className="border-t pt-3">
-      <CollapsibleTrigger asChild>
-        <Button variant="ghost" size="sm" className="group -ml-2 text-muted-foreground">
-          <ChevronRight className="transition-transform group-data-[state=open]:rotate-90" />
-          Based on {tickets.length} ticket{tickets.length === 1 ? "" : "s"}
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="mt-2 flex flex-col gap-3">
-        {groupTickets(tickets).map((g) => (
-          <section key={g.group}>
-            <h4 className="mb-1 text-xs font-medium text-muted-foreground">{g.label}</h4>
-            <ul className="flex flex-col gap-1">
-              {g.tickets.map((t) => (
-                <li key={t.key} className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                  <TicketLink ticketKey={t.key} />
-                  <span className="min-w-0">{t.summary}</span>
-                  <Badge variant="outline" className="text-xs">
-                    {t.status}
-                  </Badge>
-                  {t.points !== null && (
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {t.points} pt
-                    </span>
-                  )}
-                  {t.notes.length > 0 && (
-                    <span className="text-xs text-muted-foreground">{t.notes.join("; ")}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
-      </CollapsibleContent>
-    </Collapsible>
   );
 }

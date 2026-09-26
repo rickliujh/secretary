@@ -13,18 +13,19 @@ const now = new Date();
 const hoursAgo = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
 
 const report = {
-  summary: "Finished the refund rounding fix; the ledger export is under review.",
-  done: "- PAY-3 refund rounding fixed.",
-  inProgress: "- PAY-2 ledger export moved to review.",
-  changes: "",
-  blockers: "- PAY-2 waits on OPS-7.",
-  next: "",
+  talkTrack:
+    "I finished the refund rounding fix, PAY-3. The ledger export, PAY-2, is in review but waits on OPS-7.",
+  headline: "Refund rounding done; ledger export waits on OPS-7.",
+  tickets: [
+    { key: "PAY-3", happened: "", next: "" },
+    { key: "PAY-2", happened: "Moved to review.", next: "Chase OPS-7" },
+  ],
 };
 
 describe("recap report (D37)", () => {
   test("facts from the cache and Jira history; finished and blocked tickets must be named", async () => {
     const { layer, models } = intakeTestLayer(
-      { "std-m": [out({ ...report, inProgress: "", blockers: "" }), out(report)] },
+      { "std-m": [out({ ...report, talkTrack: "I finished PAY-3." }), out(report)] },
       [
         {
           match: (u) =>
@@ -94,9 +95,6 @@ describe("recap report (D37)", () => {
     const group = (g: string) => r.made.tickets.filter((t) => t.group === g).map((t) => t.key);
     expect(group("done")).toEqual(["PAY-3"]);
     expect(group("blocked")).toEqual(["PAY-2"]);
-    expect(r.made.tickets.find((t) => t.key === "PAY-2")?.notes).toContain(
-      `In Progress -> In Review (you, ${new Date(hoursAgo(2)).getDate()} ${new Date(hoursAgo(2)).toLocaleString("en", { month: "short" })})`,
-    );
     expect(r.made.historyMissing).toEqual(["PAY-3"]);
     expect(r.made.stats).toMatchObject({ done: 1, pointsDone: 3 });
     expect(r.made.periodLabel).toBe("Since yesterday");
@@ -106,7 +104,14 @@ describe("recap report (D37)", () => {
       ["repair_output", true],
     ]);
     expect(promptOf(models.calls, 0)).toContain("PAY-3");
-    expect(r.made.sections.blockers).toContain("OPS-7");
+    expect(r.made.talkTrack).toContain("OPS-7");
+    expect(r.made.tickets.find((t) => t.key === "PAY-2")).toMatchObject({
+      happened: "Moved to review.",
+      next: "Chase OPS-7",
+    });
+    expect(r.made.tickets.find((t) => t.key === "PAY-2")?.events.map((e) => e.text)).toContain(
+      "In Progress -> In Review",
+    );
     expect(r.last?.generatedAt).toBe(r.made.generatedAt);
   });
 
@@ -123,7 +128,7 @@ describe("recap report (D37)", () => {
         layer,
       ),
     );
-    expect(made.sections.summary).toBe("Nothing to report for this period.");
+    expect(made.talkTrack).toBe("Nothing to report for this period.");
     expect(models.calls).toHaveLength(0);
   });
 });

@@ -38,6 +38,7 @@ describe("Settings schema", () => {
       confluence: { baseUrl: "", deployment: "auto", email: "" },
       general: { outputLanguage: "English", fiscalYearStartMonth: 1 },
       dependencies: { followupDays: 3, reminders: true },
+      report: { style: "talk_track" },
       storage: { limitMb: 1024, autoCleanup: true },
       scoring: {
         priority: 3,

@@ -118,6 +118,12 @@ export const SettingsSchema = z.object({
     })
     .prefault({}),
   scoring: ScoringWeightsSchema.prefault({}),
+  report: z
+    .object({
+      /** The report style shown and copied (D39). */
+      style: z.enum(["talk_track", "standup", "by_epic", "timeline"]).default("talk_track"),
+    })
+    .prefault({}),
   storage: z
     .object({
       /** Database size the app warns near (D34). */

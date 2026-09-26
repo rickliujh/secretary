@@ -1,19 +1,13 @@
 /**
  * Pure helpers for the Report page (D37): the form's period and scope as a
- * request, the report as Markdown or plain text for pasting, and its tickets by
- * group.
+ * request, Markdown as plain text for pasting, and the header's date range and
+ * stats. The report's Markdown itself comes from `render.ts`.
  */
 import type { List, ListItem, PhrasingContent, RootContent } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { z } from "zod";
 import { shortDate } from "@/lib/time";
-import type {
-  Report,
-  ReportGroup,
-  ReportRequest,
-  ReportSections,
-  ReportTicket,
-} from "@/services/report";
+import type { Report, ReportRequest } from "@/services/report";
 
 /** The period choices in the toggle group; "custom" reads the days field. */
 export const PERIODS = [
@@ -54,31 +48,6 @@ export const ReportForm = z
   );
 
 export type ReportFormInput = z.input<typeof ReportForm>;
-
-/** The prose sections under the summary, in reading order. */
-export const SECTIONS: [Exclude<keyof ReportSections, "summary">, string][] = [
-  ["done", "Done"],
-  ["inProgress", "In progress"],
-  ["changes", "Changes"],
-  ["blockers", "Blockers"],
-  ["next", "Next"],
-];
-
-/** The report as Markdown: a title line, the summary, then a `##` heading per non-empty section. */
-export function reportMarkdown(r: Pick<Report, "periodLabel" | "sections">): string {
-  const parts = [`# Update: ${r.periodLabel}`];
-  const summary = r.sections.summary.trim();
-  if (summary) parts.push(summary);
-  for (const [key, title] of SECTIONS) {
-    const text = r.sections[key].trim();
-    if (text) parts.push(`## ${title}\n\n${text}`);
-  }
-  return parts.join("\n\n");
-}
-
-/** The report as plain text for a Teams chat or an email. */
-export const reportText = (r: Pick<Report, "periodLabel" | "sections">): string =>
-  markdownToText(reportMarkdown(r));
 
 const phrasing = (nodes: PhrasingContent[]): string => nodes.map(phrase).join("");
 
@@ -137,17 +106,23 @@ function blockLines(n: RootContent): string[] {
  * Markdown as plain text: headings on their own line, bullets as "• ", emphasis,
  * code and link syntax dropped (a link keeps its address in brackets). Blocks are
  * separated by a blank line, except that a section heading's content follows it
- * directly; a top-level title keeps its blank line.
+ * directly (the title, the document's top heading level, keeps its blank line), and a block written on the
+ * line right after the previous one (a bold line, then its list) stays tight.
  */
 export function markdownToText(md: string): string {
+  const nodes = fromMarkdown(md).children;
+  const top = Math.min(...nodes.map((n) => (n.type === "heading" ? n.depth : 7)));
   const out: string[] = [];
-  let afterHeading = false;
-  for (const node of fromMarkdown(md).children) {
+  let tight = false;
+  let endLine = -1;
+  for (const node of nodes) {
     const lines = blockLines(node);
     if (lines.length === 0) continue;
-    if (out.length > 0 && !afterHeading) out.push("");
+    const adjacent = node.position?.start.line === endLine + 1;
+    if (out.length > 0 && !tight && !adjacent) out.push("");
     out.push(...lines);
-    afterHeading = node.type === "heading" && node.depth > 1;
+    tight = node.type === "heading" && node.depth > top;
+    endLine = node.position?.end.line ?? -1;
   }
   return out.join("\n").trim();
 }
@@ -170,20 +145,3 @@ export function statLabels(s: Report["stats"]): string[] {
     plural(s.comments, "comment"),
   ];
 }
-
-export const GROUPS: [ReportGroup, string][] = [
-  ["done", "Done"],
-  ["in_progress", "In progress"],
-  ["new", "New"],
-  ["changed", "Changed"],
-  ["blocked", "Blocked"],
-  ["next", "Next"],
-];
-
-/** Tickets by group, in the order above, leaving out empty groups. */
-export const groupTickets = (tickets: ReportTicket[]) =>
-  GROUPS.map(([group, label]) => ({
-    group,
-    label,
-    tickets: tickets.filter((t) => t.group === group),
-  })).filter((g) => g.tickets.length > 0);
