@@ -462,9 +462,10 @@ toasts (sonner) for execution results.
 ## 9. Security and privacy
 
 - PAT and API keys: OS keychain only. Settings store holds non-secret config.
-- Tauri capabilities: `http:default` with `scope` allow-list built from configured
-  hosts; `sql`, `store`, `clipboard-manager:allow-write-text`, `notification`,
-  `opener` for external links only.
+- Tauri capabilities: `http:default` open to http(s); the `Fetcher` only lets
+  requests through to configured hosts (D27). `sql`, `store`,
+  `clipboard-manager:allow-write-text`, `notification`, `opener` for external links
+  only, `fs` text files for chosen export and import paths.
 - CSP restricts scripts to self. No remote code.
 - Logging redacts `Authorization` and `x-api-key` headers and any value stored as a
   secret.
@@ -524,6 +525,7 @@ No silent fallbacks between providers; the user chooses the model.
 | D24 | Drafts are local records the user edits directly, not proposals: a `communications` row keeps the request (`notes_md`), the generated short and standard variants, the chosen text and the regeneration instructions. The model writes both variants in one schema-bound call from context code assembles (recipient profile and language, team, tickets, dependency with request date and follow-ups, recent messages to the recipient, memories); code checks that an incident chase names the incident. Ticket text is untrusted input in the prompt. "Mark sent" logs a follow-up on the linked dependency | Drafting writes nothing outside the app and the user sends messages themselves (D8), so an approval step would add nothing |
 | D25 | Chat (FR-8) is the Chat page: a streamed tool loop (task `chat`, tier picker, step limit) with read-only tools over local data (tickets, dependencies, people, teams, notes, focus list) and Confluence search. Its only write path is `propose_actions`, which sends the user's request through the intake pipeline as a new thread (D22) and returns what was proposed; the chat never builds proposals itself. Tool results are other people's text and the system prompt treats them as data. Conversations live in the page session and are not stored | A free-form agent that writes proposals would bypass the checked classify step that makes weaker models reliable (D21); routing writes through intake keeps one path for every proposal |
 | D26 | Learning (FR-7): memories are ranked in code by token overlap with the input, a boost for matching subjects (issues, sender, contacts and teams in the item), weight, recency and use count; memories that reach a prompt get `last_used_at` and `use_count` updated. No FTS table: there are at most a few hundred memories. Consolidation (strong tier) turns correction examples into candidate rules, presented as `remember` proposals in a new thread. Evaluation replay (FR-9.4) re-runs stored snapshots on a chosen tier or model and compares kind and target with what the user finally approved | Keeps learning inside the approval model (inferred rules are proposals) and measurable (replay) without new infrastructure |
+| D27 | Supersedes the static host scope in section 9. Configured hosts (Jira, Confluence, model providers) are runtime settings, so the Tauri `http` capability stays open to http(s) and the `Fetcher` enforces the allow-list: a request to any other host fails before it leaves the app. The Fetcher also fails fast when the OS reports no network. A full export is one JSON file of the user's own data (directory, notes, dependencies, drafts, memories, threads and proposals, audit log, pins) validated with zod on import; the Jira cache and LLM accounting are left out because sync and use rebuild them; secrets are never read for it | Capability scopes are fixed at build time and cannot list hosts the user types in later; the check in code gives the same protection |
 
 ## 13. References
 
