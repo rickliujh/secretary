@@ -5,6 +5,7 @@ import { snapshot } from "@/test/fixtures/intake/snapshot";
 import {
   buildClassifyPrompt,
   buildItemSchema,
+  fromPayload,
   type ItemOutput,
   mapItemOutput,
   validateItemOutput,
@@ -381,5 +382,19 @@ describe("per-project checks need Jira's project metadata", () => {
         },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("kinds the model cannot propose", () => {
+  test("sprint moves are not offered to the model and have no revision shape (D30)", () => {
+    const schema = buildItemSchema(snapshot);
+    const move = {
+      kind: "move_to_sprint",
+      target: "PAY-2",
+      sprintId: 44,
+      sprintName: "Payments 16",
+    } as const;
+    expect(schema.safeParse({ ...good, proposals: [{ ...move, ...base }] }).success).toBe(false);
+    expect(fromPayload(move)).toBeNull();
   });
 });

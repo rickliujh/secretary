@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
   CreateIssue,
   describeCorrection,
+  describePayload,
   describeStoredPayload,
   issueRefs,
+  MoveToSprint,
+  PROPOSAL_LABELS,
   ProposalPayloadSchema,
   payloadChanges,
   resolveRefs,
@@ -117,5 +120,32 @@ describe("proposal payloads", () => {
       "Move PAY-2 to To Do (changed toStatus: Done -> To Do)",
     );
     expect(describeCorrection(before, before)).toBe("Move PAY-2 to Done");
+  });
+});
+
+describe("move_to_sprint (D30)", () => {
+  const move = { kind: "move_to_sprint", target: "PAY-4", sprintId: 44, sprintName: "Payments 16" };
+
+  test("needs a real issue key, a positive integer sprint id and a name", () => {
+    expect(ProposalPayloadSchema.parse(move)).toEqual(MoveToSprint.parse(move));
+    const bad = [
+      { ...move, target: "$new:1" },
+      { ...move, target: "pay-4" },
+      { ...move, sprintId: 0 },
+      { ...move, sprintId: 4.5 },
+      { ...move, sprintId: "44" },
+      { ...move, sprintName: " " },
+      { kind: "move_to_sprint", target: "PAY-4", sprintId: 44 },
+    ];
+    for (const p of bad) expect(ProposalPayloadSchema.safeParse(p).success).toBe(false);
+  });
+
+  test("is labelled and described for cards, and points at its issue", () => {
+    const p = ProposalPayloadSchema.parse(move);
+    expect(PROPOSAL_LABELS.move_to_sprint).toBe("Move to sprint");
+    expect(describePayload(p)).toBe("Move PAY-4 to sprint Payments 16");
+    expect(issueRefs(p)).toEqual(["PAY-4"]);
+    expect(issueRefs(p, { only: "new" })).toEqual([]);
+    expect(resolveRefs(p, new Map([["$new:1", "PAY-9"]]))).toEqual(p);
   });
 });

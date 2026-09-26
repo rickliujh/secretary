@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ProposalPayloadSchema } from "@/services/proposals/schema";
-import { fromFormValues, toFormValues } from "./proposal-fields";
+import { fromFormValues, isEditable, toFormValues } from "./proposal-fields";
 
 describe("proposal edit form values", () => {
   test("round trip keeps unchanged payloads identical", () => {
@@ -51,5 +51,27 @@ describe("proposal edit form values", () => {
       changes: object;
     };
     expect(cleared.changes).toEqual({});
+  });
+});
+
+describe("kinds without an edit form", () => {
+  test("a sprint move is approved as it is: no fields, payload unchanged", () => {
+    const p = ProposalPayloadSchema.parse({
+      kind: "move_to_sprint",
+      target: "PAY-4",
+      sprintId: 44,
+      sprintName: "Payments 16",
+    });
+    expect(isEditable(p)).toBe(false);
+    expect(toFormValues(p)).toEqual({});
+    expect(fromFormValues(p, { target: "PAY-9" })).toEqual(p);
+    expect(
+      isEditable(ProposalPayloadSchema.parse({ kind: "needs_clarification", question: "?" })),
+    ).toBe(false);
+    expect(
+      isEditable(
+        ProposalPayloadSchema.parse({ kind: "add_comment", target: "PAY-2", bodyMd: "x" }),
+      ),
+    ).toBe(true);
   });
 });

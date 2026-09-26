@@ -477,7 +477,8 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
 
 /**
  * A stored payload in the model's flat output shape, so a revision can return it
- * unchanged (D22). `$new` refs are renamed through `refs`; questions have no shape.
+ * unchanged (D22). `$new` refs are renamed through `refs`; questions and kinds
+ * the model cannot propose (sprint moves, D30) have no shape.
  */
 export function fromPayload(
   p: ProposalPayload,
@@ -559,6 +560,7 @@ export function fromPayload(
         notes: p.notes,
       };
     case "needs_clarification":
+    case "move_to_sprint":
       return null;
   }
 }

@@ -38,6 +38,7 @@ function payloadTarget(p: ProposalPayload): string | undefined {
     case "update_issue":
     case "add_comment":
     case "transition_issue":
+    case "move_to_sprint":
     case "link_dependency":
       return p.target;
     case "create_issue":

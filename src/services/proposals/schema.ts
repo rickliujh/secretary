@@ -66,6 +66,17 @@ export const TransitionIssue = z.object({
   toStatus: z.string().trim().min(1),
 });
 
+/**
+ * Moves an existing issue into a sprint through the Agile API (D30). Built by
+ * the sprint planner from ids the sync stored, never proposed by intake.
+ */
+export const MoveToSprint = z.object({
+  kind: z.literal("move_to_sprint"),
+  target: IssueKey,
+  sprintId: z.number().int().positive(),
+  sprintName: z.string().trim().min(1),
+});
+
 export const LinkDependency = z.object({
   kind: z.literal("link_dependency"),
   target: IssueRef,
@@ -134,6 +145,7 @@ export const ProposalPayloadSchema = z.discriminatedUnion("kind", [
   UpdateIssue,
   AddComment,
   TransitionIssue,
+  MoveToSprint,
   LinkDependency,
   UpdatePerson,
   UpdateTeam,
@@ -150,6 +162,7 @@ export const PROPOSAL_LABELS: Record<ProposalKind, string> = {
   update_issue: "Update issue",
   add_comment: "Comment",
   transition_issue: "Move",
+  move_to_sprint: "Move to sprint",
   link_dependency: "Track dependency",
   update_person: "Update contact",
   update_team: "Update team",
@@ -186,6 +199,7 @@ export function issueRefs(p: ProposalPayload, opts: IssueRefsOptions = {}): stri
     case "update_issue":
     case "add_comment":
     case "transition_issue":
+    case "move_to_sprint":
     case "link_dependency":
       values.push(p.target);
       break;
@@ -233,6 +247,8 @@ export function describePayload(p: ProposalPayload): string {
       return `Comment on ${p.target}`;
     case "transition_issue":
       return `Move ${p.target} to ${p.toStatus}`;
+    case "move_to_sprint":
+      return `Move ${p.target} to sprint ${p.sprintName}`;
     case "link_dependency":
       return `${p.target} waits on ${p.label}`;
     case "update_person":

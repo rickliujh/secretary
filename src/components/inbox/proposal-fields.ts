@@ -33,7 +33,15 @@ const projectOpts = (l: Lookups) =>
 
 const target: FieldSpec = { path: "target", label: "Issue", type: "text", mono: true };
 
-export const FIELD_SPECS: Record<Exclude<ProposalKind, "needs_clarification">, FieldSpec[]> = {
+/**
+ * Kinds without an edit form: a question is answered, not edited, and a sprint
+ * move is built by the planner from stored sprint ids (D30), so it is approved or
+ * rejected as it is.
+ */
+type EditableKind = Exclude<ProposalKind, "needs_clarification" | "move_to_sprint">;
+type EditablePayload = Extract<ProposalPayload, { kind: EditableKind }>;
+
+export const FIELD_SPECS: Record<EditableKind, FieldSpec[]> = {
   create_issue: [
     { path: "projectKey", label: "Project", type: "select", options: projectOpts },
     { path: "issueType", label: "Type", type: "select", options: opts(ISSUE_TYPES) },
@@ -163,11 +171,13 @@ function set(o: Record<string, unknown>, path: string, value: unknown) {
   else cur[last] = value;
 }
 
+export const isEditable = (p: ProposalPayload): p is EditablePayload => p.kind in FIELD_SPECS;
+
 /** Field names cannot contain dots in react-hook-form's flat mode, so encode them. */
 export const fieldName = (path: string) => path.replace(/\./g, "__");
 
 export function toFormValues(payload: ProposalPayload): Record<string, string> {
-  if (payload.kind === "needs_clarification") return {};
+  if (!isEditable(payload)) return {};
   const out: Record<string, string> = {};
   for (const spec of FIELD_SPECS[payload.kind]) {
     const v = get(payload, spec.path);
@@ -182,7 +192,7 @@ export function toFormValues(payload: ProposalPayload): Record<string, string> {
 
 /** Rebuilds a payload from form values on top of the original (unlisted fields are kept). */
 export function fromFormValues(original: ProposalPayload, values: Record<string, string>): unknown {
-  if (original.kind === "needs_clarification") return original;
+  if (!isEditable(original)) return original;
   const out = structuredClone(original) as Record<string, unknown>;
   for (const spec of FIELD_SPECS[original.kind]) {
     const raw = (values[fieldName(spec.path)] ?? "").trim();

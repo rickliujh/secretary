@@ -1,6 +1,14 @@
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { actionsLog, communications, dependencies, memories, people, teams } from "@/db/schema";
+import {
+  actionsLog,
+  communications,
+  dependencies,
+  jiraIssues,
+  memories,
+  people,
+  teams,
+} from "@/db/schema";
 import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
@@ -211,6 +219,45 @@ const make = Effect.gen(function* () {
       } satisfies ProposalResult;
     });
 
+  /** Idempotent: an issue the cache already shows in the sprint needs no write. */
+  const moveToSprint = (
+    p: Extract<ProposalPayload, { kind: "move_to_sprint" }>,
+    proposalId: string,
+  ) =>
+    Effect.gen(function* () {
+      const cached = yield* q((d) =>
+        d
+          .select({ sprint: jiraIssues.sprint })
+          .from(jiraIssues)
+          .where(eq(jiraIssues.key, p.target))
+          .get(),
+      );
+      const message = `Moved ${p.target} to sprint ${p.sprintName}`;
+      if (cached?.sprint === p.sprintName) {
+        yield* audit(
+          proposalId,
+          "move_to_sprint",
+          p.target,
+          { sprintId: p.sprintId, sprintName: p.sprintName },
+          { skipped: "already in sprint" },
+        );
+        return {
+          message: `${p.target} is already in sprint ${p.sprintName}`,
+          issueKey: p.target,
+        } satisfies ProposalResult;
+      }
+      yield* run(
+        {
+          kind: "move_to_sprint",
+          issueKey: p.target,
+          sprintId: p.sprintId,
+          sprintName: p.sprintName,
+        },
+        { proposalId },
+      );
+      return { message, issueKey: p.target } satisfies ProposalResult;
+    });
+
   const runProposal = (
     payload: ProposalPayload,
     opts: { proposalId: string; inboxItemId: string | null },
@@ -240,6 +287,8 @@ const make = Effect.gen(function* () {
           );
         case "transition_issue":
           return yield* transition(payload, proposalId);
+        case "move_to_sprint":
+          return yield* moveToSprint(payload, proposalId);
         case "update_issue": {
           const { assignee, ...fields } = payload.changes;
           if (Object.keys(fields).length > 0) {

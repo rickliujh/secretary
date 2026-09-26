@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { EditMetaSchema } from "@/services/jira";
 import editmeta from "@/test/fixtures/jira/editmeta-PAY-2.json";
-import { buildJiraWrite } from "./jira-mapping";
+import { buildJiraWrite, buildMoveToSprint, MAX_SPRINT_MOVE_ISSUES } from "./jira-mapping";
 
 const fieldIds = {
   epicLink: "customfield_10100",
@@ -136,5 +136,36 @@ describe("remote links", () => {
       method: "DELETE",
       path: "issue/PAY-2/remotelink?globalId=secretary%3Adependency%3Ad1",
     });
+  });
+});
+
+describe("sprint moves (Agile API)", () => {
+  test("move_to_sprint posts the issue key to the sprint's issue list", () => {
+    expect(
+      buildJiraWrite(
+        { kind: "move_to_sprint", issueKey: "PAY-4", sprintId: 44, sprintName: "Payments 16" },
+        { fieldIds },
+      ),
+    ).toEqual({
+      method: "POST",
+      api: "agile",
+      path: "sprint/44/issue",
+      body: { issues: ["PAY-4"] },
+    });
+    // Same request on Cloud.
+    expect(
+      buildJiraWrite(
+        { kind: "move_to_sprint", issueKey: "PAY-4", sprintId: 44 },
+        { fieldIds, deployment: "cloud" },
+      ).path,
+    ).toBe("sprint/44/issue");
+  });
+
+  test("batches take up to 50 issues and refuse empty or invalid requests", () => {
+    const keys = Array.from({ length: MAX_SPRINT_MOVE_ISSUES }, (_, i) => `PAY-${i + 1}`);
+    expect(buildMoveToSprint(7, keys).body).toEqual({ issues: keys });
+    expect(() => buildMoveToSprint(7, [...keys, "PAY-99"])).toThrow("at most 50");
+    expect(() => buildMoveToSprint(7, [])).toThrow("No issues");
+    expect(() => buildMoveToSprint(0, ["PAY-1"])).toThrow("Invalid sprint id");
   });
 });
