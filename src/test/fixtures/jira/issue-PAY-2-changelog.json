@@ -1,0 +1,73 @@
+{
+  "id": "20002",
+  "key": "PAY-2",
+  "fields": { "summary": "Fix invoice export" },
+  "changelog": {
+    "startAt": 0,
+    "maxResults": 3,
+    "total": 3,
+    "histories": [
+      {
+        "id": "70001",
+        "author": {
+          "name": "rliu",
+          "key": "JIRAUSER10001",
+          "displayName": "Rick Liu",
+          "active": true
+        },
+        "created": "2026-09-01T10:00:00.000+0100",
+        "items": [
+          {
+            "field": "priority",
+            "fieldtype": "jira",
+            "from": "3",
+            "fromString": "Medium",
+            "to": "2",
+            "toString": "High"
+          }
+        ]
+      },
+      {
+        "id": "70002",
+        "author": {
+          "name": "ana.b",
+          "key": "JIRAUSER10002",
+          "displayName": "Ana Bell",
+          "active": true
+        },
+        "created": "2026-09-21T16:40:12.000+0100",
+        "items": [
+          {
+            "field": "status",
+            "fieldtype": "jira",
+            "from": "3",
+            "fromString": "In Progress",
+            "to": "10400",
+            "toString": "Blocked"
+          },
+          {
+            "field": "resolution",
+            "fieldtype": "jira",
+            "from": null,
+            "fromString": null,
+            "to": null,
+            "toString": null
+          }
+        ]
+      },
+      {
+        "id": "70003",
+        "created": "2026-09-22T09:15:00.000+0100",
+        "items": [
+          {
+            "field": "assignee",
+            "fieldtype": "jira",
+            "from": "ana.b",
+            "fromString": "Ana Bell",
+            "to": "tom.k"
+          }
+        ]
+      }
+    ]
+  }
+}

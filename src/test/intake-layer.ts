@@ -8,6 +8,7 @@ import { LearningLive } from "@/services/learning/live";
 import { LlmLive } from "@/services/llm/live";
 import { makeScriptedModels, type Scripted } from "@/services/llm/test";
 import { PlanningLive } from "@/services/planning/live";
+import { ReportsLive } from "@/services/report/live";
 import { RetrievalLive } from "@/services/retrieval/live";
 import { testProvider } from "./helpers";
 import { syncedJiraLayer } from "./seed";
@@ -32,7 +33,7 @@ export function intakeTestLayer(
     Layer.merge(jira.layer, models.layer),
   );
   const layer = Layer.provideMerge(
-    Layer.mergeAll(CommsLive, LearningLive, ChatLive, PlanningLive),
+    Layer.mergeAll(CommsLive, LearningLive, ChatLive, PlanningLive, ReportsLive),
     Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, llm)),
   );
   return { layer, models, seen: jira.seen };

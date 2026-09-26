@@ -9,6 +9,8 @@ import { Secrets } from "@/services/secrets";
 import { Settings } from "@/services/settings";
 import {
   BoardSprintPageSchema,
+  type ChangelogHistory,
+  ChangelogPageSchema,
   CloudSearchPageSchema,
   CommentPageSchema,
   CreateMetaFieldsSchema,
@@ -16,6 +18,8 @@ import {
   type Credentials,
   EditMetaSchema,
   FieldSchema,
+  type IssueChange,
+  IssueWithChangelogSchema,
   JiraClient,
   JiraError,
   JiraUserSchema,
@@ -30,6 +34,7 @@ import {
   TransitionsSchema,
   UserRefSchema,
 } from ".";
+import { changesSince, reachesBefore } from "./history";
 
 const toJiraError = (e: unknown) =>
   e instanceof HttpFailure
@@ -40,6 +45,8 @@ const notConfigured = (message: string) => new JiraError({ kind: "not_configured
 
 const PLATFORM_PREFIX = "/rest/api/2";
 const AGILE_PREFIX = "/rest/agile/1.0";
+/** Cloud's changelog page size cap. */
+const CHANGELOG_PAGE = 100;
 
 const make = Effect.gen(function* () {
   const settings = yield* Settings;
@@ -172,6 +179,39 @@ const make = Effect.gen(function* () {
       ),
     projectStatuses: (projectKey) =>
       call(ProjectStatusesSchema, `project/${encodeURIComponent(projectKey)}/statuses`),
+    issueHistory: (key, since) =>
+      Effect.flatMap(deployment, (d): Effect.Effect<IssueChange[], JiraError> => {
+        const issuePath = `issue/${encodeURIComponent(key)}`;
+        // Data Center returns the whole history with the issue.
+        if (d !== "cloud")
+          return call(IssueWithChangelogSchema, issuePath, {
+            searchParams: { fields: "summary", expand: "changelog" },
+          }).pipe(Effect.map((r) => changesSince(r.changelog?.histories ?? [], since)));
+        // Cloud pages oldest first. The first page gives the total; then walk
+        // back from the newest entries until a page starts before `since`.
+        const page = (startAt: number, maxResults: number) =>
+          call(ChangelogPageSchema, `${issuePath}/changelog`, {
+            searchParams: { startAt, maxResults },
+          });
+        return Effect.gen(function* () {
+          const first = yield* page(0, CHANGELOG_PAGE);
+          const size = Math.max(1, Math.min(CHANGELOG_PAGE, first.maxResults || CHANGELOG_PAGE));
+          const head = first.values.length;
+          if (head === 0 || first.isLast === true || first.total <= head)
+            return changesSince(first.values, since);
+          let newer: ChangelogHistory[] = [];
+          let end = first.total;
+          while (end > head) {
+            const start = Math.max(head, end - size);
+            const p = yield* page(start, end - start);
+            newer = [...p.values, ...newer];
+            if (p.values.length === 0 || reachesBefore(p.values, since))
+              return changesSince(newer, since);
+            end = start;
+          }
+          return changesSince([...first.values, ...newer], since);
+        });
+      }),
     boardSprints: (boardId, startAt, states) =>
       call(
         BoardSprintPageSchema,

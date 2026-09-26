@@ -8,6 +8,7 @@ import {
   ListTree,
   type LucideIcon,
   MessagesSquare,
+  NotebookPen,
   PenLine,
   Settings,
   Users,
@@ -20,6 +21,7 @@ export type NavItem = {
     | "/tickets"
     | "/waiting"
     | "/planning"
+    | "/report"
     | "/people"
     | "/teams"
     | "/drafts"
@@ -36,6 +38,7 @@ export const WORK_NAV: NavItem[] = [
   { to: "/tickets", label: "Tickets", icon: ListTree },
   { to: "/waiting", label: "Waiting on", icon: Hourglass },
   { to: "/planning", label: "Planning", icon: CalendarRange },
+  { to: "/report", label: "Report", icon: NotebookPen },
   { to: "/drafts", label: "Drafts", icon: PenLine },
   { to: "/chat", label: "Chat", icon: MessagesSquare },
 ];

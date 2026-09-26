@@ -253,3 +253,65 @@ export const BoardSprintPageSchema = z.object({
 export type BoardSprintPage = z.infer<typeof BoardSprintPageSchema>;
 
 export const CreatedIssueSchema = z.object({ id: z.string(), key: z.string() });
+
+/** Ids in a changelog item are usually strings; tolerate numbers and nulls. */
+const ChangeValueSchema = z
+  .union([z.string(), z.number()])
+  .nullish()
+  .transform((v) => (v == null ? null : String(v)));
+
+/**
+ * One field change in a changelog entry. `toString` is re-read as an own
+ * property: a missing key would otherwise resolve to `Object.prototype.toString`.
+ */
+const ChangelogItemSchema = z.preprocess(
+  (v) =>
+    v && typeof v === "object"
+      ? {
+          ...v,
+          toString: Object.hasOwn(v, "toString") ? (v as { toString: unknown }).toString : null,
+        }
+      : v,
+  z.object({
+    field: z.string(),
+    fieldtype: z.string().nullish(),
+    from: ChangeValueSchema,
+    fromString: z.string().nullish(),
+    to: ChangeValueSchema,
+    toString: z.string().nullish(),
+  }),
+);
+
+/**
+ * One changelog entry (DC `expand=changelog` histories, Cloud `/changelog`
+ * values). The author is missing for anonymous or deleted users.
+ */
+export const ChangelogHistorySchema = z.object({
+  id: ChangeValueSchema,
+  author: z
+    .object({
+      name: z.string().nullish(),
+      key: z.string().nullish(),
+      accountId: z.string().nullish(),
+      displayName: z.string().nullish(),
+    })
+    .nullish(),
+  created: z.string(),
+  items: z.array(ChangelogItemSchema).default([]),
+});
+export type ChangelogHistory = z.infer<typeof ChangelogHistorySchema>;
+
+/** Data Center `GET /issue/{key}?expand=changelog`: every history entry, oldest first. */
+export const IssueWithChangelogSchema = z.object({
+  changelog: z.object({ histories: z.array(ChangelogHistorySchema).default([]) }).optional(),
+});
+
+/** Cloud `GET /issue/{key}/changelog`: offset paging, oldest first. */
+export const ChangelogPageSchema = z.object({
+  startAt: z.number(),
+  maxResults: z.number(),
+  total: z.number(),
+  isLast: z.boolean().optional(),
+  values: z.array(ChangelogHistorySchema),
+});
+export type ChangelogPage = z.infer<typeof ChangelogPageSchema>;

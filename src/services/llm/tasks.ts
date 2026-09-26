@@ -16,6 +16,7 @@ export const TASK_TYPES = [
   "summarize",
   "draft_message",
   "daily_brief",
+  "write_report",
   "consolidate_rules",
   "chat",
 ] as const;
@@ -106,6 +107,14 @@ export const TASK_DEFAULTS: Record<TaskType, TaskDefaults> = {
     timeoutMs: 120_000,
     label: "Daily brief",
     description: "Prose summary of what matters now",
+  },
+  write_report: {
+    tier: "standard",
+    escalate: true,
+    confidenceThreshold: 0,
+    timeoutMs: 120_000,
+    label: "Write report",
+    description: "Stand-up and catch-up recaps",
   },
   consolidate_rules: {
     tier: "strong",

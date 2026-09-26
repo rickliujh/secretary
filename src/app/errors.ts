@@ -73,6 +73,8 @@ export function describeError(error: unknown): Described {
         title: error.kind === "no_sprint" ? "No next sprint in Jira" : "Can't plan yet",
         description,
       };
+    case "ReportError":
+      return { title: "Can't write a report yet", description, settingsTab: "jira" };
     case "IntakeError":
       return {
         title:

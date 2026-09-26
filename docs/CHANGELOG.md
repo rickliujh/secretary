@@ -566,3 +566,11 @@ Built
 - The app header is the title bar (design.md D36): drag it to move the window,
   double-click to maximise. macOS keeps its traffic lights over the header; Windows
   and Linux get minimise, maximise and close buttons at its right end.
+
+## Report page for stand-ups and catch-ups (2026-09-26)
+
+- New Report page (design.md D37): pick a period (since the last working day, 3, 7
+  or 14 days, or any number up to 30) and optionally the tracked epics, and it writes
+  what you finished, what is in progress, what is new or changed, what is blocked and
+  what is next. Status moves and reassignments come from Jira's change history.
+  Copy it as Markdown or as plain text for Teams and email.

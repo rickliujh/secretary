@@ -18,11 +18,25 @@
  * unfinished work was carried over. `POST /rest/agile/1.0/sprint/{id}/issue`
  * moves issues into a sprint. Stories, tasks and bugs carry Story Points
  * (1, 2, 3, 5, 8, 13; some unestimated).
+ *
+ * Change history: every other issue has a status change and some an assignee
+ * change in the last few days, plus an older priority change; status,
+ * assignee and priority writes from the app are recorded too. Served by
+ * `GET /rest/api/2/issue/{key}?expand=changelog` (Data Center) and the
+ * paginated `GET /rest/api/2/issue/{key}/changelog` (Cloud shape).
  */
 import j2m from "jira2md";
 
 type User = { name: string; displayName: string; emailAddress: string };
 type Comment = { id: string; author: User; body: string; created: string; updated: string };
+type ChangeItem = {
+  field: string;
+  from: string | null;
+  fromString: string | null;
+  to: string | null;
+  toString: string | null;
+};
+type History = { id: string; author: User; created: string; items: ChangeItem[] };
 type Issue = {
   id: string;
   key: string;
@@ -47,6 +61,8 @@ type Issue = {
   points: number | null;
   /** Set when the issue was moved into a sprint through the Agile API. */
   movedToSprint?: number;
+  /** Changelog, oldest first. */
+  history?: History[];
   remoteLinks?: {
     id: number;
     globalId: string;
@@ -74,6 +90,7 @@ const STORY_POINTS = "customfield_10106";
 /** Cycled by issue id so points do not disturb the seeded random sequence. */
 const POINTS = [3, 1, 5, 2, 8, 3, null, 2, 5, 1, 3, 13, 2, null, 5, 1, 8] as const;
 
+const HOUR = 3_600_000;
 const DAY = 86_400_000;
 const SPRINT_LENGTH = 14 * DAY;
 /** Monday 09:00 UTC: the first sprint of every board starts here. */
@@ -184,7 +201,76 @@ const TOPICS = [
 ];
 const VERBS = ["Fix", "Add", "Migrate", "Document", "Review", "Automate", "Investigate"];
 
-export function generate(total: number): Map<string, Issue> {
+/** The status an issue plausibly came from, for seeded history. */
+const PREVIOUS_STATUS: Record<keyof typeof STATUSES, keyof typeof STATUSES> = {
+  "To Do": "In Progress",
+  "In Progress": "To Do",
+  Blocked: "In Progress",
+  "In Review": "In Progress",
+  Done: "In Review",
+};
+
+const statusItem = (from: keyof typeof STATUSES, to: keyof typeof STATUSES): ChangeItem => ({
+  field: "status",
+  from: STATUSES[from].id,
+  fromString: from,
+  to: STATUSES[to].id,
+  toString: to,
+});
+const assigneeItem = (from: User | null, to: User | null): ChangeItem => ({
+  field: "assignee",
+  from: from?.name ?? null,
+  fromString: from?.displayName ?? null,
+  to: to?.name ?? null,
+  toString: to?.displayName ?? null,
+});
+const priorityItem = (from: string | null, to: string | null): ChangeItem => ({
+  field: "priority",
+  from: from ? String(PRIORITIES.indexOf(from) + 1) : null,
+  fromString: from,
+  to: to ? String(PRIORITIES.indexOf(to) + 1) : null,
+  toString: to,
+});
+
+function addHistory(issue: Issue, author: User, at: number, items: ChangeItem[]) {
+  if (!issue.history) issue.history = [];
+  issue.history.push({
+    id: String(Number(issue.id) * 100 + issue.history.length),
+    author,
+    created: new Date(at).toISOString().replace("Z", "+0000"),
+    items,
+  });
+}
+
+/**
+ * Seeds a few history entries on every other non-epic issue: an old priority
+ * change, a status change 1-4 days ago and, on some, a reassignment in the
+ * last two days. Derived from the id so the seeded random sequence is untouched.
+ */
+function seedHistory(issue: Issue, now: number) {
+  const n = Number(issue.id);
+  if (issue.type === "Epic" || n % 2 !== 0) return;
+  const created = new Date(issue.created.replace("+0000", "Z")).getTime();
+  const reporter = issue.reporter;
+  if (issue.priority && issue.priority !== "Medium")
+    addHistory(issue, reporter, created + HOUR, [priorityItem("Medium", issue.priority)]);
+  const moved = now - (1 + (n % 4)) * DAY - (n % 7) * HOUR;
+  if (moved > created)
+    addHistory(issue, issue.assignee ?? reporter, moved, [
+      statusItem(PREVIOUS_STATUS[issue.status], issue.status),
+    ]);
+  const reassigned = now - (n % 3) * DAY - (2 + (n % 5)) * HOUR;
+  if (n % 4 === 0 && reassigned > created) {
+    const i = USERS.findIndex((u) => u.name === issue.assignee?.name);
+    const before = USERS[(i + 1) % USERS.length] ?? null;
+    addHistory(issue, reporter, reassigned, [assigneeItem(before, issue.assignee)]);
+  }
+  issue.history?.sort((a, b) => a.created.localeCompare(b.created));
+  const last = issue.history?.at(-1)?.created;
+  if (last && last > issue.updated) issue.updated = last;
+}
+
+export function generate(total: number, now = Date.now()): Map<string, Issue> {
   seed = 42;
   const issues = new Map<string, Issue>();
   const counters: Record<string, number> = { PAY: 0, OPS: 0 };
@@ -256,6 +342,7 @@ export function generate(total: number): Map<string, Issue> {
       if (other.key !== story.key) story.links.push({ type: "Blocks", inward: other.key });
     }
   }
+  for (const issue of issues.values()) seedHistory(issue, now);
   return issues;
 }
 
@@ -265,6 +352,11 @@ const status = (name: keyof typeof STATUSES) => ({
   id: STATUSES[name].id,
   name,
   statusCategory: { key: STATUSES[name].category, name: STATUSES[name].category },
+});
+const historyJson = (h: History) => ({
+  ...h,
+  author: userJson(h.author),
+  items: h.items.map((i) => ({ ...i, fieldtype: "jira" })),
 });
 const commentJson = (c: Comment) => ({
   ...c,
@@ -580,12 +672,48 @@ export function createHandler(issues: Map<string, Issue>) {
     if (m && !issue) return error("Issue Does Not Exist", 404);
     if (issue) {
       const sub = m?.[2] ?? "";
-      if (sub === "" && req.method === "GET") return json(issueJson(issue, issues, 1000));
+      if (sub === "" && req.method === "GET") {
+        const histories = (issue.history ?? []).map(historyJson);
+        const expand = url.searchParams.get("expand")?.split(",") ?? [];
+        return json({
+          ...issueJson(issue, issues, 1000),
+          ...(expand.includes("changelog")
+            ? {
+                changelog: {
+                  startAt: 0,
+                  maxResults: histories.length,
+                  total: histories.length,
+                  histories,
+                },
+              }
+            : {}),
+        });
+      }
+      if (sub === "/changelog" && req.method === "GET") {
+        const all = issue.history ?? [];
+        const startAt = Number(url.searchParams.get("startAt") ?? 0);
+        const max = Math.min(Number(url.searchParams.get("maxResults") ?? 100), 100);
+        const values = all.slice(startAt, startAt + max).map(historyJson);
+        return json({
+          startAt,
+          maxResults: max,
+          total: all.length,
+          isLast: startAt + values.length >= all.length,
+          values,
+        });
+      }
       if (sub === "" && req.method === "PUT") {
         const f = (body?.fields ?? {}) as Record<string, unknown>;
         if ("summary" in f) issue.summary = String(f.summary);
         if ("description" in f) issue.description = (f.description as string | null) ?? null;
-        if ("priority" in f) issue.priority = (f.priority as { name: string } | null)?.name ?? null;
+        if ("priority" in f) {
+          const priority = (f.priority as { name: string } | null)?.name ?? null;
+          if (priority !== issue.priority)
+            addHistory(issue, USERS[0] as User, Date.now(), [
+              priorityItem(issue.priority, priority),
+            ]);
+          issue.priority = priority;
+        }
         if ("duedate" in f) issue.due = (f.duedate as string | null) ?? null;
         if (STORY_POINTS in f)
           issue.points = typeof f[STORY_POINTS] === "number" ? (f[STORY_POINTS] as number) : null;
@@ -603,7 +731,10 @@ export function createHandler(issues: Map<string, Issue>) {
       }
       if (sub === "/assignee" && req.method === "PUT") {
         const name = body?.name as string | null;
-        issue.assignee = name ? (USERS.find((u) => u.name === name) ?? null) : null;
+        const assignee = name ? (USERS.find((u) => u.name === name) ?? null) : null;
+        if (assignee?.name !== issue.assignee?.name)
+          addHistory(issue, USERS[0] as User, Date.now(), [assigneeItem(issue.assignee, assignee)]);
+        issue.assignee = assignee;
         touch(issue);
         return new Response(null, { status: 204 });
       }
@@ -640,6 +771,9 @@ export function createHandler(issues: Map<string, Issue>) {
         );
         if (!t)
           return error("It seems that you have tried to perform an illegal workflow operation.");
+        addHistory(issue, USERS[0] as User, Date.now(), [
+          statusItem(issue.status, t.name as keyof typeof STATUSES),
+        ]);
         issue.status = t.name as keyof typeof STATUSES;
         touch(issue);
         return new Response(null, { status: 204 });

@@ -15,6 +15,7 @@ import { LearningLive } from "@/services/learning/live";
 import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
 import { PlanningLive } from "@/services/planning/live";
 import { ProposalsLive } from "@/services/proposals/live";
+import { ReportsLive } from "@/services/report/live";
 import { RetrievalLive } from "@/services/retrieval/live";
 import { SecretsLive } from "@/services/secrets/live";
 import { SettingsLive } from "@/services/settings/live";
@@ -27,7 +28,7 @@ const Base = FetcherLive.pipe(
 // Chat's propose_actions tool runs intake, so Chat sits above it.
 const AppLayer = ChatLive.pipe(
   Layer.provideMerge(
-    Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive, LearningLive, PlanningLive),
+    Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive, LearningLive, PlanningLive, ReportsLive),
   ),
   Layer.provideMerge(Layer.mergeAll(RetrievalLive, ExecutorLive)),
   Layer.provideMerge(SyncLive),

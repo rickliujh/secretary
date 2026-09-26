@@ -56,6 +56,23 @@ export type JiraWrite = {
   body?: unknown;
 };
 
+/** One changelog entry of an issue: who changed which fields when. */
+export type IssueChange = {
+  /** ISO timestamp. */
+  at: string;
+  /** The author's Jira user id (`accountId` on Cloud, `name` on Data Center), as `UserRef.id`. */
+  author: string | null;
+  authorDisplay: string | null;
+  /** `from`/`to` are Jira's display strings (`fromString`/`toString`); the ids are `from`/`to`. */
+  items: {
+    field: string;
+    from: string | null;
+    to: string | null;
+    fromId: string | null;
+    toId: string | null;
+  }[];
+};
+
 export interface JiraClientShape {
   /**
    * Calls `/myself`. Values passed in override stored ones so the settings form
@@ -97,6 +114,11 @@ export interface JiraClientShape {
   readonly download: (
     url: string,
   ) => Effect.Effect<{ bytes: Uint8Array; mediaType: string }, JiraError>;
+  /** Change history of one issue from `since` (ISO) until now, oldest first. */
+  readonly issueHistory: (
+    key: string,
+    since: string,
+  ) => Effect.Effect<readonly IssueChange[], JiraError>;
   /** One page of a board's sprints from the Agile API; `states` like ["active", "future"]. */
   readonly boardSprints: (
     boardId: number,
