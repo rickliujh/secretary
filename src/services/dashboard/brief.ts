@@ -4,8 +4,10 @@
  */
 import { and, count, eq, gt } from "drizzle-orm";
 import { Effect } from "effect";
+import { z } from "zod";
 import { jiraComments, jiraIssues, proposals } from "@/db/schema";
 import { localDate } from "@/lib/dates";
+import { readJson } from "@/lib/json";
 import {
   type BriefFacts,
   BriefOutputSchema,
@@ -23,13 +25,18 @@ import { buildDashboard, type Dashboard } from "./sections";
 const CACHE_KEY = "brief.cache";
 const CHANGE_LIMIT = 15;
 
-export type CachedBrief = {
-  hash: string;
-  generatedAt: string;
-  sections: { changed: string; doFirst: string; chase: string };
-  model: string | null;
-  tier: string | null;
-};
+const CachedBriefSchema = z.object({
+  hash: z.string(),
+  generatedAt: z.string(),
+  sections: z.object({
+    changed: z.string().default(""),
+    doFirst: z.string().default(""),
+    chase: z.string().default(""),
+  }),
+  model: z.string().nullable().default(null),
+  tier: z.string().nullable().default(null),
+});
+export type CachedBrief = z.infer<typeof CachedBriefSchema>;
 
 /** FNV-1a; enough to tell whether the facts changed. */
 export function hashFacts(value: unknown): string {
@@ -45,14 +52,9 @@ export function hashFacts(value: unknown): string {
 /** The "since" window moves with each brief, so it is not part of the identity. */
 const briefHash = (facts: BriefFacts) => hashFacts({ ...facts, since: null });
 
-const readCache = Effect.map(getState(CACHE_KEY), (v): CachedBrief | null => {
-  if (!v) return null;
-  try {
-    return JSON.parse(v) as CachedBrief;
-  } catch {
-    return null;
-  }
-});
+const readCache = Effect.map(getState(CACHE_KEY), (v) =>
+  readJson(v, CachedBriefSchema.nullable(), null),
+);
 
 export const collectFacts = (
   dashboard: Dashboard,

@@ -1,8 +1,11 @@
 /** Typed access to the `sync_state` key/value table. */
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
+import { z } from "zod";
 import { syncState } from "@/db/schema";
+import { readJson } from "@/lib/json";
 import { query } from "@/services/db";
+import type { FieldIds } from "@/services/jira/fields";
 import type { SprintInfo } from "@/services/sprints/calendar";
 
 export const SYNC_KEYS = {
@@ -12,7 +15,7 @@ export const SYNC_KEYS = {
   fields: "jira.fields",
   timeZone: "jira.timeZone",
   username: "jira.username",
-  /** JSON { [projectKey]: { issueTypes: string[], statuses: string[], at } } from /project/{key}/statuses. */
+  /** JSON { [projectKey]: { issueTypes: string[], statuses: string[] } } from /project/{key}/statuses. */
   projectMeta: "jira.projectMeta",
   /** JSON SprintState: every known sprint with dates, for the sprint calendar (D23). */
   sprints: "jira.sprints",
@@ -31,31 +34,44 @@ export const setState = (key: string, value: string) =>
       .onConflictDoUpdate({ target: syncState.key, set: { value } }),
   );
 
-export type ProjectMeta = Record<string, { issueTypes: string[]; statuses: string[] }>;
+const FieldIdsSchema = z.object({
+  epicLink: z.string().optional(),
+  epicName: z.string().optional(),
+  sprint: z.string().optional(),
+}) satisfies z.ZodType<FieldIds>;
 
-export const parseProjectMeta = (value: string | undefined): ProjectMeta => {
-  if (!value) return {};
-  try {
-    return JSON.parse(value) as ProjectMeta;
-  } catch {
-    return {};
-  }
-};
+export const parseFieldIds = (value: string | undefined): FieldIds =>
+  readJson(value, FieldIdsSchema, {});
 
-export type SprintState = {
-  sprints: SprintInfo[];
+const ProjectMetaSchema = z.record(
+  z.string(),
+  z.object({
+    issueTypes: z.array(z.string()).default([]),
+    statuses: z.array(z.string()).default([]),
+  }),
+);
+export type ProjectMeta = z.infer<typeof ProjectMetaSchema>;
+
+export const parseProjectMeta = (value: string | undefined): ProjectMeta =>
+  readJson(value, ProjectMetaSchema, {});
+
+const SprintInfoSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  state: z.string(),
+  boardId: z.number().nullable().default(null),
+  start: z.string().nullable().default(null),
+  end: z.string().nullable().default(null),
+}) satisfies z.ZodType<SprintInfo>;
+
+const SprintStateSchema = z.object({
+  sprints: z.array(SprintInfoSchema).default([]),
   /** Boards whose whole sprint history was fetched from the Agile API. */
-  completeBoards: number[];
+  completeBoards: z.array(z.number()).default([]),
   /** Project keys seen on each board's issues, to name boards in prompts. */
-  boardProjects: Record<string, string[]>;
-};
+  boardProjects: z.record(z.string(), z.array(z.string())).default({}),
+});
+export type SprintState = z.infer<typeof SprintStateSchema>;
 
-export const parseSprintState = (value: string | undefined): SprintState => {
-  const empty: SprintState = { sprints: [], completeBoards: [], boardProjects: {} };
-  if (!value) return empty;
-  try {
-    return { ...empty, ...(JSON.parse(value) as Partial<SprintState>) };
-  } catch {
-    return empty;
-  }
-};
+export const parseSprintState = (value: string | undefined): SprintState =>
+  readJson(value, SprintStateSchema, { sprints: [], completeBoards: [], boardProjects: {} });

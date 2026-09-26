@@ -1,24 +1,24 @@
 /** Loads one snapshot of the cache for the dashboard (FR-5). */
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { Effect } from "effect";
+import { z } from "zod";
 import { issueMeta, jiraComments, jiraIssues } from "@/db/schema";
+import { readJson } from "@/lib/json";
 import { query } from "@/services/db";
 import { listDependencies } from "@/services/dependencies/queries";
+import { type IssueLink, IssueLinkSchema } from "@/services/jira/schemas";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, SYNC_KEYS } from "@/services/sync/state";
-import type { DashboardInputs, DashIssue, IssueLink } from "./sections";
+import type { DashboardInputs, DashIssue } from "./sections";
 
 const COMMENT_WINDOW_DAYS = 14;
 
-const parseLinks = (value: unknown): IssueLink[] => {
-  if (typeof value !== "string" || !value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? (parsed as IssueLink[]) : [];
-  } catch {
-    return [];
-  }
-};
+/** Links from the raw issue JSON; a link in an unexpected shape is skipped. */
+const parseLinks = (value: unknown): IssueLink[] =>
+  readJson(value, z.array(z.unknown()), []).flatMap((l) => {
+    const r = IssueLinkSchema.safeParse(l);
+    return r.success ? [r.data] : [];
+  });
 
 export const loadDashboardInputs = (now = new Date()) =>
   Effect.gen(function* () {

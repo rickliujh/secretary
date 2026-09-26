@@ -4,14 +4,11 @@
  */
 import { daysBetween } from "@/lib/dates";
 import { timing } from "@/services/dependencies/logic";
+import type { IssueLink as JiraIssueLink } from "@/services/jira/schemas";
 import type { ScoringWeights } from "@/services/settings/schema";
 import { rank, type Scored, type ScoreInput, staleValue } from "./scoring";
 
-export type IssueLink = {
-  type?: { name?: string; inward?: string; outward?: string };
-  inwardIssue?: { key: string; fields?: { status?: { statusCategory?: { key?: string } } } };
-  outwardIssue?: { key: string; fields?: { status?: { statusCategory?: { key?: string } } } };
-};
+export type IssueLink = Pick<JiraIssueLink, "type" | "inwardIssue" | "outwardIssue">;
 
 export type DashIssue = {
   key: string;
@@ -93,10 +90,9 @@ const SECTION_LIMIT = 8;
 const AT_RISK_IDLE_DAYS = 14;
 const DUE_SOON_DAYS = 7;
 
-const isBlockLink = (l: IssueLink) =>
-  /block/i.test(`${l.type?.name ?? ""} ${l.type?.inward ?? ""}`);
-const open = (i?: { fields?: { status?: { statusCategory?: { key?: string } } } }) =>
-  i?.fields?.status?.statusCategory?.key !== "done";
+const isBlockLink = (l: IssueLink) => /block/i.test(`${l.type.name} ${l.type.inward}`);
+const open = (i: NonNullable<IssueLink["inwardIssue"]>) =>
+  i.fields?.status?.statusCategory.key !== "done";
 
 /** Unresolved blockers and blocked issues from Jira issue links. */
 export function blockInfo(links: readonly IssueLink[]): { blockedBy: string[]; blocks: string[] } {

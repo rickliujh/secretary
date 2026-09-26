@@ -20,6 +20,7 @@ import {
 import { buildScopeJql, chunk, withUpdatedSince } from "./jql";
 import {
   getState,
+  parseFieldIds,
   parseProjectMeta,
   parseSprintState,
   type SprintState,
@@ -47,15 +48,6 @@ const initialStatus: SyncStatus = {
   lastFullSyncAt: null,
   lastError: null,
   lastResult: null,
-};
-
-const parseFieldIds = (value: string | undefined): FieldIds => {
-  if (!value) return {};
-  try {
-    return JSON.parse(value) as FieldIds;
-  } catch {
-    return {};
-  }
 };
 
 const make = Effect.gen(function* () {
