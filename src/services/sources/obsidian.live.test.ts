@@ -48,7 +48,7 @@ describe.skipIf(!vault)("real Obsidian CLI (D41)", () => {
     );
 
   test("vaults, check, search, read", async () => {
-    expect(await run((s) => s.vaults)).toContain(vault);
+    expect(await run((s) => s.vaults)).toContain(vault ?? "");
     expect(await run((s) => s.check("real"))).toMatchObject({ ok: true });
     const hits = await run((s) => s.search("ledger export retention"));
     console.log(hits.map((h) => `${h.title} (${h.matches}): ${h.snippet}`).join("\n"));
