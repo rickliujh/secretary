@@ -296,7 +296,7 @@ export function TicketSheet({
               <TabsTrigger value="links">Links</TabsTrigger>
               <TabsTrigger value="notes">Notes</TabsTrigger>
             </TabsList>
-            <ScrollArea className="min-h-0 flex-1">
+            <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
               <div className="p-4">
                 <TabsContent value="details">
                   <Details detail={d} />

@@ -88,7 +88,7 @@ export function TeamSheet({
           <p className="p-4 text-sm text-muted-foreground">This team no longer exists.</p>
         )}
         {d && (
-          <ScrollArea className="min-h-0 flex-1">
+          <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
             <div className="flex flex-col gap-5 p-4">
               {d.team.contactFor && <Section title="Contact them for">{d.team.contactFor}</Section>}
               {d.team.channel && <Section title="Primary channel">{d.team.channel}</Section>}

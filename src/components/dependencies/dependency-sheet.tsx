@@ -168,7 +168,7 @@ export function DependencySheet({
           <p className="p-4 text-sm text-muted-foreground">This dependency no longer exists.</p>
         )}
         {d && (
-          <ScrollArea className="min-h-0 flex-1">
+          <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
             <div className="flex flex-col gap-5 p-4 text-sm">
               <dl className="grid grid-cols-[8rem_1fr] gap-y-1">
                 <dt className="text-muted-foreground">Owner</dt>

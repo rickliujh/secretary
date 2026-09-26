@@ -7,6 +7,7 @@ import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { SETTINGS_TABS } from "@/app/settings-tabs";
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
@@ -20,7 +21,7 @@ import { listTicketRows, searchTicketKeys } from "@/services/tickets/queries";
 
 const MAX_TICKETS = 20;
 
-/** Ctrl/Cmd+K palette. Later phases add tickets, contacts and inbox items. */
+/** Ctrl/Cmd+K palette: pages, settings tabs, tickets, contacts and teams. */
 export function CommandPalette({
   open,
   onOpenChange,
@@ -78,80 +79,83 @@ export function CommandPalette({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput
-        placeholder="Go to a page or search tickets..."
-        value={input}
-        onValueChange={setInput}
-      />
-      <CommandList>
-        <CommandEmpty>No results.</CommandEmpty>
-        {tickets.length > 0 && (
-          <CommandGroup heading="Tickets">
-            {tickets.map((t) => (
-              <CommandItem
-                key={t.key}
-                // Include the query so cmdk's own filter keeps full-text matches.
-                value={`${t.key} ${t.summary} ${q}`}
-                onSelect={() => go(() => navigate({ to: "/tickets", search: { key: t.key } }))}
-              >
-                <Ticket />
-                <span className="font-mono text-xs">{t.key}</span>
-                <span className="truncate">{t.summary}</span>
+      {/* This shadcn CommandDialog expects its own Command; without it the input and list crash. */}
+      <Command>
+        <CommandInput
+          placeholder="Go to a page or search tickets..."
+          value={input}
+          onValueChange={setInput}
+        />
+        <CommandList>
+          <CommandEmpty>No results.</CommandEmpty>
+          {tickets.length > 0 && (
+            <CommandGroup heading="Tickets">
+              {tickets.map((t) => (
+                <CommandItem
+                  key={t.key}
+                  // Include the query so cmdk's own filter keeps full-text matches.
+                  value={`${t.key} ${t.summary} ${q}`}
+                  onSelect={() => go(() => navigate({ to: "/tickets", search: { key: t.key } }))}
+                >
+                  <Ticket />
+                  <span className="font-mono text-xs">{t.key}</span>
+                  <span className="truncate">{t.summary}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+          {q.length >= 1 && (people.data?.length ?? 0) > 0 && (
+            <CommandGroup heading="People">
+              {(people.data ?? []).map((p) => (
+                <CommandItem
+                  key={p.id}
+                  value={`person ${p.displayName} ${p.jiraUsername ?? ""} ${p.title ?? ""}`}
+                  onSelect={() => go(() => navigate({ to: "/people", search: { id: p.id } }))}
+                >
+                  <UserRound />
+                  {p.displayName}
+                  {p.title && <span className="text-muted-foreground">{p.title}</span>}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+          {q.length >= 1 && (teams.data?.length ?? 0) > 0 && (
+            <CommandGroup heading="Teams">
+              {(teams.data ?? []).map((t) => (
+                <CommandItem
+                  key={t.id}
+                  value={`team ${t.name}`}
+                  onSelect={() => go(() => navigate({ to: "/teams", search: { id: t.id } }))}
+                >
+                  <Building2 />
+                  {t.name}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+          <CommandGroup heading="Pages">
+            {[...WORK_NAV, ...CONTEXT_NAV, SETTINGS_NAV].map((item) => (
+              <CommandItem key={item.to} onSelect={() => go(() => navigate({ to: item.to }))}>
+                <item.icon />
+                {item.label}
               </CommandItem>
             ))}
           </CommandGroup>
-        )}
-        {q.length >= 1 && (people.data?.length ?? 0) > 0 && (
-          <CommandGroup heading="People">
-            {(people.data ?? []).map((p) => (
+          <CommandGroup heading="Settings">
+            {SETTINGS_TABS.map((tab) => (
               <CommandItem
-                key={p.id}
-                value={`person ${p.displayName} ${p.jiraUsername ?? ""} ${p.title ?? ""}`}
-                onSelect={() => go(() => navigate({ to: "/people", search: { id: p.id } }))}
+                key={tab.value}
+                value={`settings ${tab.label}`}
+                onSelect={() => go(() => navigate({ to: "/settings", search: { tab: tab.value } }))}
               >
-                <UserRound />
-                {p.displayName}
-                {p.title && <span className="text-muted-foreground">{p.title}</span>}
+                <Settings2 />
+                {tab.label}
+                <CommandShortcut>Settings</CommandShortcut>
               </CommandItem>
             ))}
           </CommandGroup>
-        )}
-        {q.length >= 1 && (teams.data?.length ?? 0) > 0 && (
-          <CommandGroup heading="Teams">
-            {(teams.data ?? []).map((t) => (
-              <CommandItem
-                key={t.id}
-                value={`team ${t.name}`}
-                onSelect={() => go(() => navigate({ to: "/teams", search: { id: t.id } }))}
-              >
-                <Building2 />
-                {t.name}
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
-        <CommandGroup heading="Pages">
-          {[...WORK_NAV, ...CONTEXT_NAV, SETTINGS_NAV].map((item) => (
-            <CommandItem key={item.to} onSelect={() => go(() => navigate({ to: item.to }))}>
-              <item.icon />
-              {item.label}
-            </CommandItem>
-          ))}
-        </CommandGroup>
-        <CommandGroup heading="Settings">
-          {SETTINGS_TABS.map((tab) => (
-            <CommandItem
-              key={tab.value}
-              value={`settings ${tab.label}`}
-              onSelect={() => go(() => navigate({ to: "/settings", search: { tab: tab.value } }))}
-            >
-              <Settings2 />
-              {tab.label}
-              <CommandShortcut>Settings</CommandShortcut>
-            </CommandItem>
-          ))}
-        </CommandGroup>
-      </CommandList>
+        </CommandList>
+      </Command>
     </CommandDialog>
   );
 }
