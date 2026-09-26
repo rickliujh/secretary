@@ -13,6 +13,10 @@ type Tagged = { _tag: string; message?: string; kind?: string };
 const isTagged = (e: unknown): e is Tagged =>
   typeof e === "object" && e !== null && "_tag" in e && typeof (e as Tagged)._tag === "string";
 
+/** A run the user cancelled (its abort signal interrupted the fiber); not an error. */
+export const isInterrupted = (error: unknown) =>
+  isTagged(error) && error._tag === "InterruptedException";
+
 /** A sync asked for while one is already running; the running one reports. */
 export const isSyncBusy = (error: unknown) =>
   isTagged(error) && error._tag === "SyncError" && error.kind === "busy";

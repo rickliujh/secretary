@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import { isInterrupted } from "@/app/errors";
 import { useAppMutation, useErrorToast } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { type AppServices, run } from "@/app/runtime";
@@ -50,7 +51,7 @@ function useIntakeTurn<I>(
     },
     onError: (e) => {
       // A cancel is the user's choice, not an error.
-      if ((e as { _tag?: string })._tag !== "InterruptedException") onError(e);
+      if (!isInterrupted(e)) onError(e);
     },
     onSettled: () => {
       setProgress(null);

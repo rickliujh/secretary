@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describeError, errorIssues, isSyncBusy } from "./errors";
+import { describeError, errorIssues, isInterrupted, isSyncBusy } from "./errors";
 
 /** Every TaggedError declared by a service, found in the source. */
 function serviceErrorTags(): string[] {
@@ -45,6 +45,12 @@ describe("error toasts", () => {
 });
 
 describe("error helpers", () => {
+  test("isInterrupted matches a cancelled run only", () => {
+    expect(isInterrupted({ _tag: "InterruptedException" })).toBe(true);
+    expect(isInterrupted({ _tag: "LlmError", kind: "cancelled", message: "x" })).toBe(false);
+    expect(isInterrupted(undefined)).toBe(false);
+  });
+
   test("isSyncBusy matches only a busy SyncError", () => {
     expect(isSyncBusy({ _tag: "SyncError", kind: "busy", message: "x" })).toBe(true);
     expect(isSyncBusy({ _tag: "SyncError", kind: "scope", message: "x" })).toBe(false);
