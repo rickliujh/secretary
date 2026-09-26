@@ -327,7 +327,7 @@ const make = Effect.gen(function* () {
         }
         case "draft_message": {
           const id = newId();
-          // The composer (Phase 6) turns these notes into the actual message.
+          // The notes become a draft request; the Drafts page writes the message (D24).
           const row = {
             id,
             kind: payload.channel,
@@ -343,7 +343,7 @@ const make = Effect.gen(function* () {
           yield* q((d) => d.insert(communications).values(row));
           yield* audit(proposalId, "draft_message", id, row, null);
           return {
-            message: "Draft request saved for the Drafts page",
+            message: "Saved to Drafts",
             communicationId: id,
           } satisfies ProposalResult;
         }

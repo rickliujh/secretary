@@ -185,7 +185,12 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
   const { approve, reject } = useDecisions();
   const [editing, setEditing] = useState(false);
   const payload = proposal.editedPayload ?? proposal.payload;
-  const result = proposal.result as { message?: string; error?: string; issueKey?: string } | null;
+  const result = proposal.result as {
+    message?: string;
+    error?: string;
+    issueKey?: string;
+    communicationId?: string;
+  } | null;
   const pending = proposal.status === "pending";
   const busy = approve.isPending || reject.isPending;
   const canApprove = pending || proposal.status === "failed";
@@ -233,6 +238,18 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
               {" "}
               <Link to="/tickets" search={{ key: result.issueKey }} className="underline">
                 open
+              </Link>
+            </>
+          )}
+          {result.communicationId && (
+            <>
+              {" "}
+              <Link
+                to="/drafts"
+                search={{ id: result.communicationId, write: true }}
+                className="underline"
+              >
+                write it now
               </Link>
             </>
           )}
