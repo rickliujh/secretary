@@ -21,7 +21,7 @@ import {
 import { Db, query } from "@/services/db";
 import { Llm } from "@/services/llm";
 import type { MESSAGE_INTENTS } from "@/services/proposals/schema";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { Comms, CommsError } from ".";
 
 const RECENT_MESSAGES = 3;
@@ -107,11 +107,11 @@ const make = Effect.gen(function* () {
               .all(),
           )
         : [];
-      const s = yield* settings.get.pipe(Effect.orElseSucceed(() => undefined));
+      const s = yield* settingsOrDefault(settings);
 
       return {
         today,
-        language: person?.profile.language || s?.general.outputLanguage || "English",
+        language: person?.profile.language || s.general.outputLanguage,
         channel: row.kind,
         intent: row.intent as (typeof MESSAGE_INTENTS)[number],
         recipient: person

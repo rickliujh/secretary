@@ -9,7 +9,7 @@ import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
 import { Executor, ExecutorError } from "@/services/executor";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import {
   addBusinessDays,
   chaseNotes,
@@ -275,10 +275,7 @@ export const deleteDependency = (id: string) =>
 export const logFollowup = (id: string, input: FollowupInput, today = localDate()) =>
   Effect.gen(function* () {
     const v = FollowupInputSchema.parse(input);
-    const settings = yield* Settings;
-    const days =
-      (yield* settings.get.pipe(Effect.orElseSucceed(() => undefined)))?.dependencies
-        .followupDays ?? 3;
+    const days = (yield* settingsOrDefault(yield* Settings)).dependencies.followupDays;
     const dep = yield* query((d) =>
       d.select().from(dependencies).where(eq(dependencies.id, id)).get(),
     );

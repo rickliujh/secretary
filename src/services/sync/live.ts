@@ -7,7 +7,7 @@ import { Db, type DbError, query } from "@/services/db";
 import { JiraClient, type JiraError, type RawIssue, type SearchResult } from "@/services/jira";
 import { discoverFieldIds, effectiveFieldIds, type FieldIds } from "@/services/jira/fields";
 import { type CommentRow, issueFields, mapComment, mapIssue } from "@/services/jira/mapping";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { datePart, type SprintInfo } from "@/services/sprints/calendar";
 import {
   type FieldInfo,
@@ -78,11 +78,11 @@ const make = Effect.gen(function* () {
   );
 
   const fieldInfo = Effect.gen(function* () {
-    const settings = yield* settingsSvc.get.pipe(Effect.orElseSucceed(() => undefined));
+    const settings = yield* settingsOrDefault(settingsSvc);
     const discovered = parseFieldIds(yield* withDb(getState(SYNC_KEYS.fields)));
     return {
       discovered,
-      effective: effectiveFieldIds(discovered, settings?.jira.fields ?? {}),
+      effective: effectiveFieldIds(discovered, settings.jira.fields),
     } satisfies FieldInfo;
   });
 
@@ -392,7 +392,7 @@ const make = Effect.gen(function* () {
 
   const refreshIssue = (key: string) =>
     Effect.gen(function* () {
-      const settings = yield* settingsSvc.get.pipe(Effect.orElseSucceed(() => undefined));
+      const settings = yield* settingsOrDefault(settingsSvc);
       const { effective: fieldIds } = yield* withDb(fieldInfo);
       const raw = yield* jira.getIssue(key, {
         fields: issueFields(fieldIds),
@@ -400,7 +400,7 @@ const make = Effect.gen(function* () {
       });
       const m = mapIssue(raw, {
         fieldIds,
-        trackedEpics: new Set(settings?.jira.trackedEpics ?? []),
+        trackedEpics: new Set(settings.jira.trackedEpics),
         syncedAt: nowIso(),
       });
       const comments = m.commentsComplete ? m.comments : yield* allComments(key);

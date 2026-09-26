@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { issueMeta, jiraComments, jiraIssues } from "@/db/schema";
 import { query } from "@/services/db";
 import { listDependencies } from "@/services/dependencies/queries";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, SYNC_KEYS } from "@/services/sync/state";
 import type { DashboardInputs, DashIssue, IssueLink } from "./sections";
 
@@ -22,7 +22,7 @@ const parseLinks = (value: unknown): IssueLink[] => {
 
 export const loadDashboardInputs = (now = new Date()) =>
   Effect.gen(function* () {
-    const settings = yield* (yield* Settings).get.pipe(Effect.orElseSucceed(() => undefined));
+    const settings = yield* settingsOrDefault(yield* Settings);
     const me = (yield* getState(SYNC_KEYS.username)) ?? null;
     const rows = yield* query((d) =>
       d
@@ -82,7 +82,7 @@ export const loadDashboardInputs = (now = new Date()) =>
     const deps = yield* listDependencies();
     return {
       me,
-      trackedEpics: settings?.jira.trackedEpics ?? [],
+      trackedEpics: settings.jira.trackedEpics,
       issues,
       dependencies: deps.map((x) => ({
         id: x.id,

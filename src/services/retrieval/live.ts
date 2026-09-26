@@ -19,7 +19,7 @@ import { takeWithinBudget } from "@/prompts/common";
 import { Db, query } from "@/services/db";
 import { normalizeUsername } from "@/services/directory/schema";
 import { describeCorrection, describeStoredPayload } from "@/services/proposals/schema";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { promptSprints } from "@/services/sprints/calendar";
 import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { BUDGETS, CANDIDATE_LIMIT, Retrieval, type SnapshotRequest } from ".";
@@ -44,7 +44,7 @@ const make = Effect.gen(function* () {
 
   const snapshot = (req: SnapshotRequest) =>
     Effect.gen(function* () {
-      const settings = yield* settingsSvc.get.pipe(Effect.orElseSucceed(() => undefined));
+      const settings = yield* settingsOrDefault(settingsSvc);
       const me = yield* Effect.provideService(getState(SYNC_KEYS.username), Db, db);
       const allPeople = yield* q((d) => d.select().from(people).all());
       const allTeams = yield* q((d) => d.select().from(teams).all());
@@ -366,7 +366,7 @@ const make = Effect.gen(function* () {
       );
       const sprints = promptSprints(sprintState, {
         today: req.today,
-        fyStartMonth: settings?.general.fiscalYearStartMonth ?? 1,
+        fyStartMonth: settings.general.fiscalYearStartMonth,
         projects: [...projects.keys()],
       });
 
@@ -374,7 +374,7 @@ const make = Effect.gen(function* () {
         promptVersion: CLASSIFY_PROMPT_VERSION,
         today: req.today,
         me: me ? { username: me } : null,
-        outputLanguage: settings?.general.outputLanguage ?? "English",
+        outputLanguage: settings.general.outputLanguage,
         source: req.source,
         sender: sender
           ? {

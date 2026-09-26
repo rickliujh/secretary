@@ -1,6 +1,6 @@
 import { Context, Data, Effect } from "effect";
 import type { z } from "zod";
-import { type AppSettings, SettingsSchema } from "./schema";
+import { type AppSettings, defaultSettings, SettingsSchema } from "./schema";
 
 export * from "./schema";
 
@@ -18,6 +18,13 @@ export interface SettingsShape {
 }
 
 export class Settings extends Context.Tag("Settings")<Settings, SettingsShape>() {}
+
+/**
+ * Settings for readers that can work with the defaults: when the store cannot be
+ * read (the settings page reports that), they get `defaultSettings()` instead.
+ */
+export const settingsOrDefault = (settings: SettingsShape): Effect.Effect<AppSettings> =>
+  settings.get.pipe(Effect.orElseSucceed(defaultSettings));
 
 /** Parses stored data, filling defaults. Invalid data is an error, never silently reset. */
 export const decodeSettings = (raw: unknown): Effect.Effect<AppSettings, SettingsError> => {

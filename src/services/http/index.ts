@@ -3,7 +3,7 @@ import { Context, Effect, Layer, Option } from "effect";
 import { logger } from "@/lib/log";
 import { redact } from "@/lib/redact";
 import { Secrets, secretNames } from "@/services/secrets";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { checkRequest, OFFLINE_MESSAGE } from "./guard";
 
 export type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -21,8 +21,8 @@ type ProxyConfig = {
 
 /** Manual proxy from settings, or undefined to let the HTTP client use the system/env proxy. */
 export const proxyFromSettings = Effect.gen(function* () {
-  const settings = yield* (yield* Settings).get.pipe(Effect.orElseSucceed(() => undefined));
-  const net = settings?.network;
+  const settings = yield* settingsOrDefault(yield* Settings);
+  const net = settings.network;
   if (net?.proxyMode !== "manual" || !net.proxyUrl) return undefined;
   const password = net.proxyUsername
     ? Option.getOrUndefined(
