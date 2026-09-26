@@ -4,7 +4,7 @@ import { redact } from "@/lib/redact";
 import { buildChatSystem, CHAT_MAX_STEPS } from "@/prompts/chat";
 import { localDate } from "@/services/intake";
 import { Llm, LlmError } from "@/services/llm";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, SYNC_KEYS } from "@/services/sync/state";
 import { Chat, type ChatRequest } from ".";
 import { chatTools, type ToolDeps } from "./tools";
@@ -28,10 +28,7 @@ const make = Effect.gen(function* () {
 
   const stream = (req: ChatRequest) =>
     Effect.gen(function* () {
-      const settings = yield* Effect.provide(
-        Effect.flatMap(Settings, (x) => x.get),
-        deps,
-      ).pipe(Effect.orElseSucceed(() => undefined));
+      const settings = yield* Effect.provide(Effect.flatMap(Settings, settingsOrDefault), deps);
       const me = yield* Effect.provide(getState(SYNC_KEYS.username), deps).pipe(
         Effect.orElseSucceed(() => undefined),
       );
@@ -47,7 +44,7 @@ const make = Effect.gen(function* () {
         system: buildChatSystem({
           today: localDate(),
           me: me ?? null,
-          language: settings?.general.outputLanguage ?? "English",
+          language: settings.general.outputLanguage,
         }),
         messages,
         tools,

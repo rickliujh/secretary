@@ -1,6 +1,5 @@
 /** The Chat page's system prompt (FR-8, design.md D25). */
 
-export const CHAT_PROMPT_VERSION = 1;
 export const CHAT_MAX_STEPS = 8;
 
 export function buildChatSystem(c: { today: string; me: string | null; language: string }) {

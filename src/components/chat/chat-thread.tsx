@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { isSubmitEnter } from "@/lib/keys";
 import { loadConversation } from "@/services/chat/history";
 import { TIERS, type Tier } from "@/services/llm/tasks";
 import { chatFor, chatTier, hasChat, setChatTier } from "./store";
@@ -134,7 +135,7 @@ function Thread({ id, stored }: { id: string; stored: Parameters<typeof chatFor>
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (isSubmitEnter(e)) {
               e.preventDefault();
               send(input);
             }
