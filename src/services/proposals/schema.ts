@@ -290,3 +290,24 @@ export function payloadChanges(before: ProposalPayload, after: ProposalPayload):
     .filter((k) => k !== "ref" && JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null))
     .map((k) => `${k}: ${shown(a[k])} -> ${shown(b[k])}`);
 }
+
+/**
+ * Describes one side of a stored correction example: a payload, or the list of
+ * payloads a revision replaced (D22). Values that no longer parse are shown as JSON.
+ */
+export function describeStoredPayload(value: unknown): string {
+  if (Array.isArray(value)) return value.map(describeStoredPayload).join("; ") || "nothing";
+  const r = ProposalPayloadSchema.safeParse(value);
+  return r.success ? describePayload(r.data) : JSON.stringify(value);
+}
+
+/** The corrected version plus exactly what changed, so an edited field is not lost. */
+export function describeCorrection(before: unknown, after: unknown): string {
+  const b = ProposalPayloadSchema.safeParse(before);
+  const a = ProposalPayloadSchema.safeParse(after);
+  if (!b.success || !a.success) return describeStoredPayload(after);
+  const changes = payloadChanges(b.data, a.data);
+  return changes.length
+    ? `${describePayload(a.data)} (changed ${changes.join("; ")})`
+    : describePayload(a.data);
+}

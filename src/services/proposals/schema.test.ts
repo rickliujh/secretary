@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   CreateIssue,
+  describeCorrection,
+  describeStoredPayload,
   issueRefs,
   ProposalPayloadSchema,
   payloadChanges,
@@ -102,5 +104,18 @@ describe("proposal payloads", () => {
         changes: { priority: "High", dueDate: "2026-10-02" },
       }),
     ).toEqual(["priority: Medium -> High", "dueDate: (none) -> 2026-10-02"]);
+  });
+
+  test("stored corrections are described with what changed", () => {
+    const before = { kind: "transition_issue", target: "PAY-2", toStatus: "Done" };
+    const after = { ...before, toStatus: "To Do" };
+    expect(describeStoredPayload(before)).toBe("Move PAY-2 to Done");
+    expect(describeStoredPayload([before, after])).toBe("Move PAY-2 to Done; Move PAY-2 to To Do");
+    expect(describeStoredPayload([])).toBe("nothing");
+    expect(describeStoredPayload({ kind: "gone" })).toBe('{"kind":"gone"}');
+    expect(describeCorrection(before, after)).toBe(
+      "Move PAY-2 to To Do (changed toStatus: Done -> To Do)",
+    );
+    expect(describeCorrection(before, before)).toBe("Move PAY-2 to Done");
   });
 });
