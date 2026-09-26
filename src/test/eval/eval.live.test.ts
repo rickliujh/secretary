@@ -12,7 +12,6 @@
  * Jira is a stub over the fixtures, so nothing is written anywhere.
  */
 import { describe, expect, test } from "bun:test";
-import type { UIMessageChunk } from "ai";
 import { asc, eq, inArray } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { dependencies, intakeItems, memories, proposals } from "@/db/schema";
@@ -40,6 +39,7 @@ import { ProviderSchema, type TierBindings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
+import { drainStream, TODAY } from "@/test/helpers";
 import { JIRA_BASE, jiraSettings } from "@/test/layers";
 import { fixtureRoutes } from "@/test/seed";
 import { stubFetch } from "@/test/stub-fetch";
@@ -52,8 +52,6 @@ const configured = !!(
   env.SECRETARY_EVAL_STANDARD_MODEL
 );
 const PASS_RATE = 0.75;
-/** The fixtures' "today": Payments 15 is the active sprint (2026-09-14 to 2026-09-28). */
-const EVAL_TODAY = "2026-09-24";
 
 const selected = env.SECRETARY_EVAL_CASE
   ? EVAL_CASES.filter((c) => c.name.includes(env.SECRETARY_EVAL_CASE ?? ""))
@@ -149,13 +147,13 @@ const runCases = (cases: EvalCase[]) =>
             source: c.source,
             senderPersonId: c.sender ? senders[c.sender] : null,
             // Fixed, so relative dates and the sprint calendar match the fixtures.
-            today: EVAL_TODAY,
+            today: TODAY,
           });
           if (c.followUp)
             yield* intake.reply({
               inboxItemId: first.inboxItemId,
               instruction: c.followUp,
-              today: EVAL_TODAY,
+              today: TODAY,
             });
           return first;
         }),
@@ -307,7 +305,7 @@ describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live drafting eval (P
                 .where(eq(dependencies.id, dep)),
             );
             const id = yield* requestChaseDraft(dep);
-            const r = yield* Effect.either((yield* Comms).generate(id, { today: EVAL_TODAY }));
+            const r = yield* Effect.either((yield* Comms).generate(id, { today: TODAY }));
             const v = (yield* draftDetail(id))?.draft.variants;
             out.push(
               r._tag === "Left"
@@ -347,13 +345,7 @@ describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live chat eval (Phase
         const stream = yield* (yield* Chat).stream({
           messages: [{ id: "u", role: "user", parts: [{ type: "text", text }] }],
         });
-        const chunks: UIMessageChunk[] = [];
-        const reader = stream.getReader();
-        for (;;) {
-          const r = yield* Effect.promise(() => reader.read());
-          if (r.done) break;
-          chunks.push(r.value);
-        }
+        const chunks = yield* Effect.promise(() => drainStream(stream));
         return {
           text: chunks.map((c) => (c.type === "text-delta" ? c.delta : "")).join(""),
           tools: chunks.flatMap((c) => (c.type === "tool-input-available" ? [c.toolName] : [])),

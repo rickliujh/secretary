@@ -6,6 +6,7 @@ import { proposals } from "@/db/schema";
 import { query } from "@/services/db";
 import { createDependency } from "@/services/dependencies/queries";
 import { createTeam } from "@/services/directory/queries";
+import { drainStream, promptOf } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { Chat } from ".";
@@ -13,16 +14,6 @@ import { Chat } from ".";
 const ask = (text: string): UIMessage[] => [
   { id: "u1", role: "user", parts: [{ type: "text", text }] },
 ];
-
-const drain = async (stream: ReadableStream<UIMessageChunk>) => {
-  const chunks: UIMessageChunk[] = [];
-  const reader = stream.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return chunks;
-    chunks.push(value);
-  }
-};
 
 const text = (chunks: UIMessageChunk[]) =>
   chunks.map((c) => (c.type === "text-delta" ? c.delta : "")).join("");
@@ -52,7 +43,7 @@ describe("Chat (D25)", () => {
           const stream = yield* (yield* Chat).stream({
             messages: ask("What am I waiting on from Platform?"),
           });
-          return yield* Effect.promise(() => drain(stream));
+          return yield* Effect.promise(() => drainStream(stream));
         }),
         layer,
       ),
@@ -69,8 +60,8 @@ describe("Chat (D25)", () => {
     });
     expect(text(chunks)).toContain("INC0012345");
     // The second step saw the tool result, and the system prompt keeps writes out of the chat.
-    expect(JSON.stringify(models.calls[1]?.prompt)).toContain("Ledger fix");
-    expect(JSON.stringify(models.calls[0]?.prompt)).toContain("call propose_actions");
+    expect(promptOf(models.calls, 1)).toContain("Ledger fix");
+    expect(promptOf(models.calls, 0)).toContain("call propose_actions");
   });
 
   test("a requested change becomes a pending proposal through intake, not a write", async () => {
@@ -99,7 +90,7 @@ describe("Chat (D25)", () => {
           const stream = yield* (yield* Chat).stream({
             messages: ask("comment on PAY-4 that we are blocked"),
           });
-          const chunks = yield* Effect.promise(() => drain(stream));
+          const chunks = yield* Effect.promise(() => drainStream(stream));
           const output = toolOutputs(chunks)[0] as { threadId: string; proposed: string[] };
           const rows = yield* query((d) =>
             d.select().from(proposals).where(eq(proposals.inboxItemId, output.threadId)).all(),
@@ -125,7 +116,7 @@ describe("Chat (D25)", () => {
       Effect.provide(
         Effect.gen(function* () {
           const stream = yield* (yield* Chat).stream({ messages: ask("find the runbook") });
-          return yield* Effect.promise(() => drain(stream));
+          return yield* Effect.promise(() => drainStream(stream));
         }),
         layer,
       ),

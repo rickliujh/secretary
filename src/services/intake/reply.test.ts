@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { inboxMessages, intakeItems, memories, proposals } from "@/db/schema";
+import { memories, proposals } from "@/db/schema";
 import { query } from "@/services/db";
+import { promptOf, readThread, TODAY } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { Intake } from ".";
@@ -28,32 +29,6 @@ const answer = (proposals: unknown[], summary = "PAY-2 is blocked on INC0012345"
 });
 const text = "PAY-2 is blocked on INC0012345 from Platform, can you move it back to To Do?";
 
-const readThread = (inboxItemId: string) =>
-  Effect.gen(function* () {
-    const messages = yield* query((d) =>
-      d
-        .select()
-        .from(inboxMessages)
-        .where(eq(inboxMessages.inboxItemId, inboxItemId))
-        .orderBy(asc(inboxMessages.seq))
-        .all(),
-    );
-    const props = yield* query((d) =>
-      d
-        .select()
-        .from(proposals)
-        .where(eq(proposals.inboxItemId, inboxItemId))
-        .orderBy(asc(proposals.seq))
-        .all(),
-    );
-    const items = yield* query((d) =>
-      d.select().from(intakeItems).where(eq(intakeItems.inboxItemId, inboxItemId)).all(),
-    );
-    return { messages, props, items };
-  });
-
-const prompt = (calls: { prompt: unknown }[], i: number) => JSON.stringify(calls[i]?.prompt);
-
 describe("Intake threads (D22)", () => {
   test("pasted input with typed words: the words are a trusted instruction", async () => {
     const { layer, models } = intakeTestLayer({ "std-m": [out(answer([transition]))] });
@@ -66,7 +41,7 @@ describe("Intake threads (D22)", () => {
             instruction: "only move it, no dependency",
             source: "teams",
             senderPersonId: null,
-            today: "2026-09-24",
+            today: TODAY,
           });
           return yield* readThread(res.inboxItemId);
         }),
@@ -85,7 +60,7 @@ describe("Intake threads (D22)", () => {
       source: "teams",
     });
     expect(r.props[0]?.messageId).toBe(r.messages[1]?.id ?? "");
-    const p = prompt(models.calls, 0);
+    const p = promptOf(models.calls, 0);
     expect(p).toContain("Instructions from the user in this conversation (trusted)");
     // The synced board's sprints, with positions and a projection (D23).
     expect(p).toContain("active, 2026-09-14 to 2026-09-28; Q3 2026 (Jul–Sep), sprint 6");
@@ -104,7 +79,12 @@ describe("Intake threads (D22)", () => {
         Effect.gen(function* () {
           yield* syncOnce;
           const intake = yield* Intake;
-          const first = yield* intake.triage({ text, source: "teams", senderPersonId: null });
+          const first = yield* intake.triage({
+            text,
+            source: "teams",
+            senderPersonId: null,
+            today: TODAY,
+          });
           const before = yield* readThread(first.inboxItemId);
           // The transition was approved and ran; only the dependency is undecided.
           yield* query((d) =>
@@ -116,6 +96,7 @@ describe("Intake threads (D22)", () => {
           const res = yield* intake.reply({
             inboxItemId: first.inboxItemId,
             instruction: "don't track the incident, comment on PAY-2 instead",
+            today: TODAY,
           });
           const examples = yield* query((d) =>
             d.select().from(memories).where(eq(memories.kind, "example")).all(),
@@ -133,7 +114,7 @@ describe("Intake threads (D22)", () => {
     ]);
     expect(r.props[2]?.messageId).toBe(r.messages[3]?.id ?? "");
     expect(r.messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
-    const p = prompt(models.calls, 1);
+    const p = promptOf(models.calls, 1);
     expect(p).toContain("Approved: Move PAY-2 to To Do");
     expect(p).toContain("Your current proposals for this input, not yet decided");
     expect(p).toContain('\\"dependencyKind\\":\\"incident\\"');
@@ -164,12 +145,14 @@ describe("Intake threads (D22)", () => {
             text: "It is blocked again.",
             source: "teams",
             senderPersonId: null,
+            today: TODAY,
           });
           const question = (yield* readThread(first.inboxItemId)).props[0];
           const res = yield* intake.reply({
             inboxItemId: first.inboxItemId,
             instruction: "PAY-2, blocked on INC0012345; move it back to To Do",
             answers: question?.id ?? "",
+            today: TODAY,
           });
           return { res, question, ...(yield* readThread(first.inboxItemId)) };
         }),
@@ -188,7 +171,7 @@ describe("Intake threads (D22)", () => {
     expect(r.res.proposals).toBe(2);
     // No routing call: the answer goes to the item that asked.
     expect(models.calls.map((c) => c.model)).toEqual(["std-m", "std-m"]);
-    expect(prompt(models.calls, 1)).toContain("PAY-2, blocked on INC0012345");
+    expect(promptOf(models.calls, 1)).toContain("PAY-2, blocked on INC0012345");
   });
 
   test("pasted text in a reply adds items and leaves the earlier ones alone", async () => {
@@ -207,8 +190,17 @@ describe("Intake threads (D22)", () => {
         Effect.gen(function* () {
           yield* syncOnce;
           const intake = yield* Intake;
-          const first = yield* intake.triage({ text, source: "teams", senderPersonId: null });
-          yield* intake.reply({ inboxItemId: first.inboxItemId, text: "Tom: OPS-7 is done now." });
+          const first = yield* intake.triage({
+            text,
+            source: "teams",
+            senderPersonId: null,
+            today: TODAY,
+          });
+          yield* intake.reply({
+            inboxItemId: first.inboxItemId,
+            text: "Tom: OPS-7 is done now.",
+            today: TODAY,
+          });
           return yield* readThread(first.inboxItemId);
         }),
         layer,
@@ -261,10 +253,12 @@ describe("Intake threads (D22)", () => {
             text: long,
             source: "meeting",
             senderPersonId: null,
+            today: TODAY,
           });
           yield* intake.reply({
             inboxItemId: first.inboxItemId,
             instruction: "also leave a comment on the firewall one",
+            today: TODAY,
           });
           return yield* readThread(first.inboxItemId);
         }),
@@ -302,11 +296,17 @@ describe("Intake threads (D22)", () => {
         Effect.gen(function* () {
           yield* syncOnce;
           const intake = yield* Intake;
-          const first = yield* intake.triage({ text, source: "teams", senderPersonId: null });
+          const first = yield* intake.triage({
+            text,
+            source: "teams",
+            senderPersonId: null,
+            today: TODAY,
+          });
           const failed = yield* Effect.either(
             intake.reply({
               inboxItemId: first.inboxItemId,
               instruction: "and comment that we chase",
+              today: TODAY,
             }),
           );
           const retried = yield* intake.retriage(first.inboxItemId);

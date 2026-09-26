@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { inboxItems, intakeItems, llmCalls, proposals } from "@/db/schema";
+import { inboxItems, llmCalls } from "@/db/schema";
 import { CLASSIFY_PROMPT_VERSION } from "@/prompts/classify";
 import { query } from "@/services/db";
 import type { LlmError } from "@/services/llm";
+import { promptOf, readThread, TODAY } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { Intake } from ".";
@@ -36,22 +36,9 @@ const text =
 
 const readBack = (inboxItemId: string) =>
   Effect.gen(function* () {
-    const item = yield* query((d) =>
-      d.select().from(inboxItems).where(eq(inboxItems.id, inboxItemId)).get(),
-    );
-    const props = yield* query((d) =>
-      d
-        .select()
-        .from(proposals)
-        .where(eq(proposals.inboxItemId, inboxItemId))
-        .orderBy(asc(proposals.seq))
-        .all(),
-    );
-    const items = yield* query((d) =>
-      d.select().from(intakeItems).where(eq(intakeItems.inboxItemId, inboxItemId)).all(),
-    );
+    const thread = yield* readThread(inboxItemId);
     const calls = yield* query((d) => d.select().from(llmCalls).all());
-    return { item, props, items, calls };
+    return { ...thread, calls };
   });
 
 // PAY-2 is already Blocked in the fixtures, so the canned answer moves it to another existing status.
@@ -71,7 +58,7 @@ describe("Intake.triage", () => {
             text,
             source: "teams",
             senderPersonId: null,
-            today: "2026-09-24",
+            today: TODAY,
           });
           return { res, ...(yield* readBack(res.inboxItemId)) };
         }),
@@ -102,9 +89,7 @@ describe("Intake.triage", () => {
       promptVersion: CLASSIFY_PROMPT_VERSION,
     });
     // The pasted text reaches the model inside the untrusted wrapper.
-    expect(JSON.stringify(models.calls[0]?.prompt)).toContain(
-      '<untrusted_input source=\\"teams\\">',
-    );
+    expect(promptOf(models.calls, 0)).toContain('<untrusted_input source=\\"teams\\">');
   });
 
   test("an out-of-candidate target is repaired, never stored", async () => {
@@ -118,6 +103,7 @@ describe("Intake.triage", () => {
             text,
             source: "teams",
             senderPersonId: null,
+            today: TODAY,
           });
           return yield* readBack(res.inboxItemId);
         }),
@@ -145,6 +131,7 @@ describe("Intake.triage", () => {
             text,
             source: "teams",
             senderPersonId: null,
+            today: TODAY,
           });
           return { res, ...(yield* readBack(res.inboxItemId)) };
         }),
@@ -167,6 +154,7 @@ describe("Intake.triage", () => {
             text,
             source: "teams",
             senderPersonId: null,
+            today: TODAY,
           });
           return yield* readBack(res.inboxItemId);
         }),
@@ -196,6 +184,7 @@ describe("Intake.triage", () => {
               text,
               source: "teams",
               senderPersonId: null,
+              today: TODAY,
             });
             return yield* readBack(res.inboxItemId);
           }),
@@ -271,6 +260,7 @@ describe("Intake.triage", () => {
             text: long,
             source: "meeting",
             senderPersonId: null,
+            today: TODAY,
           });
           return { res, ...(yield* readBack(res.inboxItemId)) };
         }),
@@ -297,7 +287,7 @@ describe("Intake.triage", () => {
           yield* syncOnce;
           const intake = yield* Intake;
           const failed = yield* Effect.either(
-            intake.triage({ text, source: "email", senderPersonId: null }),
+            intake.triage({ text, source: "email", senderPersonId: null, today: TODAY }),
           );
           const stored = yield* query((d) => d.select().from(inboxItems).all());
           const retried = yield* intake.retriage(stored[0]?.id ?? "");
