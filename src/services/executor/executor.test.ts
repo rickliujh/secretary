@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { actionsLog, jiraComments, jiraIssues } from "@/db/schema";
+import { actionsLog, jiraComments, jiraIssues, people, proposals } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { query } from "@/services/db";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
@@ -163,5 +164,37 @@ describe("Executor", () => {
     );
     expect(exit._tag === "Left" && (exit.left as ExecutorError).kind).toBe("invalid");
     expect(seen).toHaveLength(0);
+  });
+
+  test("an appended contact note is stamped with the local date", async () => {
+    const { layer } = setup();
+    const row = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* query((d) =>
+            d.insert(people).values({ id: "p1", displayName: "Ana B", notesMd: "Met in June" }),
+          );
+          yield* query((d) =>
+            d.insert(proposals).values({
+              id: "prop1",
+              seq: 0,
+              kind: "update_person",
+              payload: {},
+              status: "approved",
+              createdAt: "2026-09-23T10:00:00.000Z",
+            }),
+          );
+          yield* Effect.flatMap(Executor, (e) =>
+            e.runProposal(
+              { kind: "update_person", personId: "p1", changes: {}, noteAppend: "Prefers email" },
+              { proposalId: "prop1", inboxItemId: null },
+            ),
+          );
+          return yield* query((d) => d.select().from(people).where(eq(people.id, "p1")).get());
+        }),
+        layer,
+      ),
+    );
+    expect(row?.notesMd).toBe(`Met in June\n\n- ${localDate()}: Prefers email`);
   });
 });

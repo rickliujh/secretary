@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { actionsLog, communications, dependencies, memories, people, teams } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redactValue } from "@/lib/redact";
@@ -52,9 +53,7 @@ const make = Effect.gen(function* () {
   ) => log({ proposalId, action, target, request, response, ok: true });
 
   const appendNote = (existing: string | null, note: string | null) =>
-    note
-      ? `${existing ? `${existing.trimEnd()}\n\n` : ""}- ${nowIso().slice(0, 10)}: ${note}`
-      : existing;
+    note ? `${existing ? `${existing.trimEnd()}\n\n` : ""}- ${localDate()}: ${note}` : existing;
 
   /** A single user-initiated or approved Jira write: validate, send, log, re-fetch. */
   const run = (input: JiraAction, opts: { proposalId?: string } = {}) =>
