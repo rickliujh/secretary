@@ -18,6 +18,12 @@ export type EvalCase = {
   instruction?: string;
   /** A typed reply in the thread after the first turn; `expect` scores the result. */
   followUp?: string;
+  /** Corrections the user made before (FR-7.2), present only while this case runs. */
+  corrections?: {
+    input: string;
+    before: Record<string, unknown>;
+    after: Record<string, unknown>;
+  }[];
   expect: EvalExpectation;
   single: boolean;
 };
@@ -178,6 +184,59 @@ export const EVAL_CASES: EvalCase[] = [
     expect: {
       required: [{ kind: "update_issue", target: "PAY-4", date: "2026-09-28" }],
       forbiddenKinds: ["needs_clarification", "create_issue"],
+    },
+    single: true,
+  },
+  {
+    // Two corrections teach a convention no model would guess (Phase 7 checklist).
+    name: "two corrections teach the third",
+    source: "teams",
+    text: "Customers say the refund confirmation email shows the wrong amount. Please raise a bug in PAY for it.",
+    corrections: [
+      {
+        input:
+          "A customer reported that invoice PDFs are missing the VAT line. Raise a bug in PAY.",
+        before: {
+          kind: "create_issue",
+          ref: "$new:1",
+          projectKey: "PAY",
+          issueType: "Bug",
+          summary: "Invoice PDF missing VAT line",
+          assignee: null,
+        },
+        after: {
+          kind: "create_issue",
+          ref: "$new:1",
+          projectKey: "PAY",
+          issueType: "Bug",
+          summary: "Invoice PDF missing VAT line",
+          assignee: "ana.b",
+        },
+      },
+      {
+        input:
+          "Customers complain the payment receipt has the wrong date. Please log a bug in PAY.",
+        before: {
+          kind: "create_issue",
+          ref: "$new:1",
+          projectKey: "PAY",
+          issueType: "Bug",
+          summary: "Receipt shows wrong date",
+          assignee: "rliu",
+        },
+        after: {
+          kind: "create_issue",
+          ref: "$new:1",
+          projectKey: "PAY",
+          issueType: "Bug",
+          summary: "Receipt shows wrong date",
+          assignee: "ana.b",
+        },
+      },
+    ],
+    expect: {
+      required: [{ kind: "create_issue", fields: { projectKey: "PAY", assignee: "ana.b" } }],
+      forbiddenKinds: ["needs_clarification"],
     },
     single: true,
   },

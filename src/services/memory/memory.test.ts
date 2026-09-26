@@ -79,7 +79,7 @@ describe("memory queries", () => {
     expect(r.first.find((m) => m.id === "ex1")?.example).toEqual({
       input: "new task for refunds",
       before: "Create Task in PAY: Refunds",
-      after: "Create Story in PAY: Refunds",
+      after: "Create Story in PAY: Refunds (issueType: Task -> Story)",
     });
     expect(r.edited).toMatchObject({
       kind: "rule",

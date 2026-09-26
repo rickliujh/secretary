@@ -18,7 +18,11 @@ import {
 import { takeWithinBudget } from "@/prompts/common";
 import { Db, query } from "@/services/db";
 import { normalizeUsername } from "@/services/directory/schema";
-import { describePayload, ProposalPayloadSchema } from "@/services/proposals/schema";
+import {
+  describePayload,
+  ProposalPayloadSchema,
+  payloadChanges,
+} from "@/services/proposals/schema";
 import { Settings } from "@/services/settings";
 import { promptSprints } from "@/services/sprints/calendar";
 import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
@@ -42,6 +46,17 @@ const describeExample = (value: unknown): string => {
   if (Array.isArray(value)) return value.map(describeExample).join("; ") || "nothing";
   const r = ProposalPayloadSchema.safeParse(value);
   return r.success ? describePayload(r.data) : JSON.stringify(value);
+};
+
+/** The corrected version plus exactly what changed, so an edited field is not lost. */
+const describeCorrection = (before: unknown, after: unknown): string => {
+  const b = ProposalPayloadSchema.safeParse(before);
+  const a = ProposalPayloadSchema.safeParse(after);
+  if (!b.success || !a.success) return describeExample(after);
+  const changes = payloadChanges(b.data, a.data);
+  return changes.length
+    ? `${describePayload(a.data)} (changed ${changes.join("; ")})`
+    : describePayload(a.data);
 };
 
 const make = Effect.gen(function* () {
@@ -313,7 +328,7 @@ const make = Effect.gen(function* () {
       const examples = pickedExamples.map((m) => ({
         input: (m.exampleInput ?? "").slice(0, 300),
         proposed: describeExample(m.exampleBefore),
-        corrected: m.exampleAfter ? describeExample(m.exampleAfter) : null,
+        corrected: m.exampleAfter ? describeCorrection(m.exampleBefore, m.exampleAfter) : null,
       }));
       const used = [...pickedRules, ...pickedExamples].map((m) => m.id);
       if (used.length)

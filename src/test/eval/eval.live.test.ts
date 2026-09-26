@@ -12,12 +12,16 @@
  * Jira is a stub over the fixtures, so nothing is written anywhere.
  */
 import { describe, expect, test } from "bun:test";
-import { asc, eq } from "drizzle-orm";
+import type { UIMessageChunk } from "ai";
+import { asc, eq, inArray } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { dependencies, intakeItems, proposals } from "@/db/schema";
+import { dependencies, intakeItems, memories, proposals } from "@/db/schema";
+import { Chat } from "@/services/chat";
+import { ChatLive } from "@/services/chat/live";
 import { Comms } from "@/services/comms";
 import { CommsLive } from "@/services/comms/live";
 import { draftDetail } from "@/services/comms/queries";
+import { ConfluenceClientLive } from "@/services/confluence/live";
 import { query } from "@/services/db";
 import { DbTest } from "@/services/db/test";
 import { createDependency, requestChaseDraft } from "@/services/dependencies/queries";
@@ -129,9 +133,13 @@ function layerFor(tiers: TierBindings) {
   );
   const withJira = Layer.provideMerge(SyncLive, Layer.provideMerge(JiraClientLive, base));
   const withLlm = Layer.provideMerge(LlmLive, Layer.provideMerge(ModelFactoryLive, withJira));
+  const withConfluence = Layer.provideMerge(ConfluenceClientLive, withLlm);
   return Layer.provideMerge(
-    CommsLive,
-    Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, withLlm)),
+    ChatLive,
+    Layer.provideMerge(
+      CommsLive,
+      Layer.provideMerge(IntakeLive, Layer.provideMerge(RetrievalLive, withConfluence)),
+    ),
   );
 }
 
@@ -162,6 +170,21 @@ const runCases = (cases: EvalCase[]) =>
     const senders = { ana, tom };
     const out: { c: EvalCase; payloads: ProposalPayload[]; errors: string[] }[] = [];
     for (const c of cases) {
+      // Corrections exist only while their case runs, so other cases stay unaffected.
+      const seeded = (c.corrections ?? []).map((x, i) => ({
+        id: `eval-correction-${i}`,
+        kind: "example" as const,
+        subjectType: "proposal_kind",
+        subjectId: String(x.before.kind),
+        content: "Changed",
+        exampleInput: x.input,
+        exampleBefore: x.before,
+        exampleAfter: x.after,
+        source: "user" as const,
+        confirmed: true,
+        createdAt: "2026-09-20T09:00:00.000Z",
+      }));
+      if (seeded.length) yield* query((d) => d.insert(memories).values(seeded));
       // A provider error (timeout, rate limit) fails this case, not the whole run.
       const intake = yield* Intake;
       const attempt = yield* Effect.either(
@@ -183,6 +206,15 @@ const runCases = (cases: EvalCase[]) =>
           return first;
         }),
       );
+      if (seeded.length)
+        yield* query((d) =>
+          d.delete(memories).where(
+            inArray(
+              memories.id,
+              seeded.map((x) => x.id),
+            ),
+          ),
+        );
       if (attempt._tag === "Left") {
         const e = attempt.left;
         out.push({ c, payloads: [], errors: [`${e._tag}: ${e.message}`] });
@@ -349,5 +381,68 @@ describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live drafting eval (P
     expect(formal).not.toMatch(/^\s*hey\b/i);
     expect(casual).not.toMatch(/^\s*dear\b/i);
     expect(casual.length).toBeLessThan(formal.length);
+  }, 600_000);
+});
+
+describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live chat eval (Phase 7)", () => {
+  test("answers from local data and turns a change into a pending proposal", async () => {
+    const model = env.SECRETARY_EVAL_STANDARD_MODEL ?? "";
+    const bind = { providerId: "eval", model };
+    const ask = (text: string) =>
+      Effect.gen(function* () {
+        const stream = yield* (yield* Chat).stream({
+          messages: [{ id: "u", role: "user", parts: [{ type: "text", text }] }],
+        });
+        const chunks: UIMessageChunk[] = [];
+        const reader = stream.getReader();
+        for (;;) {
+          const r = yield* Effect.promise(() => reader.read());
+          if (r.done) break;
+          chunks.push(r.value);
+        }
+        return {
+          text: chunks.map((c) => (c.type === "text-delta" ? c.delta : "")).join(""),
+          tools: chunks.flatMap((c) => (c.type === "tool-input-available" ? [c.toolName] : [])),
+          errors: chunks.flatMap((c) => (c.type === "error" ? [c.errorText] : [])),
+        };
+      });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const platform = yield* createTeam({
+            name: "Platform",
+            function: "Shared infrastructure",
+          });
+          yield* createDependency({
+            issueKey: "PAY-2",
+            kind: "incident",
+            label: "Ledger fix",
+            ownerTeamId: platform,
+            externalRef: "INC0012345",
+          });
+          const waiting = yield* ask("What am I waiting on from team Platform?");
+          const change = yield* ask(
+            "Comment on PAY-4 that we are blocked until finance signs off.",
+          );
+          const pending = yield* query((d) =>
+            d.select().from(proposals).where(eq(proposals.status, "pending")).all(),
+          );
+          return { waiting, change, pending };
+        }),
+        layerFor({ fast: bind, standard: bind, strong: null }),
+      ),
+    );
+    console.log(`\nchat: waiting -> [${r.waiting.tools.join(", ")}] ${r.waiting.text}`);
+    console.log(`chat: change -> [${r.change.tools.join(", ")}] ${r.change.text}`);
+    expect(r.waiting.errors).toEqual([]);
+    expect(r.waiting.tools).toContain("waiting_on");
+    expect(r.waiting.text).toContain("INC0012345");
+    expect(r.change.tools).toContain("propose_actions");
+    expect(
+      r.pending.some(
+        (p) => p.kind === "add_comment" && (p.payload as { target?: string }).target === "PAY-4",
+      ),
+    ).toBe(true);
   }, 600_000);
 });

@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { issueRefs, ProposalPayloadSchema, resolveRefs } from "./schema";
+import {
+  CreateIssue,
+  issueRefs,
+  ProposalPayloadSchema,
+  payloadChanges,
+  resolveRefs,
+  UpdateIssue,
+} from "./schema";
 
 describe("proposal payloads", () => {
   test("defaults fill optional fields", () => {
@@ -47,5 +54,30 @@ describe("proposal payloads", () => {
     });
     expect(resolveRefs(draft, created)).toMatchObject({ issueKeys: ["PAY-10", "PAY-2"] });
     expect(issueRefs(sub)).toEqual(["$new:1"]);
+  });
+
+  test("payloadChanges names every field a correction changed", () => {
+    const before = CreateIssue.parse({
+      kind: "create_issue",
+      ref: "$new:1",
+      projectKey: "PAY",
+      issueType: "Bug",
+      summary: "Receipt date",
+      assignee: null,
+    });
+    expect(payloadChanges(before, { ...before, ref: "$new:2", assignee: "ana.b" })).toEqual([
+      "assignee: (none) -> ana.b",
+    ]);
+    const update = UpdateIssue.parse({
+      kind: "update_issue",
+      target: "PAY-4",
+      changes: { priority: "Medium" },
+    });
+    expect(
+      payloadChanges(update, {
+        ...update,
+        changes: { priority: "High", dueDate: "2026-10-02" },
+      }),
+    ).toEqual(["priority: Medium -> High", "dueDate: (none) -> 2026-10-02"]);
   });
 });

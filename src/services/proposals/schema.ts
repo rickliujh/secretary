@@ -229,3 +229,38 @@ export function describePayload(p: ProposalPayload): string {
       return p.question;
   }
 }
+
+const flatFields = (p: ProposalPayload): Record<string, unknown> => {
+  const { kind: _k, ...rest } = p as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rest)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) {
+        if (v2 && typeof v2 === "object" && !Array.isArray(v2))
+          for (const [k3, v3] of Object.entries(v2 as Record<string, unknown>)) out[k3] = v3;
+        else out[k2] = v2;
+      }
+    } else out[k] = v;
+  }
+  return out;
+};
+
+const shown = (v: unknown) =>
+  v === null || v === undefined || v === ""
+    ? "(none)"
+    : Array.isArray(v)
+      ? v.join(", ")
+      : String(v);
+
+/**
+ * What a correction changed, field by field, e.g. ["assignee: (none) -> ana.b"]
+ * (FR-7.2). Descriptions alone can hide the change, such as a new assignee.
+ */
+export function payloadChanges(before: ProposalPayload, after: ProposalPayload): string[] {
+  if (before.kind !== after.kind) return [`kind: ${before.kind} -> ${after.kind}`];
+  const a = flatFields(before);
+  const b = flatFields(after);
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])]
+    .filter((k) => k !== "ref" && JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null))
+    .map((k) => `${k}: ${shown(a[k])} -> ${shown(b[k])}`);
+}

@@ -9,6 +9,13 @@ export type Expected = {
   target?: string;
   /** The date the proposal must set: dueDate, or expectedAt for a dependency. */
   date?: string;
+  /** Fields the payload must have, e.g. { issueType: "Bug", assignee: "ana.b" }. */
+  fields?: Record<string, unknown>;
+};
+
+const hasFields = (p: ProposalPayload, fields: Record<string, unknown>) => {
+  const flat = { ...p, ...("changes" in p ? p.changes : {}) } as Record<string, unknown>;
+  return Object.entries(fields).every(([k, v]) => flat[k] === v);
 };
 
 const dateOf = (p: ProposalPayload): string | null | undefined => {
@@ -56,7 +63,8 @@ export function scoreCase(
         (a) =>
           a.kind === e.kind &&
           (e.target === undefined || payloadTarget(a) === e.target) &&
-          (e.date === undefined || dateOf(a) === e.date),
+          (e.date === undefined || dateOf(a) === e.date) &&
+          (e.fields === undefined || hasFields(a, e.fields)),
       ),
   );
   const forbidden = [

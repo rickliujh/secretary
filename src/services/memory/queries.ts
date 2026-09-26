@@ -4,7 +4,11 @@ import { Effect } from "effect";
 import { memories, people, teams } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
-import { describePayload, ProposalPayloadSchema } from "@/services/proposals/schema";
+import {
+  describePayload,
+  ProposalPayloadSchema,
+  payloadChanges,
+} from "@/services/proposals/schema";
 import { type MemoryInput, MemoryInputSchema } from "./schema";
 
 export * from "./schema";
@@ -13,6 +17,16 @@ const describe = (value: unknown): string => {
   if (Array.isArray(value)) return value.map(describe).join("; ") || "nothing";
   const r = ProposalPayloadSchema.safeParse(value);
   return r.success ? describePayload(r.data) : "";
+};
+
+const describeAfter = (before: unknown, after: unknown): string => {
+  const b = ProposalPayloadSchema.safeParse(before);
+  const a = ProposalPayloadSchema.safeParse(after);
+  if (!b.success || !a.success) return describe(after);
+  const changes = payloadChanges(b.data, a.data);
+  return changes.length
+    ? `${describePayload(a.data)} (${changes.join("; ")})`
+    : describePayload(a.data);
 };
 
 export type MemoryView = {
@@ -78,7 +92,8 @@ export const listMemories = Effect.gen(function* () {
           ? {
               input: m.exampleInput ?? "",
               before: describe(m.exampleBefore),
-              after: m.exampleAfter === null ? null : describe(m.exampleAfter),
+              after:
+                m.exampleAfter === null ? null : describeAfter(m.exampleBefore, m.exampleAfter),
             }
           : null,
     }),
