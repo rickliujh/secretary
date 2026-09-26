@@ -19,6 +19,8 @@ import { ReportsLive } from "@/services/report/live";
 import { RetrievalLive } from "@/services/retrieval/live";
 import { SecretsLive } from "@/services/secrets/live";
 import { SettingsLive } from "@/services/settings/live";
+import { VaultFsLive } from "@/services/sources/fs-live";
+import { SourcesLive } from "@/services/sources/live";
 import { SyncLive } from "@/services/sync/live";
 
 const Base = FetcherLive.pipe(
@@ -30,7 +32,9 @@ const AppLayer = ChatLive.pipe(
   Layer.provideMerge(
     Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive, LearningLive, PlanningLive, ReportsLive),
   ),
-  Layer.provideMerge(Layer.mergeAll(RetrievalLive, ExecutorLive)),
+  Layer.provideMerge(
+    Layer.mergeAll(RetrievalLive, ExecutorLive, SourcesLive.pipe(Layer.provide(VaultFsLive))),
+  ),
   Layer.provideMerge(SyncLive),
   Layer.provideMerge(Layer.mergeAll(LlmLive, JiraClientLive, ConfluenceClientLive)),
   Layer.provideMerge(ModelFactoryLive),
