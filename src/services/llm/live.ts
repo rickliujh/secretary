@@ -1,4 +1,4 @@
-import { generateText, NoObjectGeneratedError, Output } from "ai";
+import { generateText, NoObjectGeneratedError, Output, stepCountIs, streamText } from "ai";
 import { Duration, Effect, Exit, Layer, Option } from "effect";
 import { llmCalls } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
@@ -15,6 +15,7 @@ import {
   ModelFactory,
   type ObjectRequest,
   type ObjectResult,
+  type StreamRequest,
   type TestResult,
   toLlmError,
   type Usage,
@@ -412,13 +413,49 @@ export const makeLlm = Effect.gen(function* () {
       } satisfies TestResult;
     });
 
+  const stream = (task: TaskType, req: StreamRequest) =>
+    Effect.gen(function* () {
+      const settings = yield* settingsSvc.get.pipe(
+        Effect.mapError((e) => new LlmError({ kind: "config", message: e.message })),
+      );
+      const routed = resolveTask(settings, task);
+      let target: Target;
+      if (req.tier) target = yield* explicit(settings, { tier: req.tier });
+      else if (routed.resolved) target = targetOf(routed.resolved);
+      else return yield* noTier();
+      const p = yield* prepare(settings, target);
+      const meta: Meta = { task, escalated: false, repair: false, timeoutMs: routed.timeoutMs };
+      const started = Date.now();
+      const done = (row: { ok: boolean; usage?: Usage; errorKind?: string }) =>
+        void Effect.runPromise(
+          record(p, meta, { ...row, durationMs: Date.now() - started, validationOk: null }),
+        );
+      const result = streamText({
+        model: p.languageModel,
+        system: req.system,
+        messages: req.messages,
+        tools: req.tools,
+        stopWhen: stepCountIs(req.maxSteps),
+        maxRetries: 1,
+        abortSignal: req.abortSignal,
+        ...callSettings(p.provider),
+        onFinish: (e) =>
+          done({ ok: true, usage: usageOf((e as { totalUsage?: Usage }).totalUsage) }),
+        onError: ({ error }) => done({ ok: false, errorKind: toLlmError(error).kind }),
+      });
+      return result.toUIMessageStream({
+        // The chat shows the reason instead of a generic failure; keys are redacted.
+        onError: (error) => redact(toLlmError(error).message),
+      });
+    });
+
   const route = (task: TaskType) =>
     settingsSvc.get.pipe(
       Effect.mapError((e) => new LlmError({ kind: "config", message: e.message })),
       Effect.map((s) => resolveTask(s, task)),
     );
 
-  return Llm.of({ object, text, test, route });
+  return Llm.of({ object, text, stream, test, route });
 });
 
 export const ModelFactoryLive = Layer.effect(

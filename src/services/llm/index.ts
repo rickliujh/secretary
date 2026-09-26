@@ -1,4 +1,4 @@
-import type { LanguageModel } from "ai";
+import type { LanguageModel, ModelMessage, ToolSet, UIMessageChunk } from "ai";
 import { Context, type Effect } from "effect";
 import type { z } from "zod";
 import type { LlmError } from "./errors";
@@ -42,6 +42,18 @@ export type ObjectResult<T> = CallInfo & {
 };
 
 export type TextRequest = { system?: string; prompt: string };
+
+/** A streamed tool loop (chat, design.md D25). */
+export type StreamRequest = {
+  system: string;
+  messages: ModelMessage[];
+  tools: ToolSet;
+  /** Upper bound on model steps (tool calls plus the answer). */
+  maxSteps: number;
+  /** A tier to use instead of the task's routing. */
+  tier?: Tier;
+  abortSignal?: AbortSignal;
+};
 export type TextResult = CallInfo & { text: string };
 
 export type TestTarget = { tier: Tier } | { providerId: string; model: string };
@@ -60,6 +72,11 @@ export interface LlmShape {
     req: ObjectRequest<T>,
   ) => Effect.Effect<ObjectResult<T>, LlmError>;
   readonly text: (task: TaskType, req: TextRequest) => Effect.Effect<TextResult, LlmError>;
+  /** Streams a tool loop as UI message chunks; errors arrive in the stream. */
+  readonly stream: (
+    task: TaskType,
+    req: StreamRequest,
+  ) => Effect.Effect<ReadableStream<UIMessageChunk>, LlmError>;
   /** Connection test. Recorded in `llm_calls` as task `test_connection`. */
   readonly test: (target: TestTarget) => Effect.Effect<TestResult, LlmError>;
   /** Current routing for a task, for display in settings. */

@@ -3,6 +3,7 @@
  * React calls `run` inside TanStack Query functions.
  */
 import { Cause, type Effect, Exit, Layer, ManagedRuntime } from "effect";
+import { ChatLive } from "@/services/chat/live";
 import { CommsLive } from "@/services/comms/live";
 import { ConfluenceClientLive } from "@/services/confluence/live";
 import { DbLive } from "@/services/db/live";
@@ -22,7 +23,9 @@ const Base = FetcherLive.pipe(
   Layer.provideMerge(Layer.mergeAll(SettingsLive, SecretsLive, DbLive)),
 );
 
-export const AppLayer = Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive, LearningLive).pipe(
+// Chat's propose_actions tool runs intake, so Chat sits above it.
+export const AppLayer = ChatLive.pipe(
+  Layer.provideMerge(Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive, LearningLive)),
   Layer.provideMerge(Layer.mergeAll(RetrievalLive, ExecutorLive)),
   Layer.provideMerge(SyncLive),
   Layer.provideMerge(Layer.mergeAll(LlmLive, JiraClientLive, ConfluenceClientLive)),
