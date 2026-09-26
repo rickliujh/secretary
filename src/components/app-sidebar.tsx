@@ -1,8 +1,8 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Sparkles } from "lucide-react";
 import { CONTEXT_NAV, type NavItem, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
 import { macOverlay } from "@/app/platform";
 import { usePendingCount } from "@/app/queries";
+import logo from "@/assets/logo.svg";
 import {
   Sidebar,
   SidebarContent,
@@ -58,9 +58,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link to="/">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                  <Sparkles className="size-4" />
-                </div>
+                <img src={logo} alt="" className="size-8 shrink-0 rounded-lg" />
                 <span className="font-semibold">Secretary</span>
               </Link>
             </SidebarMenuButton>
