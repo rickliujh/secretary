@@ -28,9 +28,19 @@ local models).
 
 ## Install
 
-Download the build for your platform from the latest CI run (Actions -> CI -> the
-`secretary-<os>` artifact): `.dmg` for macOS, `.msi` or `.exe` for Windows, `.deb`,
-`.rpm` or `.AppImage` for Linux.
+Download the build for your platform from the latest CI run on `main` (Actions -> CI
+-> the `secretary-<os>` artifact): `.dmg` for macOS, `.msi` or `.exe` for Windows,
+`.deb`, `.rpm` or `.AppImage` for Linux. Pull request runs do not build bundles.
+
+Before you install:
+
+- The bundles are not signed, so the OS warns you the first time.
+  - macOS (Gatekeeper): right-click the app, choose **Open**, then **Open** again.
+  - Windows (SmartScreen): click **More info**, then **Run anyway**.
+- The macOS build comes from the `macos-latest` runner and runs on Apple Silicon only.
+  On an Intel Mac, build from source.
+- Downloading an Actions artifact needs a GitHub login, and artifacts expire after
+  90 days. For an older commit, build from source.
 
 ### Build from source
 
@@ -135,8 +145,12 @@ SECRETARY_EVAL_STANDARD_MODEL=z-ai/glm-5.3-flash \
 bun test src/test/eval
 ```
 
-Read `docs/requirements.md`, `docs/design.md` (decisions in section 12) and
-`docs/implementation-plan.md` before changing things; `CLAUDE.md` has the working rules.
+Read `docs/requirements.md` and `docs/design.md` (decisions in section 12) before
+changing things; `docs/implementation-plan.md` is the build history and
+`docs/CHANGELOG.md` what changed since. `CLAUDE.md` has the working rules.
+
+CI runs typecheck, lint and tests on every pull request. The release bundles, Rust
+tests and clippy run on pushes to `main` and when the workflow is started by hand.
 
 ## License
 
