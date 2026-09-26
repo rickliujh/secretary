@@ -1,4 +1,4 @@
-import type { LanguageModel, ModelMessage, ToolSet, UIMessageChunk } from "ai";
+import type { LanguageModel, ModelMessage, PrepareStepFunction, ToolSet, UIMessageChunk } from "ai";
 import { Context, type Effect } from "effect";
 import type { z } from "zod";
 import type { LlmError } from "./errors";
@@ -53,6 +53,8 @@ export type StreamRequest = {
   /** A tier to use instead of the task's routing. */
   tier?: Tier;
   abortSignal?: AbortSignal;
+  /** Changes the messages before each step (the chat adds fetched images, D33). */
+  prepareStep?: PrepareStepFunction<ToolSet>;
 };
 export type TextResult = CallInfo & { text: string };
 

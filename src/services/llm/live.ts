@@ -430,6 +430,7 @@ const makeLlm = Effect.gen(function* () {
         messages: req.messages,
         tools: req.tools,
         stopWhen: stepCountIs(req.maxSteps),
+        prepareStep: req.prepareStep,
         maxRetries: 1,
         abortSignal: req.abortSignal,
         ...callSettings(p.provider),

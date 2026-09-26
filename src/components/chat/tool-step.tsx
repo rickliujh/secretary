@@ -4,6 +4,7 @@ import {
   AlertCircle,
   BookOpen,
   Hourglass,
+  Image as ImageIcon,
   Loader2,
   NotebookText,
   Search,
@@ -36,6 +37,8 @@ const describe = (part: Part): [ReactNode, string] => {
       ];
     case "tool-find_contacts":
       return [<Users key="i" />, `Looked up “${input.text ?? ""}” in people and teams`];
+    case "tool-view_images":
+      return [<ImageIcon key="i" />, `Looked at the pictures in ${input.key ?? "a ticket"}`];
     case "tool-search_notes":
       return [<NotebookText key="i" />, `Searched notes for “${input.text ?? ""}”`];
     case "tool-my_focus":

@@ -90,6 +90,13 @@ export interface JiraClientShape {
   ) => Effect.Effect<readonly CreateMetaField[], JiraError>;
   readonly remoteLinks: (key: string) => Effect.Effect<readonly RemoteLink[], JiraError>;
   readonly projectStatuses: (projectKey: string) => Effect.Effect<ProjectStatuses, JiraError>;
+  /**
+   * Downloads an attachment's content (its `content` URL) with the user's
+   * credentials. Only URLs on the Jira site are fetched.
+   */
+  readonly download: (
+    url: string,
+  ) => Effect.Effect<{ bytes: Uint8Array; mediaType: string }, JiraError>;
   /** One page of a board's sprints from the Agile API; `states` like ["active", "future"]. */
   readonly boardSprints: (
     boardId: number,

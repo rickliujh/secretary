@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect";
 import type { KyInstance } from "ky";
 import { z } from "zod";
 import { resolveCredentials } from "@/services/atlassian/credentials";
+import { authorizationHeader } from "@/services/atlassian/deployment";
 import { Fetcher } from "@/services/http";
 import { HttpFailure, makeAtlassianClient, requestJson } from "@/services/http/json";
 import { Secrets } from "@/services/secrets";
@@ -178,6 +179,37 @@ const make = Effect.gen(function* () {
         { searchParams: { startAt, maxResults: 50, state: states.join(",") } },
         undefined,
         AGILE_PREFIX,
+      ),
+    download: (url) =>
+      Effect.flatMap(credentials(), ({ siteUrl, apiBase, auth }) =>
+        Effect.tryPromise({
+          try: async (signal) => {
+            const allowed = [siteUrl, apiBase].map((u) => new URL(u).origin);
+            if (!allowed.includes(new URL(url).origin))
+              throw new HttpFailure(
+                "http",
+                `Refused to download from outside Jira: ${new URL(url).host}`,
+              );
+            const res = await fetch(url, {
+              headers: { Authorization: authorizationHeader(auth) },
+              signal,
+            });
+            if (res.status === 401 || res.status === 403)
+              throw new HttpFailure("auth", "Jira refused the attachment download.", res.status);
+            if (!res.ok)
+              throw new HttpFailure(
+                "http",
+                `Attachment download failed (${res.status}).`,
+                res.status,
+              );
+            return {
+              bytes: new Uint8Array(await res.arrayBuffer()),
+              mediaType:
+                (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0] ?? "",
+            };
+          },
+          catch: toJiraError,
+        }),
       ),
     remoteLinks: (key) =>
       call(z.array(RemoteLinkSchema), `issue/${encodeURIComponent(key)}/remotelink`),

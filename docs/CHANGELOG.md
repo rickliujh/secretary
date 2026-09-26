@@ -524,3 +524,7 @@ Built
 - All secrets live in one keychain entry, read once per run (design.md D32), so macOS
   asks once instead of once per secret. Existing entries move in on first use.
   Unsigned builds still ask again after each rebuild or update.
+- The chat can look at a ticket's pictures (`view_images`, design.md D33): up to four
+  image attachments, embedded ones first, shrunk in the webview when large, handed to
+  the next model step as an image message. Nothing is saved to disk; the model must
+  accept images.

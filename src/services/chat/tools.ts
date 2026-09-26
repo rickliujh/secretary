@@ -14,12 +14,14 @@ import { type Db, query } from "@/services/db";
 import { listDependencies } from "@/services/dependencies/queries";
 import { searchNoteIds } from "@/services/directory/notes";
 import { Intake } from "@/services/intake";
+import { AttachmentSchema, JiraClient } from "@/services/jira";
 import { describePayload, type ProposalPayload } from "@/services/proposals/schema";
 import { retrievalFtsQuery, tokens } from "@/services/retrieval/ranking";
 import { Settings } from "@/services/settings";
 import { searchTicketKeys, ticketDetail } from "@/services/tickets/queries";
+import { type AttachmentRef, type ImageForModel, pickImages, prepareImage } from "./images";
 
-export type ToolDeps = Db | Settings | Intake | ConfluenceClient;
+export type ToolDeps = Db | Settings | Intake | ConfluenceClient | JiraClient;
 type Exec = <A, E>(effect: Effect.Effect<A, E, ToolDeps>) => Promise<A | { error: string }>;
 
 const clip = (s: string | null | undefined, n: number) =>
@@ -32,7 +34,24 @@ const matches = (haystack: string, text: string) => {
   return words.length > 0 && words.some((w) => h.includes(w));
 };
 
-export function chatTools(exec: Exec) {
+/** The attachments stored with a synced issue. */
+const attachmentsOf = (raw: unknown): AttachmentRef[] => {
+  const list = (raw as { attachment?: unknown } | null)?.attachment;
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((a) => {
+    const r = AttachmentSchema.safeParse(a);
+    return r.success ? [r.data] : [];
+  });
+};
+
+/**
+ * @param showImages receives images a tool fetched, keyed by tool call; the chat
+ *   adds them to the next model step (D33).
+ */
+export function chatTools(
+  exec: Exec,
+  showImages: (toolCallId: string, key: string, images: ImageForModel[]) => void = () => undefined,
+) {
   return {
     search_tickets: tool({
       description: "Find Jira tickets by words in the key, summary, description or comments.",
@@ -90,6 +109,10 @@ export function chatTools(exec: Exec) {
               labels: i.labels,
               updated: i.updated.slice(0, 10),
               description: clip(i.description, 1500),
+              attachments: attachmentsOf(i.raw).map((a) => ({
+                filename: a.filename,
+                type: a.mimeType ?? null,
+              })),
               recentComments: d.comments.slice(-5).map((c) => ({
                 author: c.authorDisplay,
                 at: c.created.slice(0, 10),
@@ -102,6 +125,57 @@ export function chatTools(exec: Exec) {
                 externalRef: x.externalRef,
                 expectedAt: x.expectedAt,
               })),
+            };
+          }),
+        ),
+    }),
+
+    view_images: tool({
+      description:
+        "Look at the pictures attached to a ticket (screenshots in the description or comments). Use it when the question depends on what an image shows. Optionally name the files from get_ticket's attachments.",
+      inputSchema: z.object({
+        key: z.string().describe("Issue key, e.g. PAY-12"),
+        filenames: z.array(z.string()).optional().describe("Only these attachments"),
+      }),
+      execute: ({ key, filenames }, { toolCallId }) =>
+        exec(
+          Effect.gen(function* () {
+            const d = yield* ticketDetail(key.trim().toUpperCase());
+            if (!d) return { error: `No ticket ${key} in the local cache.` };
+            const picked = pickImages(
+              attachmentsOf(d.issue.raw),
+              [d.issue.description ?? "", ...d.comments.map((c) => c.body)],
+              filenames ?? [],
+            );
+            if (!picked.length)
+              return { key: d.issue.key, images: [], note: "No image attachments." };
+            const jira = yield* JiraClient;
+            const shown: ImageForModel[] = [];
+            const skipped: string[] = [];
+            for (const a of picked) {
+              const file = yield* Effect.either(jira.download(a.content ?? ""));
+              if (file._tag === "Left") {
+                skipped.push(`${a.filename} (${file.left.message})`);
+                continue;
+              }
+              const ready = yield* Effect.promise(() =>
+                prepareImage({
+                  filename: a.filename,
+                  mediaType: a.mimeType ?? file.right.mediaType,
+                  data: file.right.bytes,
+                }),
+              );
+              if (ready) shown.push(ready);
+              else skipped.push(`${a.filename} (too large)`);
+            }
+            if (shown.length) showImages(toolCallId, d.issue.key, shown);
+            return {
+              key: d.issue.key,
+              images: shown.map((i) => i.filename),
+              skipped,
+              note: shown.length
+                ? "The images follow in the next message."
+                : "None of the images could be loaded.",
             };
           }),
         ),
