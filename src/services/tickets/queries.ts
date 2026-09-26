@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { issueMeta, jiraComments, jiraIssues } from "@/db/schema";
 import { nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
+import { ISSUE_KEY_RE } from "@/services/proposals/schema";
 import { getState, SYNC_KEYS } from "@/services/sync/state";
 import { ftsQuery, type TicketRow } from "./tree";
 
@@ -39,7 +40,7 @@ export const searchTicketKeys = (text: string) =>
   Effect.gen(function* () {
     const keys = new Set<string>();
     const upper = text.trim().toUpperCase();
-    if (/^[A-Z][A-Z0-9_]+-\d+$/.test(upper)) keys.add(upper);
+    if (ISSUE_KEY_RE.test(upper)) keys.add(upper);
     const match = ftsQuery(text);
     if (!match) return keys;
     const rows = yield* query((db) =>

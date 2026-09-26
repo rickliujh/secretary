@@ -10,6 +10,7 @@ import { CHANNELS, DETAIL, FORMALITY, RESPONSIVENESS } from "@/services/director
 import { NONE } from "@/services/llm/portable";
 import {
   DEPENDENCY_KINDS,
+  ISO_DATE_RE,
   MEMORY_KINDS,
   MESSAGE_INTENTS,
   NEW_REF_RE,
@@ -363,11 +364,10 @@ export function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
   }
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const validDate = (v: unknown) =>
   v === null ||
   v === undefined ||
-  (typeof v === "string" && ISO_DATE.test(v) && !Number.isNaN(Date.parse(v)));
+  (typeof v === "string" && ISO_DATE_RE.test(v) && !Number.isNaN(Date.parse(v)));
 
 /**
  * Business-rule checks the schema cannot express (design.md 7.0 rule 4).

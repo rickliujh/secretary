@@ -4,7 +4,7 @@
  * them. `$new:n` refers to an issue created earlier in the same inbox item.
  */
 import { z } from "zod";
-import { CHANNELS, DETAIL, FORMALITY, RESPONSIVENESS } from "@/services/directory/schema";
+import { ProfileSchema, SUBJECT_TYPES } from "@/services/directory/schema";
 
 export const ISSUE_KEY_RE = /^[A-Z][A-Z0-9_]+-\d+$/;
 export const NEW_REF_RE = /^\$new:\d+$/;
@@ -12,7 +12,8 @@ export const NEW_REF_RE = /^\$new:\d+$/;
 export const IssueKey = z.string().regex(ISSUE_KEY_RE, "Invalid issue key");
 export const NewRef = z.string().regex(NEW_REF_RE, "Invalid $new reference");
 export const IssueRef = z.union([IssueKey, NewRef]);
-export const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
+export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+export const IsoDate = z.string().regex(ISO_DATE_RE, "Use YYYY-MM-DD");
 
 export const ISSUE_TYPES = ["Epic", "Story", "Task", "Sub-task", "Bug"] as const;
 export const DEPENDENCY_KINDS = ["person", "team", "incident", "external"] as const;
@@ -78,15 +79,6 @@ export const LinkDependency = z.object({
   nextFollowupAt: IsoDate.nullable().default(null),
 });
 
-export const ProfileChanges = z.object({
-  tone: z.string().max(200).optional(),
-  formality: z.enum(FORMALITY).optional(),
-  detail: z.enum(DETAIL).optional(),
-  responsiveness: z.enum(RESPONSIVENESS).optional(),
-  preferredChannel: z.enum(CHANNELS).optional(),
-  language: z.string().max(50).optional(),
-});
-
 export const UpdatePerson = z.object({
   kind: z.literal("update_person"),
   personId: z.string().min(1),
@@ -94,7 +86,7 @@ export const UpdatePerson = z.object({
     .object({
       title: z.string().trim().min(1).max(200).optional(),
       responsibilities: z.string().trim().min(1).max(2000).optional(),
-      profile: ProfileChanges.optional(),
+      profile: ProfileSchema.optional(),
     })
     .default({}),
   noteAppend: z.string().trim().min(1).nullable().default(null),
@@ -118,7 +110,7 @@ export const Remember = z.object({
   kind: z.literal("remember"),
   memoryKind: z.enum(MEMORY_KINDS),
   content: z.string().trim().min(1).max(2000),
-  subjectType: z.enum(["team", "person", "issue"]).nullable().default(null),
+  subjectType: z.enum(SUBJECT_TYPES).nullable().default(null),
   subjectId: z.string().nullable().default(null),
 });
 

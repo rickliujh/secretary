@@ -3,9 +3,7 @@
  * actions in the ticket view; Phase 3 proposals map onto the same shapes.
  */
 import { z } from "zod";
-
-const IssueKey = z.string().regex(/^[A-Z][A-Z0-9_]+-\d+$/, "Invalid issue key");
-const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
+import { IsoDate, IssueKey } from "@/services/proposals/schema";
 
 export const JiraActionSchema = z.discriminatedUnion("kind", [
   z.object({
