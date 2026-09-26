@@ -574,3 +574,9 @@ Built
   what you finished, what is in progress, what is new or changed, what is blocked and
   what is next. Status moves and reassignments come from Jira's change history.
   Copy it as Markdown or as plain text for Teams and email.
+
+## Ctrl+W deletes the previous word (2026-09-26)
+
+- Ctrl+W no longer closes the window; in any text field it deletes the word before
+  the cursor, like a terminal (design.md D38). On macOS Cmd+W does the same and the
+  Close Window menu item has no shortcut.

@@ -2,6 +2,7 @@ import { createRootRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { Search } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
+import { useDeleteWordKey } from "@/app/keyboard";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
 import { macOverlay, ownWindowButtons } from "@/app/platform";
 import { useFollowupReminders } from "@/app/reminders";
@@ -34,6 +35,7 @@ function Background() {
   useSyncScheduler();
   useFollowupReminders();
   useAutoCleanup();
+  useDeleteWordKey();
   useStorageWarning();
   return null;
 }
