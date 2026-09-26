@@ -21,7 +21,7 @@ export function ReportControls({
 }) {
   const form = useForm<ReportFormInput, unknown, z.output<typeof ReportForm>>({
     resolver: zodResolver(ReportForm),
-    defaultValues: { period: "workday", days: "5", tracked: false },
+    defaultValues: { period: "workday", days: "5", tracked: false, sprintOnly: true },
   });
   const period = useWatch({ control: form.control, name: "period" });
   const submit = form.handleSubmit(onWrite);
@@ -77,20 +77,36 @@ export function ReportControls({
             </Field>
           )}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <Controller
-              control={form.control}
-              name="tracked"
-              render={({ field }) => (
-                <Field orientation="horizontal" className="w-auto">
-                  <Switch
-                    id="report-tracked"
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                  <FieldLabel htmlFor="report-tracked">Include tracked epics</FieldLabel>
-                </Field>
-              )}
-            />
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <Controller
+                control={form.control}
+                name="sprintOnly"
+                render={({ field }) => (
+                  <Field orientation="horizontal" className="w-auto">
+                    <Switch
+                      id="report-sprint-only"
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                    <FieldLabel htmlFor="report-sprint-only">Current sprint only</FieldLabel>
+                  </Field>
+                )}
+              />
+              <Controller
+                control={form.control}
+                name="tracked"
+                render={({ field }) => (
+                  <Field orientation="horizontal" className="w-auto">
+                    <Switch
+                      id="report-tracked"
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                    <FieldLabel htmlFor="report-tracked">Include tracked epics</FieldLabel>
+                  </Field>
+                )}
+              />
+            </div>
             <Button type="submit" disabled={pending}>
               {pending ? <Loader2 className="animate-spin" /> : <NotebookPen />}
               {pending ? "Writing..." : "Write report"}

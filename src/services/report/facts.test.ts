@@ -33,6 +33,7 @@ const i = (key: string, p: Partial<RecapIssue> = {}): RecapIssue => ({
 
 const inputs = (p: Partial<RecapInputs> = {}): RecapInputs => ({
   me: "me",
+  sprintOnly: false,
   since: SINCE,
   until: "2026-09-26T09:00:00.000Z",
   today: "2026-09-26",
@@ -203,6 +204,26 @@ describe("buildRecapFacts", () => {
       "5 of 10 points done with 1 working day left in PAY 15.",
     ]);
     expect(f.stats).toEqual({ done: 1, pointsDone: 5, inProgress: 2, new: 2, comments: 2 });
+  });
+
+  test("sprint only: tickets outside the active sprint stay out, asks too (D40)", () => {
+    const f = buildRecapFacts({
+      ...base,
+      sprintOnly: true,
+      issues: [
+        ...base.issues,
+        i("NEXT-SPRINT", { sprint: "PAY 16", created: "2026-09-25T08:00:00.000Z" }),
+      ],
+      asks: [{ key: "BACKLOG-1", who: "Tom", what: "Any update?", at: "2026-09-20T09:00:00.000Z" }],
+    });
+    const keys = f.tickets.map((t) => t.key);
+    expect(keys).not.toContain("BACKLOG-1");
+    expect(keys).not.toContain("NEXT-SPRINT");
+    expect(keys).toContain("DONE-1");
+    expect(f.asks.map((a) => a.key)).not.toContain("BACKLOG-1");
+    // With no active sprint there is nothing to limit to.
+    const none = buildRecapFacts({ ...base, sprintOnly: true, activeSprints: new Set() });
+    expect(none.tickets.map((t) => t.key)).toContain("BACKLOG-1");
   });
 
   test("tracked epics bring their tickets in", () => {

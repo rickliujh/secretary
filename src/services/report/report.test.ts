@@ -72,7 +72,8 @@ describe("recap report (D37)", () => {
           yield* syncOnce;
           const set = (key: string, v: Partial<typeof jiraIssues.$inferInsert>) =>
             query((d) => d.update(jiraIssues).set(v).where(eq(jiraIssues.key, key)));
-          yield* set("PAY-2", { assignee: "rliu", updated: hoursAgo(2) });
+          // Both in the fixtures' active sprint, which the report is limited to by default.
+          yield* set("PAY-2", { assignee: "rliu", updated: hoursAgo(2), sprint: "Ops 9" });
           yield* set("PAY-3", {
             assignee: "rliu",
             status: "Done",
@@ -80,6 +81,7 @@ describe("recap report (D37)", () => {
             resolved: hoursAgo(3),
             updated: hoursAgo(3),
             storyPoints: 3,
+            sprint: "Ops 9",
           });
           const reports = yield* Reports;
           const made = yield* reports.generate({
@@ -98,6 +100,7 @@ describe("recap report (D37)", () => {
     expect(r.made.historyMissing).toEqual(["PAY-3"]);
     expect(r.made.stats).toMatchObject({ done: 1, pointsDone: 3 });
     expect(r.made.periodLabel).toBe("Since yesterday");
+    expect(r.made.sprintScope).toContain("Ops 9");
     // The first answer left out the blocked ticket and was repaired.
     expect(r.calls.map((c) => [c.task, c.validationOk])).toEqual([
       ["write_report", false],

@@ -50,6 +50,12 @@ export function ReportView({ report }: { report: Report }) {
         <CardTitle>{report.periodLabel}</CardTitle>
         <CardDescription className="flex flex-wrap items-center gap-x-2">
           <span>{dateRange(report.since, report.until)}</span>
+          <span>
+            ·{" "}
+            {report.sprintScope?.length
+              ? `${report.sprintScope.join(", ")} only`
+              : "All sprints and backlog"}
+          </span>
           <span>· Written {relativeTime(report.generatedAt)}</span>
           {report.model && <span>· {report.model}</span>}
         </CardDescription>

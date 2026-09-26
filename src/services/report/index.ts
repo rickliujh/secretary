@@ -24,7 +24,12 @@ export type ReportPeriod = { kind: "workday" } | { kind: "days"; days: number };
 /** The user's own work, or that plus the tracked epics' tickets. */
 export type ReportScope = "mine" | "mine_and_tracked";
 
-export type ReportRequest = { period: ReportPeriod; scope: ReportScope };
+export type ReportRequest = {
+  period: ReportPeriod;
+  scope: ReportScope;
+  /** Only tickets in the active sprint (D40); default true. No effect without one. */
+  sprintOnly?: boolean;
+};
 
 /** How a report reads (D39); every style is built from the same report data. */
 export const REPORT_STYLES = ["talk_track", "standup", "by_epic", "timeline"] as const;
@@ -107,6 +112,8 @@ export type Report = {
   /** e.g. "Since Friday" or "Last 7 days". */
   periodLabel: string;
   scope: ReportScope;
+  /** The active sprints the report was limited to; empty when it was not limited. */
+  sprintScope: string[];
   /** A 20-second first-person script to read out. */
   talkTrack: string;
   /** One sentence: the period's headline. */

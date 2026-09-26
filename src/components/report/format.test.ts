@@ -45,15 +45,23 @@ describe("report as plain text", () => {
 
 describe("report form", () => {
   test("maps the period choice and scope to a request", () => {
-    expect(ReportForm.parse({ period: "workday", days: "", tracked: false })).toEqual({
+    expect(
+      ReportForm.parse({ period: "workday", days: "", tracked: false, sprintOnly: true }),
+    ).toEqual({
       period: { kind: "workday" },
       scope: "mine",
+      sprintOnly: true,
     });
-    expect(ReportForm.parse({ period: "7", days: "abc", tracked: true })).toEqual({
+    expect(
+      ReportForm.parse({ period: "7", days: "abc", tracked: true, sprintOnly: false }),
+    ).toEqual({
       period: { kind: "days", days: 7 },
       scope: "mine_and_tracked",
+      sprintOnly: false,
     });
-    expect(ReportForm.parse({ period: "custom", days: "10", tracked: false }).period).toEqual({
+    expect(
+      ReportForm.parse({ period: "custom", days: "10", tracked: false, sprintOnly: true }).period,
+    ).toEqual({
       kind: "days",
       days: 10,
     });
@@ -61,7 +69,7 @@ describe("report form", () => {
 
   test("rejects custom days outside 1 to 30 or not whole", () => {
     for (const days of ["", "0", "31", "2.5", "x"]) {
-      const r = ReportForm.safeParse({ period: "custom", days, tracked: false });
+      const r = ReportForm.safeParse({ period: "custom", days, tracked: false, sprintOnly: true });
       expect(r.success).toBe(false);
       expect(r.error?.issues[0]?.path).toEqual(["days"]);
     }

@@ -607,3 +607,9 @@ Built
 
 - The app icon moves to the 8b design, and the sidebar shows it instead of the old
   sparkles logo.
+
+## Report limited to the current sprint (2026-09-26)
+
+- The report covers only tickets in the active sprint, like Top focus (design.md
+  D40); a "Current sprint only" switch widens it to all your tickets. The report
+  header says which sprint it covers.

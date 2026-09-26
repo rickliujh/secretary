@@ -32,6 +32,7 @@ const report: Report = {
   until: "2026-09-25T16:30:00",
   periodLabel: "Last 7 days",
   scope: "mine",
+  sprintScope: ["Payments 15"],
   talkTrack:
     "Finished the refund rounding fix (PAY-412), QA passed. Ledger export (PAY-398) is in review; one change left from Tom on CSV encoding. Bank-file retry (PAY-420) is still blocked on the firewall rule; I chase Network today.",
   headline:

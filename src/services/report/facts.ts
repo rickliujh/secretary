@@ -67,8 +67,34 @@ export type RecapDependency = {
   followups: { at: string; channel: string | null; summary: string | null }[];
 };
 
+/** Who and what a report covers (D37, D40). */
+export type ReportScopeRule = {
+  me: string;
+  tracked: ReadonlySet<string>;
+  activeSprints: ReadonlySet<string>;
+  /** Only tickets in an active sprint; ignored when no sprint is active. */
+  sprintOnly: boolean;
+};
+
+/**
+ * A ticket is in the report when it is the user's (assigned or reported) or under
+ * a tracked epic, and, with `sprintOnly` and an active sprint, in that sprint.
+ */
+export function inReportScope(i: RecapIssue, rule: ReportScopeRule): boolean {
+  const who =
+    i.assignee === rule.me ||
+    i.reporter === rule.me ||
+    (!!i.epicKey && rule.tracked.has(i.epicKey)) ||
+    rule.tracked.has(i.key);
+  if (!who) return false;
+  if (!rule.sprintOnly || rule.activeSprints.size === 0) return true;
+  return !!i.sprint && rule.activeSprints.has(i.sprint);
+}
+
 export type RecapInputs = {
   me: string;
+  /** Only tickets in an active sprint (D40). */
+  sprintOnly: boolean;
   since: string;
   until: string;
   /** Local date, YYYY-MM-DD. */
@@ -247,7 +273,12 @@ export function buildRecapFacts(input: RecapInputs): RecapFacts {
   const inWindow = (iso: string | null) => !!iso && iso >= since;
   const mine = (i: RecapIssue) => i.assignee === me;
   const inScope = (i: RecapIssue) =>
-    mine(i) || i.reporter === me || (!!i.epicKey && tracked.has(i.epicKey)) || tracked.has(i.key);
+    inReportScope(i, {
+      me,
+      tracked,
+      activeSprints: input.activeSprints,
+      sprintOnly: input.sprintOnly,
+    });
   const epicKeys = new Set(input.issues.map((i) => i.epicKey).filter((k): k is string => !!k));
   const isEpic = (i: RecapIssue) => /epic/i.test(i.issueType) || epicKeys.has(i.key);
   const byKey = new Map(input.issues.map((i) => [i.key, i]));
@@ -265,6 +296,7 @@ export function buildRecapFacts(input: RecapInputs): RecapFacts {
   for (const c of input.comments) {
     const issue = byKey.get(c.issueKey);
     if (!issue || c.author === me || !(issue.assignee === me || issue.reporter === me)) continue;
+    if (!inScope(issue)) continue;
     const mentioned = mentions.some((m) => c.body.toLowerCase().includes(m.toLowerCase()));
     if (!c.body.includes("?") && !mentioned) continue;
     asks.set(c.issueKey, {
@@ -274,7 +306,10 @@ export function buildRecapFacts(input: RecapInputs): RecapFacts {
       at: c.created,
     });
   }
-  for (const a of input.asks) if (!asks.has(a.key)) asks.set(a.key, a);
+  for (const a of input.asks) {
+    const issue = byKey.get(a.key);
+    if (!asks.has(a.key) && (!issue || inScope(issue))) asks.set(a.key, a);
+  }
   const askBy = asks;
   const focusRank = new Map(input.focus.map((k, n) => [k, n]));
 
