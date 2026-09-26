@@ -28,6 +28,8 @@ export const ReportForm = z
     /** The custom "Last N days" field, as typed. */
     days: z.string(),
     tracked: z.boolean(),
+    /** Only tickets in the active sprint (D40). */
+    sprintOnly: z.boolean(),
   })
   .superRefine((v, ctx) => {
     if (v.period === "custom" && (v.days.trim() === "" || !CustomDays.safeParse(v.days).success))
@@ -44,6 +46,7 @@ export const ReportForm = z
           ? { kind: "workday" }
           : { kind: "days", days: v.period === "custom" ? Number(v.days) : Number(v.period) },
       scope: v.tracked ? "mine_and_tracked" : "mine",
+      sprintOnly: v.sprintOnly,
     }),
   );
 

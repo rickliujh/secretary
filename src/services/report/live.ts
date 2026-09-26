@@ -26,6 +26,7 @@ import {
   askText,
   buildRecapFacts,
   type HistoryEntry,
+  inReportScope,
   type RecapIssue,
   reportWindow,
 } from "./facts";
@@ -98,12 +99,13 @@ const make = Effect.gen(function* () {
           blockedBy: blockInfo(linksOf(links)).blockedBy,
         }),
       );
-      const inScope = (i: RecapIssue) =>
-        i.assignee === me ||
-        i.reporter === me ||
-        (!!i.epicKey && tracked.has(i.epicKey)) ||
-        tracked.has(i.key);
-      const scoped = issues.filter(inScope);
+      const sprints = parseSprintState(yield* withDb(getState(SYNC_KEYS.sprints))).sprints;
+      const active = sprints.filter((s) => s.state === "active");
+      const activeSprints = new Set(active.map((s) => s.name));
+      const sprintOnly = req.sprintOnly ?? true;
+      const scoped = issues.filter((i) =>
+        inReportScope(i, { me, tracked, activeSprints, sprintOnly }),
+      );
 
       const comments = yield* q((d) =>
         d
@@ -155,8 +157,6 @@ const make = Effect.gen(function* () {
         Effect.provideService(Settings, settingsSvc),
       );
       const dashboard = buildDashboard(inputs, settings.scoring, today, now.toISOString());
-      const sprints = parseSprintState(yield* withDb(getState(SYNC_KEYS.sprints))).sprints;
-      const active = sprints.filter((s) => s.state === "active");
       const mySprint =
         active.find((s) => issues.some((i) => i.sprint === s.name && i.assignee === me)) ?? null;
 
@@ -218,7 +218,8 @@ const make = Effect.gen(function* () {
         until,
         today,
         tracked,
-        activeSprints: new Set(active.map((s) => s.name)),
+        activeSprints,
+        sprintOnly,
         sprint: mySprint,
         focus: dashboard.topFocus.map((f) => f.key),
         issues,
@@ -270,6 +271,7 @@ const make = Effect.gen(function* () {
         until,
         periodLabel: label,
         scope: req.scope,
+        sprintScope: sprintOnly ? [...activeSprints] : [],
         talkTrack: written.talkTrack.trim(),
         headline: written.headline.trim(),
         tickets: facts.tickets.map(({ comments: _, ...t }) => ({
