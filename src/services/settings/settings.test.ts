@@ -20,6 +20,44 @@ describe("Settings schema", () => {
     expect(s.general.outputLanguage).toBe("English");
   });
 
+  test("every section's defaults are filled from its fields", () => {
+    expect(defaultSettings()).toEqual({
+      version: 1,
+      providers: [],
+      tiers: { fast: null, standard: null, strong: null },
+      taskOverrides: {},
+      jira: {
+        baseUrl: "",
+        deployment: "auto",
+        email: "",
+        jql: DEFAULT_JQL,
+        trackedEpics: [],
+        syncIntervalMinutes: 10,
+        fields: {},
+      },
+      confluence: { baseUrl: "", deployment: "auto", email: "" },
+      general: { outputLanguage: "English", fiscalYearStartMonth: 1 },
+      dependencies: { followupDays: 3, reminders: true },
+      scoring: {
+        priority: 3,
+        due: 4,
+        blocked: 2,
+        blocking: 2,
+        stale: 1,
+        dependency: 3,
+        pinned: 10,
+      },
+      network: {
+        proxyMode: "system",
+        proxyUrl: "",
+        noProxy: "localhost,127.0.0.1",
+        proxyUsername: "",
+      },
+    });
+    // Defaults are fresh objects, not one shared instance.
+    expect(defaultSettings().jira.trackedEpics).not.toBe(defaultSettings().jira.trackedEpics);
+  });
+
   test("partial data keeps stored values and fills the rest", async () => {
     const s = await Effect.runPromise(
       decodeSettings({ jira: { baseUrl: "https://jira.example.com" } }),
