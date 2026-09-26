@@ -59,4 +59,4 @@ export interface IntakeShape {
 
 export class Intake extends Context.Tag("Intake")<Intake, IntakeShape>() {}
 
-export const localDate = (d = new Date()) => d.toLocaleDateString("en-CA");
+export { localDate } from "@/lib/dates";

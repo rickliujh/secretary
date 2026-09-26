@@ -5,10 +5,10 @@
 import { and, asc, desc, eq, inArray, isNotNull, lte, ne, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { communications, dependencies, followups, jiraIssues, people, teams } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
 import { Executor, ExecutorError } from "@/services/executor";
-import { localDate } from "@/services/intake";
 import { Settings } from "@/services/settings";
 import {
   addBusinessDays,

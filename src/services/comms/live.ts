@@ -9,6 +9,7 @@ import {
   people,
   teams,
 } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { nowIso } from "@/lib/ids";
 import {
   buildDraftPrompt,
@@ -18,7 +19,6 @@ import {
   validateDraft,
 } from "@/prompts/draft";
 import { Db, query } from "@/services/db";
-import { localDate } from "@/services/intake";
 import { Llm } from "@/services/llm";
 import type { MESSAGE_INTENTS } from "@/services/proposals/schema";
 import { Settings } from "@/services/settings";

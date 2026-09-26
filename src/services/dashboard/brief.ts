@@ -5,6 +5,7 @@
 import { and, count, eq, gt } from "drizzle-orm";
 import { Effect } from "effect";
 import { jiraComments, jiraIssues, proposals } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import {
   type BriefFacts,
   BriefOutputSchema,
@@ -13,7 +14,6 @@ import {
   validateBrief,
 } from "@/prompts/brief";
 import { query } from "@/services/db";
-import { localDate } from "@/services/intake";
 import { Llm } from "@/services/llm";
 import { Settings } from "@/services/settings";
 import { DEFAULT_WEIGHTS } from "@/services/settings/schema";

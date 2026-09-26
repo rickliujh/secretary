@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect, Either, Layer } from "effect";
 import { inboxItems, inboxMessages, intakeItems, memories, people, proposals } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import {
@@ -36,7 +37,6 @@ import { Retrieval } from "@/services/retrieval";
 import {
   Intake,
   IntakeError,
-  localDate,
   type ReplyInput,
   type Source,
   type TriageInput,
