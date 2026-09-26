@@ -1,13 +1,11 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
-import { toast } from "sonner";
 import { z } from "zod";
-import { useErrorToast } from "@/app/hooks";
+import { useAppMutation } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
-import { run } from "@/app/runtime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -165,7 +163,6 @@ export function ProviderDialog({
   provider?: Provider;
 }) {
   const client = useQueryClient();
-  const onError = useErrorToast();
   const [removed, setRemoved] = useState<string[]>([]);
   const form = useForm<FormValues>({
     resolver: zodResolver(Form),
@@ -181,36 +178,35 @@ export function ProviderDialog({
     }
   }, [open, provider, form]);
 
-  const save = useMutation({
-    mutationFn: (v: FormValues) =>
-      run(
-        saveProvider({
-          id: provider?.id,
-          name: v.name,
-          kind: v.kind,
-          baseUrl: v.baseUrl,
-          apiKey: v.apiKey,
-          removeHeaders: removed,
-          addHeaders: parseHeaderLines(v.newHeaders).headers,
-          authStyle: v.authStyle,
-          thinking: v.thinking,
-          effort: v.effort,
-          structuredOutputMode: v.structuredOutputMode,
-          jsonSchemaOutputs: v.jsonSchemaOutputs,
-          sendTemperature: v.sendTemperature,
-          seed: v.seed === "" ? undefined : Number(v.seed),
-        }),
-      ),
-    onSuccess: (saved) => {
-      client.invalidateQueries({ queryKey: queryKeys.settings });
-      client.invalidateQueries({
-        queryKey: queryKeys.secretStatus(secretNames.providerApiKey(saved.id)),
-      });
-      toast.success(`Saved ${saved.name}`);
-      onOpenChange(false);
+  const save = useAppMutation(
+    (v: FormValues) =>
+      saveProvider({
+        id: provider?.id,
+        name: v.name,
+        kind: v.kind,
+        baseUrl: v.baseUrl,
+        apiKey: v.apiKey,
+        removeHeaders: removed,
+        addHeaders: parseHeaderLines(v.newHeaders).headers,
+        authStyle: v.authStyle,
+        thinking: v.thinking,
+        effort: v.effort,
+        structuredOutputMode: v.structuredOutputMode,
+        jsonSchemaOutputs: v.jsonSchemaOutputs,
+        sendTemperature: v.sendTemperature,
+        seed: v.seed === "" ? undefined : Number(v.seed),
+      }),
+    {
+      invalidate: [queryKeys.settings],
+      success: (saved) => `Saved ${saved.name}`,
+      onSuccess: (saved) => {
+        void client.invalidateQueries({
+          queryKey: queryKeys.secretStatus(secretNames.providerApiKey(saved.id)),
+        });
+        onOpenChange(false);
+      },
     },
-    onError: (e) => onError(e),
-  });
+  );
 
   const headerNames = (provider?.headerNames ?? []).filter((h) => !removed.includes(h));
 

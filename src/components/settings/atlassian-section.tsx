@@ -6,7 +6,13 @@ import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
-import { useErrorToast, useSecretStatus, useSettings, useUpdateSettings } from "@/app/hooks";
+import {
+  useAppMutation,
+  useErrorToast,
+  useSecretStatus,
+  useSettings,
+  useUpdateSettings,
+} from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -145,30 +151,24 @@ export function AtlassianSection({ product }: { product: Product }) {
     onError: (e) => onError(e),
   });
 
-  const removePat = useMutation({
-    mutationFn: () => run(Effect.flatMap(Secrets, (s) => s.remove(copy.secret))),
-    onSuccess: () => {
-      toast.success("Token removed from the keychain");
-      setConnectedAs(null);
-      refreshPatStatus();
-    },
-    onError: (e) => onError(e),
+  const removePat = useAppMutation(() => Effect.flatMap(Secrets, (s) => s.remove(copy.secret)), {
+    invalidate: [queryKeys.secretStatus(copy.secret)],
+    success: "Token removed from the keychain",
+    onSuccess: () => setConnectedAs(null),
   });
 
-  const test = useMutation({
-    mutationFn: (values: FormValues) =>
-      run(
-        testConnection(product, {
-          baseUrl: values.baseUrl || undefined,
-          pat: values.pat || undefined,
-          email: values.email || undefined,
-        }),
-      ),
-    onMutate: () => setConnectedAs(null),
-    onSuccess: (user) =>
-      setConnectedAs(user.detail ? `${user.displayName} (${user.detail})` : user.displayName),
-    onError: (e) => onError(e),
-  });
+  const test = useAppMutation(
+    (values: FormValues) =>
+      testConnection(product, {
+        baseUrl: values.baseUrl || undefined,
+        pat: values.pat || undefined,
+        email: values.email || undefined,
+      }),
+    {
+      onSuccess: (user) =>
+        setConnectedAs(user.detail ? `${user.displayName} (${user.detail})` : user.displayName),
+    },
+  );
 
   return (
     <Card>
@@ -270,7 +270,10 @@ export function AtlassianSection({ product }: { product: Product }) {
             type="button"
             variant="outline"
             disabled={test.isPending}
-            onClick={form.handleSubmit((v) => test.mutate(v))}
+            onClick={form.handleSubmit((v) => {
+              setConnectedAs(null);
+              test.mutate(v);
+            })}
           >
             {test.isPending ? "Testing..." : "Test connection"}
           </Button>

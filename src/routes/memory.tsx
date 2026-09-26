@@ -1,11 +1,11 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { Brain, Check, Loader2, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { useErrorToast } from "@/app/hooks";
+import { useAppMutation } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { MemoryDialog } from "@/components/memory/memory-dialog";
@@ -48,16 +48,13 @@ function MemoryPage() {
     queryFn: ({ signal }) => run(listMemories, signal),
   });
   const [editing, setEditing] = useState<MemoryView | null | undefined>(undefined);
-  const onError = useErrorToast();
-  const consolidate = useMutation({
-    mutationFn: () => run(Effect.flatMap(Learning, (l) => l.consolidate)),
+  const consolidate = useAppMutation(() => Effect.flatMap(Learning, (l) => l.consolidate), {
     onSuccess: (r) => {
       if (r.inboxItemId) {
         toast.success(`${r.rules} rule${r.rules === 1 ? "" : "s"} to review`);
         void navigateTo({ to: "/inbox", search: { item: r.inboxItemId } });
       } else toast.info(`No clear pattern in ${r.corrections} corrections yet.`);
     },
-    onError: (e) => onError(e),
   });
   const all = list.data ?? [];
   const kept = all.filter((m) => m.kind !== "example");

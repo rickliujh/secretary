@@ -2,20 +2,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useErrorToast } from "@/app/hooks";
+import { useAppMutation, useErrorToast } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
-import { run } from "@/app/runtime";
+import { type AppServices, run } from "@/app/runtime";
 import { listPeople, listTeams } from "@/services/directory/queries";
 import { Intake, type ReplyInput, type TriageInput, type TriageResult } from "@/services/intake";
 import { type ProposalPayload, Proposals } from "@/services/proposals";
 import { listTicketRows } from "@/services/tickets/queries";
 
 /** Everything a decision can change: inbox, tickets, directory, memories. */
+const DECISION_KEYS = [queryKeys.inbox, queryKeys.tickets, queryKeys.directory];
+
 function useInvalidateAfterDecision() {
   const client = useQueryClient();
   return () => {
-    for (const key of [queryKeys.inbox, queryKeys.tickets, queryKeys.directory])
-      void client.invalidateQueries({ queryKey: key });
+    for (const key of DECISION_KEYS) void client.invalidateQueries({ queryKey: key });
   };
 }
 
@@ -41,11 +42,7 @@ function useIntakeTurn<I>(
     mutationFn: (input: I) => {
       controller.current = new AbortController();
       return run(
-        Effect.flatMap(Intake, (i) => f(i, input, setProgress)) as Effect.Effect<
-          TriageResult,
-          unknown,
-          never
-        >,
+        Effect.flatMap(Intake, (i) => f(i, input, setProgress)),
         controller.current.signal,
       );
     },
@@ -80,34 +77,30 @@ export function useReply() {
   );
 }
 
-function useProposalMutation<A, I>(
-  f: (p: Proposals["Type"], input: I) => Effect.Effect<A, unknown>,
-) {
-  const onError = useErrorToast();
-  const invalidate = useInvalidateAfterDecision();
-  return useMutation({
-    mutationFn: (input: I) =>
-      run(Effect.flatMap(Proposals, (p) => f(p, input)) as Effect.Effect<A, unknown, never>),
-    onError: (e) => onError(e),
-    onSettled: invalidate,
-  });
+/** A decision can partly apply before it fails, so views refresh either way. */
+function useDecisionMutation<A, E, I>(program: (input: I) => Effect.Effect<A, E, AppServices>) {
+  return useAppMutation(program, { invalidate: DECISION_KEYS, invalidateOnError: true });
 }
 
+const withProposals =
+  <A, E, I>(f: (p: Proposals["Type"], input: I) => Effect.Effect<A, E>) =>
+  (input: I) =>
+    Effect.flatMap(Proposals, (p) => f(p, input));
+
 export function useDecisions() {
-  const onError = useErrorToast();
-  const invalidate = useInvalidateAfterDecision();
-  const approve = useProposalMutation((p, i: { id: string; edited?: ProposalPayload }) =>
-    p.approve(i.id, i.edited),
+  const approve = useDecisionMutation(
+    withProposals((p, i: { id: string; edited?: ProposalPayload }) => p.approve(i.id, i.edited)),
   );
-  const reject = useProposalMutation((p, id: string) => p.reject(id));
-  const approveAll = useProposalMutation((p, inboxItemId: string) => p.approveAll(inboxItemId));
-  const dismiss = useProposalMutation((p, inboxItemId: string) => p.dismiss(inboxItemId));
-  const retriage = useMutation({
-    mutationFn: (inboxItemId: string) =>
-      run(Effect.flatMap(Intake, (i) => i.retriage(inboxItemId))),
-    onError: (e) => onError(e),
-    onSettled: invalidate,
-  });
+  const reject = useDecisionMutation(withProposals((p, id: string) => p.reject(id)));
+  const approveAll = useDecisionMutation(
+    withProposals((p, inboxItemId: string) => p.approveAll(inboxItemId)),
+  );
+  const dismiss = useDecisionMutation(
+    withProposals((p, inboxItemId: string) => p.dismiss(inboxItemId)),
+  );
+  const retriage = useDecisionMutation((inboxItemId: string) =>
+    Effect.flatMap(Intake, (i) => i.retriage(inboxItemId)),
+  );
   return { approve, reject, approveAll, dismiss, retriage };
 }
 
