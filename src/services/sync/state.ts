@@ -19,6 +19,8 @@ export const SYNC_KEYS = {
   projectMeta: "jira.projectMeta",
   /** JSON SprintState: every known sprint with dates, for the sprint calendar (D23). */
   sprints: "jira.sprints",
+  /** JSON CleanupResult of the last storage cleanup (D34). */
+  lastCleanup: "app.lastCleanup",
 } as const;
 
 export const getState = (key: string) =>

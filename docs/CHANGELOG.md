@@ -528,3 +528,14 @@ Built
   image attachments, embedded ones first, shrunk in the webview when large, handed to
   the next model step as an image message. Nothing is saved to disk; the model must
   accept images.
+
+## Storage cleanup (2026-09-26)
+
+- A cleanup runs a minute after start and then daily (design.md D34): model usage
+  records after 90 days, tickets that left the sync scope 30 days ago (with their
+  comments), and inbox context snapshots after 180 days (emptied; threads, proposals and
+  decisions stay; evaluation replay skips them). The database is compacted when more
+  than 20 MB is free. Cleanup waits while a sync is running.
+- Logs rotate at 2 MB and keep three files; import backups keep the newest three.
+- Settings > Data > Storage shows the database size, the last cleanup and a "Clean up
+  now" button. The user's own records are never removed automatically.

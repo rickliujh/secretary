@@ -2,6 +2,7 @@ import { createRootRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { Search } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
+import { useCleanupScheduler } from "@/app/cleanup";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
 import { useFollowupReminders } from "@/app/reminders";
 import { useSyncScheduler } from "@/app/sync";
@@ -29,6 +30,7 @@ const ALL_NAV = [...WORK_NAV, ...CONTEXT_NAV, SETTINGS_NAV];
 function Background() {
   useSyncScheduler();
   useFollowupReminders();
+  useCleanupScheduler();
   return null;
 }
 

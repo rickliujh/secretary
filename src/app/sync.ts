@@ -42,6 +42,9 @@ export function useSyncStatus(): SyncStatus | null {
   );
 }
 
+/** True while a sync run is writing; cleanup waits for it. */
+export const syncRunning = () => !!current?.running;
+
 export const runSync = (full = false) => run(Effect.flatMap(Sync, (s) => s.run({ full })));
 
 const STARTUP_DELAY_MS = 3000;

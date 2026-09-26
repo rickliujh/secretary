@@ -165,6 +165,8 @@ const make = Effect.gen(function* () {
       for (const p of decided)
         byItem.set(p.intakeItemId ?? "", [...(byItem.get(p.intakeItemId ?? "") ?? []), p]);
       const items = rows
+        // Snapshots older than the retention window are emptied (D34); they cannot be replayed.
+        .filter((r) => !(r.snapshot as { pruned?: boolean }).pruned)
         .filter((r) => {
           const ps = byItem.get(r.id) ?? [];
           return (

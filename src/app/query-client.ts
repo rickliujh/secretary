@@ -13,6 +13,7 @@ export const queryKeys = {
   usage: ["llm-usage"] as const,
   recentCalls: ["llm-calls"] as const,
   dataPaths: ["data-paths"] as const,
+  storage: ["storage"] as const,
   tickets: ["tickets"] as const,
   ticketRows: ["tickets", "rows"] as const,
   /** Under "tickets" so sync, decisions and dependency changes refresh it. */
