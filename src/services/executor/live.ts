@@ -7,7 +7,7 @@ import { logger } from "@/lib/log";
 import { redactValue } from "@/lib/redact";
 import { Db, query } from "@/services/db";
 import { CreatedIssueSchema, JiraClient } from "@/services/jira";
-import { issueRefs, NEW_REF_RE, type ProposalPayload } from "@/services/proposals/schema";
+import { issueRefs, type ProposalPayload } from "@/services/proposals/schema";
 import { Sync } from "@/services/sync";
 import {
   describeAction,
@@ -217,7 +217,7 @@ const make = Effect.gen(function* () {
     opts: { proposalId: string; inboxItemId: string | null },
   ) =>
     Effect.gen(function* () {
-      const unresolved = issueRefs(payload).filter((r) => NEW_REF_RE.test(r));
+      const unresolved = issueRefs(payload, { only: "new" });
       if (unresolved.length) {
         return yield* fail(
           "invalid",

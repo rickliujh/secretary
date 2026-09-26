@@ -172,21 +172,41 @@ export const effectivePayload = (row: {
   readonly editedPayload: unknown;
 }): ProposalPayload => (row.editedPayload ?? row.payload) as ProposalPayload;
 
-/** Issue references a payload depends on, for ordering and failure propagation. */
-export function issueRefs(p: ProposalPayload): string[] {
+export type IssueRefsOptions = {
+  /** `"new"` keeps only `$new:n` refs, `"keys"` only real issue keys. */
+  only?: "new" | "keys";
+  /** Include the `$new` ref a create_issue defines, not just the ones it points at. */
+  includeOwn?: boolean;
+};
+
+/**
+ * Issue references a payload points at: for ordering and failure propagation,
+ * for linking thread items through `$new` refs, and for keeping real keys as
+ * retrieval candidates.
+ */
+export function issueRefs(p: ProposalPayload, opts: IssueRefsOptions = {}): string[] {
+  const values: (string | null)[] = [];
   switch (p.kind) {
     case "create_issue":
-      return [p.parent, p.epic].filter((x): x is string => !!x);
+      if (opts.includeOwn) values.push(p.ref);
+      values.push(p.parent, p.epic);
+      break;
     case "update_issue":
     case "add_comment":
     case "transition_issue":
     case "link_dependency":
-      return [p.target];
+      values.push(p.target);
+      break;
     case "draft_message":
-      return p.issueKeys;
+      values.push(...p.issueKeys);
+      break;
     default:
-      return [];
+      break;
   }
+  return values.filter(
+    (v): v is string =>
+      !!v && (opts.only === undefined || NEW_REF_RE.test(v) === (opts.only === "new")),
+  );
 }
 
 /** Replaces `$new:n` references with created keys. Unknown refs are left as they are. */

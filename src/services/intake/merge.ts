@@ -4,7 +4,7 @@
  * across items collapses to the first, and exact duplicates are dropped.
  */
 import type { MappedProposal } from "@/prompts/classify";
-import { NEW_REF_RE, type ProposalPayload, resolveRefs } from "@/services/proposals/schema";
+import { type ProposalPayload, resolveRefs } from "@/services/proposals/schema";
 
 export type MergedProposal = MappedProposal & { itemIndex: number };
 
@@ -80,5 +80,3 @@ export function mergeItemProposals(
     .sort((a, b) => refNum(a.m.payload) - refNum(b.m.payload) || a.i - b.i)
     .map(({ m }) => m);
 }
-
-export const isNewRef = (v: string) => NEW_REF_RE.test(v);

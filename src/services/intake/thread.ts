@@ -3,7 +3,7 @@
  * input and which is instruction, and which items a revision must include.
  */
 import { z } from "zod";
-import { NEW_REF_RE, type ProposalPayload } from "@/services/proposals/schema";
+import { issueRefs, type ProposalPayload } from "@/services/proposals/schema";
 import { SOURCES } from ".";
 
 export const MessagePartSchema = z.object({
@@ -57,28 +57,6 @@ export function partsOf(input: string, instruction: string | null, inputIsTyped:
   return parts;
 }
 
-/** `$new` refs a payload creates or points at. */
-export function refsOf(p: ProposalPayload): string[] {
-  const values: (string | null)[] = [];
-  switch (p.kind) {
-    case "create_issue":
-      values.push(p.ref, p.parent, p.epic);
-      break;
-    case "update_issue":
-    case "add_comment":
-    case "transition_issue":
-    case "link_dependency":
-      values.push(p.target);
-      break;
-    case "draft_message":
-      values.push(...p.issueKeys);
-      break;
-    default:
-      break;
-  }
-  return values.filter((v): v is string => !!v && NEW_REF_RE.test(v));
-}
-
 /**
  * Items to revise: the chosen ones plus every item linked to them through a `$new`
  * ref in their pending proposals, since refs are renumbered when proposals are
@@ -89,7 +67,11 @@ export function withLinkedItems(
   pendingByItem: ReadonlyMap<number, readonly ProposalPayload[]>,
 ): number[] {
   const refs = new Map<number, Set<string>>();
-  for (const [item, payloads] of pendingByItem) refs.set(item, new Set(payloads.flatMap(refsOf)));
+  for (const [item, payloads] of pendingByItem)
+    refs.set(
+      item,
+      new Set(payloads.flatMap((p) => issueRefs(p, { only: "new", includeOwn: true }))),
+    );
   const out = new Set(chosen);
   let grew = true;
   while (grew) {
