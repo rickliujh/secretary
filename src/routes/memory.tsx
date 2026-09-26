@@ -10,7 +10,7 @@ import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { MemoryDialog } from "@/components/memory/memory-dialog";
 import { useMemoryMutation } from "@/components/memory/use-memory";
-import { PageHeader } from "@/components/page";
+import { EmptyState, PageHeader } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -81,10 +81,10 @@ function MemoryPage() {
             <MemoryCard key={m.id} memory={m} onEdit={() => setEditing(m)} />
           ))}
           {list.isSuccess && kept.length === 0 && (
-            <Empty>
-              Nothing yet. Add a rule such as “anything about the billing migration goes under
-              PAY-1”, or approve a “remember” proposal in the Inbox.
-            </Empty>
+            <EmptyState
+              icon={Brain}
+              description="Nothing yet. Add a rule such as “anything about the billing migration goes under PAY-1”, or approve a “remember” proposal in the Inbox."
+            />
           )}
         </TabsContent>
         <TabsContent value="corrections" className="mt-4 flex flex-col gap-2">
@@ -104,10 +104,10 @@ function MemoryPage() {
             <CorrectionCard key={m.id} memory={m} />
           ))}
           {list.isSuccess && corrections.length === 0 && (
-            <Empty>
-              When you edit, reject or ask for a change to a proposal, the change is kept here and
-              shown to the model next time something similar comes in.
-            </Empty>
+            <EmptyState
+              icon={Brain}
+              description="When you edit, reject or ask for a change to a proposal, the change is kept here and shown to the model next time something similar comes in."
+            />
           )}
         </TabsContent>
       </Tabs>
@@ -116,15 +116,6 @@ function MemoryPage() {
         onOpenChange={(o) => !o && setEditing(undefined)}
         memory={editing}
       />
-    </div>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-      <Brain className="size-6" />
-      <p className="max-w-md">{children}</p>
     </div>
   );
 }

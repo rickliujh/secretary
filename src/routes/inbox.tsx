@@ -8,6 +8,7 @@ import { run } from "@/app/runtime";
 import { Composer, toTriageInput } from "@/components/inbox/composer";
 import { ThreadView } from "@/components/inbox/thread-view";
 import { useTriage } from "@/components/inbox/use-inbox";
+import { EmptyState } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -102,14 +103,12 @@ function NewThread({ onStarted }: { onStarted: (id: string) => void }) {
   const triage = useTriage(onStarted);
   return (
     <div className="flex h-full flex-col justify-end gap-6">
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-        <MessagesSquare className="size-8 text-muted-foreground" />
-        <h2 className="text-lg font-semibold">Start a thread</h2>
-        <p className="max-w-md text-sm text-muted-foreground">
-          Paste a Teams message, an email or meeting notes and say what you want done. The secretary
-          proposes Jira actions; ask for changes in the thread, then approve.
-        </p>
-      </div>
+      <EmptyState
+        className="border-0"
+        icon={MessagesSquare}
+        title="Start a thread"
+        description="Paste a Teams message, an email or meeting notes and say what you want done. The secretary proposes Jira actions; ask for changes in the thread, then approve."
+      />
       <Composer
         withSender
         busy={triage.isPending}

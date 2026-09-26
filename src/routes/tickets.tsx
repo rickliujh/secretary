@@ -9,7 +9,7 @@ import { useTicketRows } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { runSync, useSyncStatus } from "@/app/sync";
-import { PageHeader, Planned } from "@/components/page";
+import { EmptyState, PageHeader } from "@/components/page";
 import { TicketSheet } from "@/components/tickets/ticket-sheet";
 import { TicketTable } from "@/components/tickets/ticket-table";
 import { Button } from "@/components/ui/button";
@@ -96,18 +96,18 @@ function TicketsPage() {
     return (
       <>
         <PageHeader title="Tickets" />
-        <Planned
+        <EmptyState
           icon={ListTree}
           title="Jira is not connected"
           description="Add your Jira base URL and personal access token in Settings, then sync."
+          action={
+            <Button asChild>
+              <Link to="/settings" search={{ tab: "jira" }}>
+                Open Jira settings
+              </Link>
+            </Button>
+          }
         />
-        <div className="mt-4 flex justify-center">
-          <Button asChild>
-            <Link to="/settings" search={{ tab: "jira" }}>
-              Open Jira settings
-            </Link>
-          </Button>
-        </div>
       </>
     );
   }
