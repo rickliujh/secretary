@@ -9,6 +9,7 @@ import { Data, Effect } from "effect";
 import { z } from "zod";
 import {
   actionsLog,
+  chatConversations,
   communications,
   contextNotes,
   dependencies,
@@ -49,6 +50,7 @@ export const EXPORTED_TABLES = [
   proposals,
   actionsLog,
   memories,
+  chatConversations,
 ] as const satisfies readonly SQLiteTable[];
 
 export class TransferError extends Data.TaggedError("TransferError")<{

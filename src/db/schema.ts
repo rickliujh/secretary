@@ -408,6 +408,19 @@ export const memories = sqliteTable(
 // Operations
 // ---------------------------------------------------------------------------
 
+/** Chat page conversations (design.md D28); `messages` are AI SDK UI messages. */
+export const chatConversations = sqliteTable(
+  "chat_conversations",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    messages: text("messages", { mode: "json" }).$type<unknown[]>().notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [index("chat_conversations_updated_idx").on(t.updatedAt)],
+);
+
 export const llmCalls = sqliteTable(
   "llm_calls",
   {

@@ -41,6 +41,8 @@ export const queryKeys = {
     ["dependencies", "list", includeResolved, issueKey ?? ""] as const,
   dependency: (id: string) => ["dependencies", "detail", id] as const,
   memories: ["memories"] as const,
+  chats: ["chats"] as const,
+  chat: (id: string) => ["chats", id] as const,
   drafts: ["drafts"] as const,
   draftList: ["drafts", "list"] as const,
   draft: (id: string) => ["drafts", "detail", id] as const,
