@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
+import { type Lookups, useLookups } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import {
@@ -29,7 +30,7 @@ import type { MessagePart } from "@/services/intake/thread";
 import { describePayload } from "@/services/proposals/schema";
 import { Composer, type ComposerMessage, SOURCE_LABELS } from "./composer";
 import { ProposalCard } from "./proposal-card";
-import { type Lookups, useDecisions, useLookups, useReply } from "./use-inbox";
+import { useDecisions, useReply } from "./use-inbox";
 
 function PastedText({ text, source }: { text: string; source: string | null }) {
   const [open, setOpen] = useState(false);

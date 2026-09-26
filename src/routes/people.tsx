@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { useErrorToast } from "@/app/hooks";
+import { usePeople, useTeams } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { PersonDialog } from "@/components/directory/person-dialog";
@@ -31,12 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  createPerson,
-  jiraUsersWithoutContact,
-  listPeople,
-  listTeams,
-} from "@/services/directory/queries";
+import { createPerson, jiraUsersWithoutContact } from "@/services/directory/queries";
 import type { Profile } from "@/services/directory/schema";
 import { exportDirectory, importDirectory } from "@/services/directory/transfer";
 
@@ -105,14 +101,8 @@ function PeoplePage() {
   const navigate = useNavigate({ from: "/people" });
   const [text, setText] = useState("");
   const [adding, setAdding] = useState(false);
-  const people = useQuery({
-    queryKey: queryKeys.people,
-    queryFn: ({ signal }) => run(listPeople, signal),
-  });
-  const teams = useQuery({
-    queryKey: queryKeys.teams,
-    queryFn: ({ signal }) => run(listTeams, signal),
-  });
+  const people = usePeople();
+  const teams = useTeams();
   const suggestions = useQuery({
     queryKey: queryKeys.jiraUserSuggestions,
     queryFn: ({ signal }) => run(jiraUsersWithoutContact, signal),

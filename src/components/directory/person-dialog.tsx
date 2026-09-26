@@ -1,11 +1,9 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
-import { queryKeys } from "@/app/query-client";
-import { run } from "@/app/runtime";
+import { useTeams } from "@/app/queries";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,7 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { createPerson, listTeams, type Person, updatePerson } from "@/services/directory/queries";
+import { createPerson, type Person, updatePerson } from "@/services/directory/queries";
 import {
   CHANNELS,
   DETAIL,
@@ -158,11 +156,7 @@ export function PersonDialog({
   onOpenChange: (open: boolean) => void;
   onSaved?: (id: string) => void;
 }) {
-  const teams = useQuery({
-    queryKey: queryKeys.teams,
-    queryFn: ({ signal }) => run(listTeams, signal),
-    enabled: open,
-  });
+  const teams = useTeams({ enabled: open });
   const form = useForm<FormValues>({
     resolver: zodResolver(Form),
     defaultValues: toForm(person ?? initial),

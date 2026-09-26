@@ -4,6 +4,7 @@ import { ListTree, Search } from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 import { z } from "zod";
 import { useSettings } from "@/app/hooks";
+import { useTicketRows } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { runSync, useSyncStatus } from "@/app/sync";
@@ -22,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { currentJiraUsername, listTicketRows, searchTicketKeys } from "@/services/tickets/queries";
+import { currentJiraUsername, searchTicketKeys } from "@/services/tickets/queries";
 import {
   buildTree,
   isFiltering,
@@ -57,10 +58,7 @@ function TicketsPage() {
     queryFn: ({ signal }) => run(currentJiraUsername, signal),
   }).data;
 
-  const rows = useQuery({
-    queryKey: queryKeys.ticketRows,
-    queryFn: ({ signal }) => run(listTicketRows, signal),
-  });
+  const rows = useTicketRows();
   const search = useQuery({
     queryKey: queryKeys.ticketSearch(q),
     queryFn: ({ signal }) => run(searchTicketKeys(q), signal),

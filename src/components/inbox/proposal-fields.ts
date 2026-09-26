@@ -2,6 +2,8 @@
  * Edit-form field specs per proposal kind. Values are flattened to strings by
  * path for react-hook-form and rebuilt into a payload that is re-validated.
  */
+
+import type { Lookups } from "@/app/queries";
 import { CHANNELS, DETAIL, FORMALITY, RESPONSIVENESS } from "@/services/directory/schema";
 import {
   DEPENDENCY_KINDS,
@@ -11,7 +13,6 @@ import {
   type ProposalKind,
   type ProposalPayload,
 } from "@/services/proposals/schema";
-import type { Lookups } from "./use-inbox";
 
 export type FieldSpec = {
   path: string;

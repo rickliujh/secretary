@@ -3,9 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
+import { useLookups } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
-import { useLookups } from "@/components/inbox/use-inbox";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import {

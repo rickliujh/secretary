@@ -1,9 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { queryKeys } from "@/app/query-client";
-import { run } from "@/app/runtime";
+import { usePendingCount } from "@/app/queries";
 import { BriefPanel } from "@/components/dashboard/brief-panel";
 import { EpicHealth } from "@/components/dashboard/epic-health";
 import { FocusList } from "@/components/dashboard/focus-list";
@@ -20,7 +18,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { relativeTime } from "@/lib/time";
-import { pendingCount } from "@/services/inbox/queries";
 
 export const Route = createFileRoute("/")({ component: Dashboard });
 
@@ -78,10 +75,7 @@ function IssueLine({
 
 function Dashboard() {
   const { data, isPending, isError } = useDashboard();
-  const pending = useQuery({
-    queryKey: queryKeys.pendingCount,
-    queryFn: ({ signal }) => run(pendingCount, signal),
-  });
+  const pending = usePendingCount();
 
   if (isPending) return <Loader2 className="m-6 animate-spin text-muted-foreground" />;
   if (isError || !data) return <Empty>The dashboard could not be loaded.</Empty>;

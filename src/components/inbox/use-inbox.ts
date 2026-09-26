@@ -1,14 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAppMutation, useErrorToast } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { type AppServices, run } from "@/app/runtime";
-import { listPeople, listTeams } from "@/services/directory/queries";
 import { Intake, type ReplyInput, type TriageInput, type TriageResult } from "@/services/intake";
 import { type ProposalPayload, Proposals } from "@/services/proposals";
-import { listTicketRows } from "@/services/tickets/queries";
 
 /** Everything a decision can change: inbox, tickets, directory, memories. */
 const DECISION_KEYS = [queryKeys.inbox, queryKeys.tickets, queryKeys.directory];
@@ -103,31 +101,3 @@ export function useDecisions() {
   );
   return { approve, reject, approveAll, dismiss, retriage };
 }
-
-/** Names for keys and ids shown on proposal cards. */
-export function useLookups() {
-  const tickets = useQuery({
-    queryKey: queryKeys.ticketRows,
-    queryFn: ({ signal }) => run(listTicketRows, signal),
-  });
-  const people = useQuery({
-    queryKey: queryKeys.people,
-    queryFn: ({ signal }) => run(listPeople, signal),
-  });
-  const teams = useQuery({
-    queryKey: queryKeys.teams,
-    queryFn: ({ signal }) => run(listTeams, signal),
-  });
-  return useMemo(
-    () => ({
-      issue: new Map((tickets.data ?? []).map((t) => [t.key, t])),
-      person: new Map((people.data ?? []).map((p) => [p.id, p])),
-      team: new Map((teams.data ?? []).map((t) => [t.id, t])),
-      people: people.data ?? [],
-      teams: teams.data ?? [],
-      tickets: tickets.data ?? [],
-    }),
-    [tickets.data, people.data, teams.data],
-  );
-}
-export type Lookups = ReturnType<typeof useLookups>;

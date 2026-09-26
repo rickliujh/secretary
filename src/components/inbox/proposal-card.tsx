@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Check, Loader2, Pencil, RotateCcw, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import type { Lookups } from "@/app/queries";
 import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
 import { NEW_REF_RE, PROPOSAL_LABELS, type ProposalPayload } from "@/services/proposals/schema";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
-import { type Lookups, useDecisions } from "./use-inbox";
+import { useDecisions } from "./use-inbox";
 
 const STATUS_TONE: Record<string, string> = {
   pending: "bg-amber-500/15 text-amber-700 dark:text-amber-300",

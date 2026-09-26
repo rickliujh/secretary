@@ -1,16 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Plus, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
-import { queryKeys } from "@/app/query-client";
-import { run } from "@/app/runtime";
+import { usePeople, useTeams } from "@/app/queries";
 import { TeamDialog } from "@/components/directory/team-dialog";
 import { TeamSheet } from "@/components/directory/team-sheet";
 import { PageHeader } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { listPeople, listTeams } from "@/services/directory/queries";
 
 export const Route = createFileRoute("/teams")({
   validateSearch: z.object({ id: z.string().optional() }),
@@ -21,14 +18,8 @@ function TeamsPage() {
   const { id } = Route.useSearch();
   const navigate = useNavigate({ from: "/teams" });
   const [adding, setAdding] = useState(false);
-  const teams = useQuery({
-    queryKey: queryKeys.teams,
-    queryFn: ({ signal }) => run(listTeams, signal),
-  });
-  const people = useQuery({
-    queryKey: queryKeys.people,
-    queryFn: ({ signal }) => run(listPeople, signal),
-  });
+  const teams = useTeams();
+  const people = usePeople();
   const counts = useMemo(() => {
     const m = new Map<string, number>();
     for (const p of people.data ?? []) if (p.teamId) m.set(p.teamId, (m.get(p.teamId) ?? 0) + 1);

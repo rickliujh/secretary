@@ -1,11 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
 import { Coins } from "lucide-react";
-import { queryKeys } from "@/app/query-client";
-import { run, SESSION_STARTED_AT } from "@/app/runtime";
+import { useSessionUsage } from "@/app/queries";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TIERS } from "@/services/llm/tasks";
-import { usageSince } from "@/services/llm/usage";
 
 export const formatTokens = (n: number) =>
   n >= 1_000_000
@@ -16,9 +13,7 @@ export const formatTokens = (n: number) =>
 
 /** Session token total with a per-tier breakdown (FR-9.5). */
 export function UsageIndicator() {
-  const { data } = useQuery({
-    queryKey: queryKeys.usage,
-    queryFn: ({ signal }) => run(usageSince(SESSION_STARTED_AT), signal),
+  const { data } = useSessionUsage({
     refetchInterval: 15_000,
   });
   const total = data ? data.inputTokens + data.outputTokens : 0;

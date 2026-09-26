@@ -1,5 +1,6 @@
 import { ClipboardPaste, CornerDownLeft, Loader2, Type, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { usePeople } from "@/app/queries";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -12,7 +13,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { SOURCES, type Source } from "@/services/intake";
 import { SenderPicker } from "./sender-picker";
-import { useLookups } from "./use-inbox";
 
 export const SOURCE_LABELS: Record<Source, string> = {
   teams: "Teams",
@@ -63,7 +63,7 @@ export function Composer({
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [source, setSource] = useState<Source>(defaultSource === "typed" ? "teams" : defaultSource);
   const [sender, setSender] = useState<string | null>(null);
-  const { people } = useLookups();
+  const people = usePeople().data ?? [];
   const canSend = !busy && (typed.trim() !== "" || blocks.length > 0);
 
   const send = () => {
