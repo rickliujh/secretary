@@ -602,3 +602,8 @@ Built
   machine).
 - New app icon: the macOS version with its inset rounded tile, the Windows and Linux
   version full-bleed.
+
+## Icon 8b in the app and the sidebar (2026-09-26)
+
+- The app icon moves to the 8b design, and the sidebar shows it instead of the old
+  sparkles logo.
