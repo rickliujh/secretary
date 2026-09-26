@@ -79,7 +79,10 @@ describe("sync and executor against the mock Jira", () => {
           );
           const meta = parseProjectMeta(yield* getState(SYNC_KEYS.projectMeta));
           const sprints = parseSprintState(yield* getState(SYNC_KEYS.sprints));
-          return { first, second, count, changed, stored, meta, sprints };
+          const points = (yield* query((db) =>
+            db.select({ p: jiraIssues.storyPoints }).from(jiraIssues).all(),
+          )).map((x) => x.p);
+          return { first, second, count, changed, stored, meta, sprints, points };
         }),
         layer,
       ),
@@ -90,6 +93,10 @@ describe("sync and executor against the mock Jira", () => {
     expect(r.second.fetched).toBeGreaterThanOrEqual(1);
     expect(r.second.fetched).toBeLessThan(issues.size);
     expect(r.changed?.summary).toBe("Changed in Jira");
+    // Story Points are discovered by name and stored per issue (D30).
+    expect(r.changed?.storyPoints).toBe(story.points);
+    expect(r.points.filter((p) => p !== null).length).toBeGreaterThan(0);
+    expect(r.points).toContain(null);
     // Jira received wiki markup and the cache shows Jira's version.
     expect(story.comments.at(-1)?.body).toBe("*Chased* Ana");
     expect(r.stored.at(-1)?.body).toBe("*Chased* Ana");

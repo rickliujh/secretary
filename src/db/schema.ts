@@ -45,6 +45,7 @@ export const jiraIssues = sqliteTable(
     labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
     components: text("components", { mode: "json" }).$type<string[]>().notNull().default([]),
     sprint: text("sprint"),
+    storyPoints: real("story_points"),
     dueDate: text("due_date"),
     created: text("created").notNull(),
     updated: text("updated").notNull(),

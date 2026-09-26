@@ -89,5 +89,19 @@
       "custom": "com.pyxis.greenhopper.jira:gh-lexo-rank",
       "customId": 10105
     }
+  },
+  {
+    "id": "customfield_10106",
+    "name": "Story Points",
+    "custom": true,
+    "orderable": true,
+    "navigable": true,
+    "searchable": true,
+    "clauseNames": ["cf[10106]", "Story Points"],
+    "schema": {
+      "type": "number",
+      "custom": "com.atlassian.jira.plugin.system.customfieldtypes:float",
+      "customId": 10106
+    }
   }
 ]

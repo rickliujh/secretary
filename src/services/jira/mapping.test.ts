@@ -4,7 +4,7 @@ import page1 from "@/test/fixtures/jira/search-page-1.json";
 import page2 from "@/test/fixtures/jira/search-page-2.json";
 import { jiraDateToIso, toJqlDate } from "./dates";
 import { discoverFieldIds, effectiveFieldIds, jqlFieldRef } from "./fields";
-import { currentSprint, issueFields, mapIssue, parseSprints } from "./mapping";
+import { currentSprint, issueFields, mapIssue, parseSprints, parseStoryPoints } from "./mapping";
 import { FieldSchema, SearchPageSchema } from "./schemas";
 
 const fieldIds = discoverFieldIds(fields.map((f) => FieldSchema.parse(f)));
@@ -17,20 +17,80 @@ const byKey = (key: string) => {
 };
 
 describe("field discovery", () => {
-  test("finds Epic Link, Epic Name and Sprint by custom type", () => {
+  test("finds Epic Link, Epic Name and Sprint by custom type, Story Points by name", () => {
     expect(fieldIds).toEqual({
       epicLink: "customfield_10100",
       epicName: "customfield_10102",
       sprint: "customfield_10104",
+      storyPoints: "customfield_10106",
     });
   });
 
   test("overrides win; blanks fall back to discovery", () => {
-    expect(effectiveFieldIds(fieldIds, { epicLink: "customfield_1", epicName: " " })).toEqual({
+    expect(
+      effectiveFieldIds(fieldIds, {
+        epicLink: "customfield_1",
+        epicName: " ",
+        storyPoints: "customfield_2",
+      }),
+    ).toEqual({
       epicLink: "customfield_1",
       epicName: "customfield_10102",
       sprint: "customfield_10104",
+      storyPoints: "customfield_2",
     });
+  });
+
+  const field = (id: string, name: string, type: string, custom?: string) =>
+    FieldSchema.parse({ id, name, custom: true, schema: { type, custom } });
+
+  test("Story Points on Data Center: a float field named Story Points", () => {
+    const dc = [
+      field(
+        "customfield_1",
+        "Budget",
+        "number",
+        "com.atlassian.jira.plugin.system.customfieldtypes:float",
+      ),
+      field(
+        "customfield_2",
+        "Story Points",
+        "number",
+        "com.atlassian.jira.plugin.system.customfieldtypes:float",
+      ),
+    ];
+    expect(discoverFieldIds(dc).storyPoints).toBe("customfield_2");
+  });
+
+  test("Story Points on Cloud: the exact type wins over a legacy Story Points field", () => {
+    const cloud = [
+      field(
+        "customfield_10028",
+        "Story Points",
+        "number",
+        "com.atlassian.jira.plugin.system.customfieldtypes:float",
+      ),
+      field(
+        "customfield_10016",
+        "Story point estimate",
+        "number",
+        "com.pyxis.greenhopper.jira:jsw-story-points",
+      ),
+    ];
+    expect(discoverFieldIds(cloud).storyPoints).toBe("customfield_10016");
+    expect(discoverFieldIds(cloud.slice(0, 1)).storyPoints).toBe("customfield_10028");
+  });
+
+  test("Story Points by name prefers a number field and ignores unrelated names", () => {
+    expect(
+      discoverFieldIds([
+        field("customfield_3", "story points", "string"),
+        field("customfield_4", "Story Points", "number"),
+      ]).storyPoints,
+    ).toBe("customfield_4");
+    expect(
+      discoverFieldIds([field("customfield_5", "Points", "number")]).storyPoints,
+    ).toBeUndefined();
   });
 
   test("custom field ids become cf[] references", () => {
@@ -40,6 +100,7 @@ describe("field discovery", () => {
 
   test("requested fields include discovered custom fields", () => {
     expect(issueFields(fieldIds)).toContain("customfield_10104");
+    expect(issueFields(fieldIds)).toContain("customfield_10106");
   });
 });
 
@@ -156,6 +217,28 @@ describe("mapIssue", () => {
       },
       { id: 51, name: "Undated", state: "future", boardId: 12, start: null, end: null },
     ]);
+  });
+
+  test("story points: numbers and numeric strings; everything else is null", () => {
+    expect(byKey("PAY-2").issue.storyPoints).toBe(5);
+    expect(byKey("OPS-7").issue.storyPoints).toBe(3);
+    expect(byKey("PAY-4").issue.storyPoints).toBe(2);
+    expect(byKey("PAY-3").issue.storyPoints).toBeNull();
+    expect(byKey("PAY-1").issue.storyPoints).toBeNull();
+    expect(parseStoryPoints(0.5)).toBe(0.5);
+    expect(parseStoryPoints(" 8 ")).toBe(8);
+    expect(parseStoryPoints("")).toBeNull();
+    expect(parseStoryPoints("large")).toBeNull();
+    expect(parseStoryPoints(Number.NaN)).toBeNull();
+    expect(parseStoryPoints({ value: 3 })).toBeNull();
+    expect(parseStoryPoints(true)).toBeNull();
+  });
+
+  test("story points are null when the field is not discovered", () => {
+    const raw = issues.find((i) => i.key === "PAY-2");
+    if (!raw) throw new Error("PAY-2");
+    const noPoints = { ...ctx, fieldIds: { ...fieldIds, storyPoints: undefined } };
+    expect(mapIssue(raw, noPoints).issue.storyPoints).toBeNull();
   });
 
   test("a parent that is an Epic is treated as the epic link", () => {
