@@ -449,3 +449,32 @@ export const syncState = sqliteTable("sync_state", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+// ---------------------------------------------------------------------------
+// Data sources (D41): notes from outside Jira the chat can search. A cache,
+// rebuilt from the source folders; not exported.
+// ---------------------------------------------------------------------------
+
+export const sourceDocuments = sqliteTable(
+  "source_documents",
+  {
+    /** `${sourceId}:${path}`. */
+    id: text("id").primaryKey(),
+    sourceId: text("source_id").notNull(),
+    /** Path inside the source, with forward slashes, e.g. "Projects/Ledger.md". */
+    path: text("path").notNull(),
+    title: text("title").notNull(),
+    aliases: text("aliases", { mode: "json" }).$type<string[]>().notNull().default([]),
+    tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
+    /** Link targets as written, e.g. "Ledger export" from [[Ledger export|the export]]. */
+    links: text("links", { mode: "json" }).$type<string[]>().notNull().default([]),
+    frontmatter: text("frontmatter", { mode: "json" }).$type<Record<string, unknown>>(),
+    /** Markdown without the frontmatter. */
+    body: text("body").notNull(),
+    /** File modification time (ms) and size, to skip unchanged files. */
+    mtime: integer("mtime").notNull(),
+    size: integer("size").notNull(),
+    indexedAt: text("indexed_at").notNull(),
+  },
+  (t) => [index("source_documents_source_idx").on(t.sourceId)],
+);

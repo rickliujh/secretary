@@ -89,6 +89,22 @@ export const ScoringWeightsSchema = z.object({
 export type ScoringWeights = z.infer<typeof ScoringWeightsSchema>;
 export const DEFAULT_WEIGHTS: ScoringWeights = ScoringWeightsSchema.parse({});
 
+/** A folder of notes the secretary can search (D41). Only Obsidian vaults for now. */
+export const DataSourceSchema = z.object({
+  id: z.string().min(1),
+  kind: z.literal("obsidian"),
+  name: z.string().trim().min(1),
+  /** Absolute path of the vault folder, as picked in the folder dialog. */
+  path: z.string().min(1),
+  enabled: z.boolean().default(true),
+  /**
+   * Vault-relative folders or files left out of the index, e.g. "Private" or
+   * "Journal/2024". Dot folders (.obsidian, .trash, .git) are always left out.
+   */
+  exclude: z.array(z.string()).default([]),
+});
+export type DataSource = z.infer<typeof DataSourceSchema>;
+
 export const SettingsSchema = z.object({
   version: z.literal(1).default(1),
   providers: z.array(ProviderSchema).default([]),
@@ -118,6 +134,7 @@ export const SettingsSchema = z.object({
     })
     .prefault({}),
   scoring: ScoringWeightsSchema.prefault({}),
+  dataSources: z.array(DataSourceSchema).default([]),
   report: z
     .object({
       /** The report style shown and copied (D39). */
