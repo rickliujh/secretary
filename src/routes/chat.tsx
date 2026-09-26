@@ -1,168 +1,92 @@
-import { useChat } from "@ai-sdk/react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { isToolUIPart } from "ai";
-import { AlertCircle, CornerDownLeft, MessagesSquare, RotateCcw, Square } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
-import { useSettings } from "@/app/hooks";
-import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from "@/components/ai-elements/conversation";
-import { ToolStep } from "@/components/chat/tool-step";
-import { SecretaryTransport } from "@/components/chat/transport";
-import { Markdown } from "@/components/markdown";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { z } from "zod";
+import { useErrorToast } from "@/app/hooks";
+import { queryKeys } from "@/app/query-client";
+import { run } from "@/app/runtime";
+import { ChatThread } from "@/components/chat/chat-thread";
+import { forgetChat, lastChat } from "@/components/chat/store";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { TIERS, type Tier } from "@/services/llm/tasks";
+import { newId } from "@/lib/ids";
+import { relativeTime } from "@/lib/time";
+import { cn } from "@/lib/utils";
+import { deleteConversation, listConversations } from "@/services/chat/history";
 
-export const Route = createFileRoute("/chat")({ component: ChatPage });
+export const Route = createFileRoute("/chat")({
+  validateSearch: z.object({ c: z.string().optional() }),
+  component: ChatPage,
+});
 
-const SUGGESTIONS = [
-  "What should I focus on today?",
-  "What am I waiting on, and what is overdue?",
-  "Who should I ask about Kubernetes?",
-];
-const ROUTED = "routed";
-
-/** Ask the secretary (FR-8, design.md D25). Changes go through the Inbox. */
+/** Ask the secretary (FR-8, D25) with saved conversations (D28). */
 function ChatPage() {
-  const { data: settings } = useSettings();
-  const [tier, setTier] = useState<string>(ROUTED);
-  const tierRef = useRef<Tier | undefined>(undefined);
-  tierRef.current = tier === ROUTED ? undefined : (tier as Tier);
-  const transport = useMemo(() => new SecretaryTransport(() => tierRef.current), []);
-  const { messages, sendMessage, status, stop, error, regenerate, setMessages } = useChat({
-    transport,
+  const { c } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const client = useQueryClient();
+  const onError = useErrorToast();
+  const list = useQuery({
+    queryKey: queryKeys.chats,
+    queryFn: ({ signal }) => run(listConversations, signal),
   });
-  const [input, setInput] = useState("");
-  const busy = status === "submitted" || status === "streaming";
+  // A new conversation gets an id now and is saved with its first answer.
+  const [fresh] = useState(newId);
+  const id = c ?? lastChat() ?? (list.isSuccess ? (list.data[0]?.id ?? fresh) : null);
+  const open = (next: string) => navigate({ search: { c: next } });
 
-  const send = (text: string) => {
-    if (!text.trim() || busy) return;
-    void sendMessage({ text: text.trim() });
-    setInput("");
-  };
+  const remove = useMutation({
+    mutationFn: (target: string) => run(deleteConversation(target)),
+    onSuccess: (_r, target) => {
+      forgetChat(target);
+      void client.invalidateQueries({ queryKey: queryKeys.chats });
+      if (target === id) open(newId());
+    },
+    onError: (e) => onError(e),
+  });
 
   return (
-    <div className="mx-auto flex h-full min-h-0 max-w-3xl flex-col gap-3">
-      <Conversation className="min-h-0 flex-1">
-        <ConversationContent className="gap-5 p-2">
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center gap-3 pt-16 text-center">
-              <MessagesSquare className="size-8 text-muted-foreground" />
-              <h2 className="text-lg font-semibold">Ask the secretary</h2>
-              <p className="max-w-md text-sm text-muted-foreground">
-                Questions are answered from your synced tickets, dependencies, contacts and notes.
-                Ask for a change and it prepares proposals in the Inbox for you to approve.
-              </p>
-              <div className="flex flex-wrap justify-center gap-2">
-                {SUGGESTIONS.map((s) => (
-                  <Button key={s} variant="outline" size="sm" onClick={() => send(s)}>
-                    {s}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-          {messages.map((m) =>
-            m.role === "user" ? (
-              <div
-                key={m.id}
-                className="ml-auto max-w-[85%] rounded-lg bg-muted px-3 py-2 text-sm whitespace-pre-wrap"
-              >
-                {m.parts.map((p) => (p.type === "text" ? p.text : "")).join("")}
-              </div>
-            ) : (
-              <div key={m.id} className="flex flex-col gap-2">
-                {m.parts.map((p, i) =>
-                  p.type === "text" ? (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: parts only append.
-                    <Markdown key={i} className="text-sm">
-                      {p.text}
-                    </Markdown>
-                  ) : isToolUIPart(p) ? (
-                    <ToolStep
-                      key={p.toolCallId}
-                      part={p as Parameters<typeof ToolStep>[0]["part"]}
-                    />
-                  ) : null,
+    <div className="flex h-full min-h-0 gap-6">
+      <aside className="flex w-72 shrink-0 flex-col gap-3">
+        <Button variant="outline" onClick={() => open(newId())}>
+          <Plus /> New chat
+        </Button>
+        <ul className="min-h-0 flex-1 overflow-y-auto">
+          {(list.data ?? []).map((conv) => (
+            <li key={conv.id} className="group flex items-center">
+              <button
+                type="button"
+                onClick={() => open(conv.id)}
+                className={cn(
+                  "flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-3 py-2 text-left hover:bg-muted",
+                  conv.id === id && "bg-muted",
                 )}
-              </div>
-            ),
+              >
+                <span className="line-clamp-2 text-sm">{conv.title}</span>
+                <span className="text-xs text-muted-foreground">
+                  {relativeTime(conv.updatedAt)}
+                </span>
+              </button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                aria-label={`Delete "${conv.title}"`}
+                onClick={() => remove.mutate(conv.id)}
+              >
+                <Trash2 />
+              </Button>
+            </li>
+          ))}
+          {list.isSuccess && list.data.length === 0 && (
+            <li className="px-3 py-6 text-center text-sm text-muted-foreground">
+              Past conversations appear here.
+            </li>
           )}
-          {status === "submitted" && <p className="text-sm text-muted-foreground">Thinking...</p>}
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle />
-              <AlertTitle>No answer</AlertTitle>
-              <AlertDescription className="flex flex-col items-start gap-2">
-                <span>{error.message}</span>
-                <Button size="sm" variant="outline" onClick={() => void regenerate()}>
-                  <RotateCcw /> Try again
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
-      <div className="flex flex-col gap-2 rounded-lg border p-2">
-        <Textarea
-          aria-label="Ask the secretary"
-          className="min-h-0 resize-none border-0 shadow-none focus-visible:ring-0"
-          rows={2}
-          placeholder="Ask about your tickets, dependencies or people, or ask for a change."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              send(input);
-            }
-          }}
-        />
-        <div className="flex items-center gap-2">
-          <Select value={tier} onValueChange={setTier}>
-            <SelectTrigger size="sm" className="w-44" aria-label="Model tier">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ROUTED}>Chat's usual tier</SelectItem>
-              {TIERS.filter((t) => settings?.tiers[t]).map((t) => (
-                <SelectItem key={t} value={t}>
-                  {t} ({settings?.tiers[t]?.model})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {messages.length > 0 && !busy && (
-            <Button size="sm" variant="ghost" onClick={() => setMessages([])}>
-              New chat
-            </Button>
-          )}
-          <span className="ml-auto text-xs text-muted-foreground">
-            Nothing changes until you approve it in the Inbox.
-          </span>
-          {busy ? (
-            <Button size="sm" variant="outline" onClick={() => void stop()}>
-              <Square /> Stop
-            </Button>
-          ) : (
-            <Button size="sm" disabled={!input.trim()} onClick={() => send(input)}>
-              <CornerDownLeft /> Send
-            </Button>
-          )}
-        </div>
-      </div>
+        </ul>
+      </aside>
+      <section className="mx-auto flex min-h-0 min-w-0 max-w-3xl flex-1 flex-col">
+        {id && <ChatThread key={id} id={id} />}
+      </section>
     </div>
   );
 }

@@ -414,3 +414,16 @@ Checklist
   `transfer.test.ts`.
 - Fresh install reaching a working dashboard: to be checked by the user on the built
   bundle.
+
+## Chat history (2026-09-26)
+
+Why: testing showed chat conversations vanished when switching pages and had no
+history (design.md D28, superseding D25's "not stored").
+
+Built
+- `chat_conversations` table (migration 0009): title from the first question and the
+  UI messages as JSON, saved after every answer, including stopped or failed ones.
+  Included in the full export.
+- Chats stay in memory while the app runs, so leaving the Chat page and coming back
+  shows the same conversation, even mid-answer; the page reopens the last one.
+- Chat page: a list of past conversations with delete, and "New chat".
