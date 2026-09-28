@@ -8,6 +8,7 @@ import {
   Settings,
   SettingsSchema,
 } from ".";
+import { DEFAULT_SUGGESTED_PROMPTS } from "./schema";
 import { makeSettingsTest } from "./test";
 
 describe("Settings schema", () => {
@@ -39,6 +40,7 @@ describe("Settings schema", () => {
       general: { outputLanguage: "English", fiscalYearStartMonth: 1 },
       dependencies: { followupDays: 3, reminders: true },
       dataSources: [],
+      suggestedPrompts: DEFAULT_SUGGESTED_PROMPTS,
       obsidian: { cliPath: "" },
       report: { style: "talk_track" },
       storage: { limitMb: 1024, autoCleanup: true },

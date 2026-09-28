@@ -89,6 +89,30 @@ export const ScoringWeightsSchema = z.object({
 export type ScoringWeights = z.infer<typeof ScoringWeightsSchema>;
 export const DEFAULT_WEIGHTS: ScoringWeights = ScoringWeightsSchema.parse({});
 
+/** A one-click question for the chat, shown on the dashboard (D42). */
+export const SuggestedPromptSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1).max(40),
+  message: z.string().trim().min(1).max(1000),
+});
+export type SuggestedPrompt = z.infer<typeof SuggestedPromptSchema>;
+
+export const DEFAULT_SUGGESTED_PROMPTS: SuggestedPrompt[] = [
+  {
+    id: "plan-my-day",
+    title: "Plan My Day",
+    message:
+      "Plan my day: pull my active sprint work, what is due or at risk, what people are waiting on me for, follow-ups due today, approvals waiting in my Inbox, and anything relevant in my notes. Give me a short plan in the order I should work.",
+  },
+  { id: "top-priorities", title: "Top Priorities", message: "What are my top priorities today?" },
+  {
+    id: "pending-decisions",
+    title: "Pending Decisions",
+    message: "Do I have any pending decisions or approvals?",
+  },
+  { id: "weekly-look-ahead", title: "Weekly Look-Ahead", message: "Give me a weekly look-ahead." },
+];
+
 /** A vault of notes the secretary can search through the Obsidian CLI (D41). */
 export const DataSourceSchema = z.object({
   id: z.string().min(1),
@@ -131,6 +155,8 @@ export const SettingsSchema = z.object({
     .prefault({}),
   scoring: ScoringWeightsSchema.prefault({}),
   dataSources: z.array(DataSourceSchema).default([]),
+  /** Dashboard questions for the chat, in order (D42). */
+  suggestedPrompts: z.array(SuggestedPromptSchema).max(12).default(DEFAULT_SUGGESTED_PROMPTS),
   obsidian: z
     .object({
       /** Full path of the `obsidian` command when it is not where Obsidian installs it. */

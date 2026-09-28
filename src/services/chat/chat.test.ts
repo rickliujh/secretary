@@ -6,6 +6,7 @@ import { jiraIssues, proposals } from "@/db/schema";
 import { query } from "@/services/db";
 import { createDependency } from "@/services/dependencies/queries";
 import { createTeam } from "@/services/directory/queries";
+import { Intake } from "@/services/intake";
 import { FIXTURE_VAULT_DIR, loadVaultFromDisk } from "@/services/sources/test";
 import { getState, SYNC_KEYS, setState } from "@/services/sync/state";
 import { drainStream, promptOf } from "@/test/helpers";
@@ -328,5 +329,58 @@ describe("notes from an Obsidian vault (D41)", () => {
     expect(toolOutputs(chunks)[0]).toMatchObject({
       error: expect.stringContaining("Settings > Data sources"),
     });
+  });
+});
+
+describe("suggested prompt tools (D42)", () => {
+  test("pending_decisions lists what waits in the Inbox; week_ahead lists the coming days", async () => {
+    const pending = {
+      summary: "Move PAY-2",
+      question: null,
+      confidence: 0.9,
+      proposals: [
+        {
+          kind: "transition_issue",
+          target: "PAY-2",
+          toStatus: "In Review",
+          rationale: "r",
+          evidence: "e",
+          confidence: 0.9,
+        },
+      ],
+    };
+    const { layer } = intakeTestLayer({
+      "std-m": [
+        out(pending),
+        { toolCall: { name: "pending_decisions", input: {} } },
+        { toolCall: { name: "week_ahead", input: {} } },
+        { text: "One approval is waiting." },
+      ],
+    });
+    const chunks = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          yield* (yield* Intake).triage({
+            text: "PAY-2 is ready for review",
+            source: "teams",
+            senderPersonId: null,
+            today: "2026-09-24",
+          });
+          const stream = yield* (yield* Chat).stream({
+            messages: ask("Do I have any pending decisions or approvals?"),
+          });
+          return yield* Effect.promise(() => drainStream(stream));
+        }),
+        layer,
+      ),
+    );
+    const [decisions, week] = toolOutputs(chunks) as [
+      { inbox: { approve: string[] }[] },
+      { events: unknown[]; days: number },
+    ];
+    expect(decisions.inbox[0]?.approve[0]).toContain("PAY-2");
+    expect(week.days).toBe(7);
+    expect(Array.isArray(week.events)).toBe(true);
   });
 });

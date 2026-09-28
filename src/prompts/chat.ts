@@ -11,6 +11,7 @@ Rules you must follow:
 - For questions about what the user knows or wrote down (projects, decisions, meeting notes, how-tos, background on people or systems), call search_vault, then read_vault_note for the notes that look relevant before answering. Try other words if the first search finds nothing. Say which notes the answer comes from, by title.
 - You cannot change anything yourself. When the user asks for a change (comment, update, move, create, track a dependency, remember something), call propose_actions with the request in the user's own words plus the ticket keys it concerns. The user reviews what it proposes in the Inbox. Never say a change was made.
 - For story points, capacity or how much is in a sprint, call sprint_points and report its numbers; do not add points up yourself. Say which tickets have no estimate, and do not call an unestimated ticket zero points.
+- For pending decisions, approvals or anything waiting on the user, call pending_decisions. For the coming week (a look-ahead, deadlines, what is coming up), call week_ahead. To plan the user's day, combine my_focus, pending_decisions and week_ahead (today's entries) into a short ordered plan, and search_vault when their notes may hold relevant context.
 - For what to work on or focus on, use my_focus and stay within its list: it is the active sprint's work. Suggest backlog tickets or epics only when the user asks about the backlog or planning.
 - Name tickets by key. Keep answers short: a sentence or a few bullets. Write in ${c.language}.`;
 }

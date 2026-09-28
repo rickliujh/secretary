@@ -6,7 +6,16 @@ import { tool } from "ai";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { Effect } from "effect";
 import { z } from "zod";
-import { contextNotes, jiraIssues, people, proposals, teams } from "@/db/schema";
+import {
+  communications,
+  contextNotes,
+  inboxItems,
+  jiraIssues,
+  people,
+  proposals,
+  teams,
+} from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { ConfluenceClient } from "@/services/confluence";
 import { textToCql, webUrl } from "@/services/confluence/cql";
 import { dashboardWithBrief } from "@/services/dashboard/brief";
@@ -23,6 +32,7 @@ import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sources } from "@/services/sources";
 import { getState, parseFieldIds, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { searchTicketKeys, ticketDetail } from "@/services/tickets/queries";
+import { pendingDecisions, weekAhead } from "./agenda";
 import { type AttachmentRef, type ImageForModel, pickImages, prepareImage } from "./images";
 
 export type ToolDeps = Db | Settings | Intake | ConfluenceClient | JiraClient | Sources;
@@ -458,6 +468,148 @@ export function chatTools(
               truncated: n.body.length > NOTE_CHARS,
               linkedFrom: n.backlinks.slice(0, 30),
             };
+          }),
+        ),
+    }),
+
+    pending_decisions: tool({
+      description:
+        "What waits on a decision from the user: proposals to approve and questions to answer in the Inbox (by thread, with how long they have waited), people waiting on the user, follow-ups due, and drafts not sent yet.",
+      inputSchema: z.object({}),
+      execute: () =>
+        exec(
+          Effect.gen(function* () {
+            const today = localDate();
+            const rows = yield* query((d) =>
+              d
+                .select({
+                  inboxItemId: proposals.inboxItemId,
+                  kind: proposals.kind,
+                  payload: proposals.payload,
+                  editedPayload: proposals.editedPayload,
+                  createdAt: proposals.createdAt,
+                  threadSummary: inboxItems.summary,
+                  receivedAt: inboxItems.receivedAt,
+                })
+                .from(proposals)
+                .innerJoin(inboxItems, eq(inboxItems.id, proposals.inboxItemId))
+                .where(eq(proposals.status, "pending"))
+                .all(),
+            );
+            const drafts = yield* query((d) =>
+              d
+                .select({
+                  issueKeys: communications.issueKeys,
+                  createdAt: communications.createdAt,
+                  person: people.displayName,
+                  team: teams.name,
+                })
+                .from(communications)
+                .leftJoin(people, eq(people.id, communications.recipientPersonId))
+                .leftJoin(teams, eq(teams.id, communications.recipientTeamId))
+                .where(eq(communications.status, "draft"))
+                .all(),
+            );
+            const decisions = pendingDecisions(
+              rows.map((r) => {
+                const payload = (r.editedPayload ?? r.payload) as ProposalPayload;
+                return {
+                  inboxItemId: r.inboxItemId ?? "",
+                  threadSummary: r.threadSummary,
+                  receivedAt: r.receivedAt,
+                  kind: r.kind,
+                  description: describePayload(payload),
+                  question: payload.kind === "needs_clarification" ? payload.question : null,
+                  createdAt: r.createdAt,
+                };
+              }),
+              drafts.map((d) => ({
+                to: d.person ?? d.team ?? "someone",
+                issueKeys: d.issueKeys,
+                updatedAt: d.createdAt,
+              })),
+              today,
+            );
+            const { dashboard: dash } = yield* dashboardWithBrief();
+            return {
+              ...decisions,
+              waitingOnMe: dash.waitingOnMe.map((w) => ({
+                key: w.issue.key,
+                summary: w.issue.summary,
+                why: w.reasons,
+              })),
+              followupsDue: dash.iAmWaitingOn
+                .filter((d) => d.followupDue)
+                .map((d) => ({ issueKey: d.issueKey, label: d.label, owner: d.ownerName })),
+            };
+          }),
+        ),
+    }),
+
+    week_ahead: tool({
+      description:
+        "The next seven days, day by day: tickets due, answers expected from people and teams, follow-ups to make, and the sprint's end with points done; plus what is at risk.",
+      inputSchema: z.object({}),
+      execute: () =>
+        exec(
+          Effect.gen(function* () {
+            const today = localDate();
+            const { dashboard: dash } = yield* dashboardWithBrief();
+            const deps = yield* listDependencies({});
+            const me = (yield* getState(SYNC_KEYS.username)) ?? null;
+            const sprints = parseSprintState(yield* getState(SYNC_KEYS.sprints)).sprints;
+            const issues = yield* query((d) =>
+              d
+                .select({
+                  key: jiraIssues.key,
+                  summary: jiraIssues.summary,
+                  issueType: jiraIssues.issueType,
+                  isSubtask: jiraIssues.isSubtask,
+                  status: jiraIssues.status,
+                  statusCategory: jiraIssues.statusCategory,
+                  assignee: jiraIssues.assignee,
+                  assigneeDisplay: jiraIssues.assigneeDisplay,
+                  sprint: jiraIssues.sprint,
+                  storyPoints: jiraIssues.storyPoints,
+                })
+                .from(jiraIssues)
+                .where(and(eq(jiraIssues.stale, false), isNotNull(jiraIssues.sprint)))
+                .all(),
+            );
+            const active = pickSprint(sprints, issues, me);
+            const points = active && me ? sprintPoints(issues, active.name, me) : null;
+            return weekAhead({
+              today,
+              dueSoon: dash.dueSoon.map((i) => ({
+                key: i.key,
+                summary: i.summary,
+                dueDate: i.dueDate,
+                status: i.status,
+              })),
+              dependencies: deps
+                .filter((d) => d.status !== "resolved")
+                .map((d) => ({
+                  issueKey: d.issueKey,
+                  label: d.label,
+                  owner: d.owner.name,
+                  expectedAt: d.expectedAt,
+                  nextFollowupAt: d.nextFollowupAt,
+                })),
+              sprint:
+                active && active.state === "active"
+                  ? {
+                      name: active.name,
+                      end: active.end,
+                      total: points?.total ?? 0,
+                      done: points?.done ?? 0,
+                    }
+                  : null,
+              atRisk: dash.atRisk.map((r) => ({
+                key: r.issue.key,
+                summary: r.issue.summary,
+                why: r.reasons,
+              })),
+            });
           }),
         ),
     }),

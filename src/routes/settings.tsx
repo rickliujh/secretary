@@ -8,6 +8,7 @@ import { GeneralSection } from "@/components/settings/general-section";
 import { JiraSyncSection } from "@/components/settings/jira-sync-section";
 import { ModelsSection } from "@/components/settings/models-section";
 import { NetworkSection } from "@/components/settings/network-section";
+import { PromptsCard } from "@/components/settings/prompts-card";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RankingSection } from "@/components/settings/ranking-section";
 import { SourcesSection } from "@/components/settings/sources-section";
@@ -47,6 +48,7 @@ function SettingsPage() {
         </TabsList>
         <TabsContent value="general" className="flex flex-col gap-4">
           <GeneralSection />
+          <PromptsCard />
           <NetworkSection />
         </TabsContent>
         <TabsContent value="providers">
