@@ -18,6 +18,8 @@ export type EvalCase = {
   instruction?: string;
   /** A typed reply in the thread after the first turn; `expect` scores the result. */
   followUp?: string;
+  /** A pasted reply in the thread after the first turn (new input); `expect` scores the result. */
+  followUpPaste?: string;
   /** Corrections the user made before (FR-7.2), present only while this case runs. */
   corrections?: {
     input: string;
@@ -29,6 +31,36 @@ export type EvalCase = {
 };
 
 export const EVAL_CASES: EvalCase[] = [
+  {
+    name: "cancellation gets a comment saying why",
+    source: "teams",
+    sender: "ana",
+    text: "The payments team is relocating to the Lisbon office next month, so we won't do the ledger export for invoices (PAY-2) anymore. Please close it out.",
+    expect: {
+      required: [
+        { kind: "transition_issue", target: "PAY-2" },
+        { kind: "add_comment", target: "PAY-2" },
+      ],
+      forbiddenKinds: ["create_issue"],
+    },
+    single: true,
+  },
+  {
+    name: "a later paste says 'that ticket' about an earlier one",
+    source: "teams",
+    sender: "tom",
+    text: "PAY-4: refund totals are off by one cent for some currencies.",
+    followUpPaste:
+      "Ana: finance confirmed the rounding is expected behaviour, so there is nothing to fix. Please close that ticket and note why.",
+    expect: {
+      required: [
+        { kind: "transition_issue", target: "PAY-4" },
+        { kind: "add_comment", target: "PAY-4" },
+      ],
+      forbiddenKinds: ["create_issue"],
+    },
+    single: false,
+  },
   {
     name: "comment on an explicit issue",
     source: "teams",

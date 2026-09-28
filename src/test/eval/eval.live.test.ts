@@ -193,6 +193,12 @@ const runCases = (cases: EvalCase[]) =>
               instruction: c.followUp,
               today: TODAY,
             });
+          if (c.followUpPaste)
+            yield* intake.reply({
+              inboxItemId: first.inboxItemId,
+              text: c.followUpPaste,
+              today: TODAY,
+            });
           return first;
         }),
       );

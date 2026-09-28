@@ -631,3 +631,17 @@ Built
   fixed reading the tab-separated `file` output and repeated search lines.
 - Live eval (GLM 5.3 Flash) answers a decision-and-owner question from a test vault,
   naming the notes.
+
+## Suggested prompts, thread context, cancellations explained (2026-09-28)
+
+- Dashboard: a "suggested prompts" card beside At risk (Plan My Day, Top Priorities,
+  Pending Decisions, Weekly Look-Ahead) opens the chat with the question; edit, add,
+  remove and reorder them in Settings > General (design.md D42). The chat's empty
+  screen shows the same list. New chat tools `pending_decisions` and `week_ahead`
+  answer the last two from code.
+- Inbox threads: every item now sees the rest of the conversation and the tickets
+  named in it, so a later paste can say "that ticket" (D43).
+- Closing or cancelling a ticket comes with a comment saying why; a cancellation
+  without one is sent back to the model (D43).
+- Live eval: two new cases (a cancellation with its reason, a later paste referring
+  to an earlier ticket) pass with GLM 5.3 Flash.
