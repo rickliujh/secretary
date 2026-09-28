@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import type { Lookups } from "@/app/queries";
+import { IssueCombobox } from "@/components/tickets/issue-combobox";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,6 +32,7 @@ import {
   fieldName,
   fromFormValues,
   isEditable,
+  issueOptions,
   toFormValues,
 } from "./proposal-fields";
 
@@ -90,6 +92,26 @@ export function ProposalEditDialog({
                   <FieldLabel htmlFor={id}>{spec.label}</FieldLabel>
                   {spec.type === "textarea" ? (
                     <Textarea id={id} rows={5} {...form.register(name)} />
+                  ) : spec.type === "issue" ? (
+                    <Controller
+                      control={form.control}
+                      name={name}
+                      render={({ field }) => (
+                        <IssueCombobox
+                          id={id}
+                          value={field.value ?? ""}
+                          onChange={field.onChange}
+                          options={issueOptions(
+                            lookups.tickets,
+                            spec.issues ?? "any",
+                            form.watch(fieldName("projectKey")) || undefined,
+                          )}
+                          placeholder={
+                            spec.issues === "epic" ? "Choose an epic" : "Choose an issue"
+                          }
+                        />
+                      )}
+                    />
                   ) : spec.type === "select" ? (
                     <Controller
                       control={form.control}

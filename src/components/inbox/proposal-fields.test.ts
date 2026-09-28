@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ProposalPayloadSchema } from "@/services/proposals/schema";
-import { fromFormValues, isEditable, toFormValues } from "./proposal-fields";
+import { fromFormValues, isEditable, issueOptions, toFormValues } from "./proposal-fields";
 
 describe("proposal edit form values", () => {
   test("round trip keeps unchanged payloads identical", () => {
@@ -73,5 +73,41 @@ describe("kinds without an edit form", () => {
         ProposalPayloadSchema.parse({ kind: "add_comment", target: "PAY-2", bodyMd: "x" }),
       ),
     ).toBe(true);
+  });
+});
+
+describe("issueOptions", () => {
+  const t = (key: string, p: Partial<Parameters<typeof issueOptions>[0][number]> = {}) => ({
+    key,
+    summary: key,
+    issueType: "Story",
+    isSubtask: false,
+    projectKey: key.split("-")[0] ?? "",
+    epicKey: null,
+    statusCategory: "indeterminate" as const,
+    stale: false,
+    ...p,
+  });
+  const tickets = [
+    t("PAY-1", { issueType: "Epic", summary: "Billing" }),
+    t("OPS-3", { issueType: "Initiative", summary: "Infra" }),
+    t("OPS-4", { epicKey: "OPS-3" }),
+    t("PAY-9", { issueType: "Epic", statusCategory: "done" }),
+    t("PAY-2", { epicKey: "PAY-1" }),
+    t("PAY-3", { issueType: "Sub-task", isSubtask: true }),
+    t("PAY-8", { issueType: "Epic", stale: true }),
+  ];
+
+  test("epics by type or by having children; open ones and the chosen project first", () => {
+    expect(issueOptions(tickets, "epic", "PAY").map((o) => o.value)).toEqual([
+      "PAY-1",
+      "OPS-3",
+      "PAY-9",
+    ]);
+  });
+
+  test("parents exclude epics and sub-tasks; any means every synced ticket", () => {
+    expect(issueOptions(tickets, "parent").map((o) => o.value)).toEqual(["OPS-4", "PAY-2"]);
+    expect(issueOptions(tickets, "any")).toHaveLength(6);
   });
 });

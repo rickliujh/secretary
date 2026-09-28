@@ -643,5 +643,8 @@ Built
   named in it, so a later paste can say "that ticket" (D43).
 - Closing or cancelling a ticket comes with a comment saying why; a cancellation
   without one is sent back to the model (D43).
+- Inbox edit: Epic, Parent and Issue are searchable pickers (epics, possible parents,
+  or any synced ticket, the chosen project's first) instead of text boxes; a key that
+  is not synced, or a new issue from the same thread ("$new:1"), can still be typed.
 - Live eval: two new cases (a cancellation with its reason, a later paste referring
   to an earlier ticket) pass with GLM 5.3 Flash.
