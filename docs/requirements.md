@@ -4,7 +4,7 @@ Status: approved for implementation. Date: 2026-09-23.
 Owner: Rick Liu. Executor: Claude Opus 5.5 (see `implementation-plan.md`).
 Now: built. Later changes to scope are decisions D19–D43 in `design.md` section 12.
 Small asks (FR-10 to FR-13, and the additions to FR-2 and FR-3) were approved on
-2026-10-03: decisions D44–D50, built in Phases 11–16 of `implementation-plan.md`.
+2026-10-03 and are built: decisions D44–D51, Phases 11–16 of `implementation-plan.md`.
 
 ## 1. Vision
 

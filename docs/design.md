@@ -4,7 +4,8 @@ Status: built. Approved for implementation 2026-09-23; all phases done by 2026-0
 Companion to `requirements.md` (what) and `implementation-plan.md` (when, now
 history). Decisions taken during the build (section 12, D19–D43) override older
 text; notes marked "Now:" point to them where the text below is out of date.
-Small asks (D44–D50, approved 2026-10-03) are built in Phases 11–16 of the plan.
+Small asks (D44–D51, approved 2026-10-03) are built: Phases 11–16 of the plan. Each
+of those decisions ends with a "Built" note that says where the code differs.
 
 ## 1. Architecture overview
 

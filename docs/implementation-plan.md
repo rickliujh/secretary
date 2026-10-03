@@ -1,8 +1,9 @@
 # Secretary: Implementation Plan (handover to Claude Opus 5.5)
 
 > **Status:** Phases 0–8 are built and are history; later changes are decisions
-> D19–D43 in design.md section 12 and entries in CHANGELOG.md. **Phases 11–16
-> (small asks, approved 2026-10-03) are at the end of this file.**
+> D19–D43 in design.md section 12 and entries in CHANGELOG.md. Phases 11–16
+> (small asks, approved 2026-10-03) are at the end of this file and are built too
+> (2026-10-03); what changed on the way is in D44–D51 and CHANGELOG.md.
 
 Read `requirements.md` and `design.md` first, then `../CLAUDE.md`. Work phase by
 phase. Each phase ends with its checklist passing, a short entry appended to
