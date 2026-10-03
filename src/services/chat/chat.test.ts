@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { UIMessage, UIMessageChunk } from "ai";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { jiraIssues, proposals } from "@/db/schema";
+import { issueMeta, jiraIssues, proposals } from "@/db/schema";
 import { query } from "@/services/db";
 import { createDependency } from "@/services/dependencies/queries";
-import { createTeam } from "@/services/directory/queries";
+import { createPerson, createTeam } from "@/services/directory/queries";
 import { Intake } from "@/services/intake";
 import { FIXTURE_VAULT_DIR, loadVaultFromDisk } from "@/services/sources/test";
 import { getState, SYNC_KEYS, setState } from "@/services/sync/state";
@@ -382,5 +382,68 @@ describe("suggested prompt tools (D42)", () => {
     expect(decisions.inbox[0]?.approve[0]).toContain("PAY-2");
     expect(week.days).toBe(7);
     expect(Array.isArray(week.events)).toBe(true);
+  });
+});
+
+describe("small asks and blockers in the chat (D49)", () => {
+  test("pending_decisions lists open small asks with who asked; waiting_on lists blocked tickets", async () => {
+    const { layer } = intakeTestLayer(
+      {
+        "std-m": [
+          { toolCall: { name: "pending_decisions", input: {} } },
+          { toolCall: { name: "waiting_on", input: {} } },
+          { text: "Priya waits on the Q3 numbers; PAY-2 waits on OPS-7." },
+        ],
+      },
+      [],
+      {
+        settings: {
+          smallAsks: {
+            projectKey: "PAY",
+            label: "small-ask",
+            joinActiveSprint: true,
+            hintDismissed: false,
+          },
+        },
+      },
+    );
+    const chunks = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          // PAY-4 is the user's small ask from Priya; PAY-2 (blocked by OPS-7) is the user's too.
+          yield* query((d) =>
+            d
+              .update(jiraIssues)
+              .set({ labels: ["small-ask"] })
+              .where(eq(jiraIssues.key, "PAY-4")),
+          );
+          yield* query((d) =>
+            d.update(jiraIssues).set({ assignee: "rliu" }).where(eq(jiraIssues.key, "PAY-2")),
+          );
+          // Tom's comment on PAY-2 was read, so it is not Your move.
+          yield* query((d) =>
+            d.insert(issueMeta).values({ issueKey: "PAY-2", lastViewedAt: "2099-01-01T00:00:00Z" }),
+          );
+          const priya = yield* createPerson({ displayName: "Priya Shah" });
+          yield* query((d) =>
+            d.insert(issueMeta).values({ issueKey: "PAY-4", requesterPersonId: priya }),
+          );
+          const stream = yield* (yield* Chat).stream({ messages: ask("What do I owe people?") });
+          return yield* Effect.promise(() => drainStream(stream));
+        }),
+        layer,
+      ),
+    );
+    const [decisions, waiting] = toolOutputs(chunks) as [
+      { smallAsks: { key: string; askedBy: string | null; state: string }[] },
+      { blockedTickets: { key: string; blockedBy: string[] }[] },
+    ];
+    expect(decisions.smallAsks).toEqual([
+      expect.objectContaining({ key: "PAY-4", askedBy: "Priya Shah", state: "your move" }),
+    ]);
+    expect(waiting.blockedTickets).toEqual([
+      expect.objectContaining({ key: "PAY-2", blockedBy: ["OPS-7"] }),
+    ]);
   });
 });

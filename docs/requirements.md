@@ -61,7 +61,7 @@ Principles, in priority order:
 | Dependency | Something a ticket waits on that is outside the user's control: a person, a team, a ServiceNow incident, or an external item |
 | Contact | A person record with title, team, contact details and communication profile |
 | Memory | A stored rule, fact, preference or correction example the secretary uses in later reasoning |
-| Brief | The dashboard's generated summary of what matters now |
+| Brief | The generated summary of what matters now, opened from Today |
 | Small ask | A small task that arrives outside planned work. It is a Jira ticket in the small-asks home (a configured project and label), assigned to the user (FR-10) |
 | Wait | Another word for an open dependency: someone else has the next move |
 | Blocker | A ticket another ticket waits for, recorded in Jira as an "is blocked by" link (FR-3.8) |

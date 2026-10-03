@@ -6,7 +6,7 @@ import { Effect } from "effect";
 import { localDate } from "@/lib/dates";
 import { loadDashboardInputs } from "@/services/dashboard/data";
 import { priorityValue } from "@/services/dashboard/scoring";
-import { blockInfo, buildDashboard, type DashIssue } from "@/services/dashboard/sections";
+import { blockInfo, type DashIssue, rankWork } from "@/services/dashboard/sections";
 import { Settings, settingsOrDefault } from "@/services/settings";
 
 export type PickerTicket = Pick<
@@ -125,7 +125,7 @@ export const loadPickerSource = (now = new Date()) =>
   Effect.gen(function* () {
     const settings = yield* settingsOrDefault(yield* Settings);
     const inputs = yield* loadDashboardInputs(now);
-    const dashboard = buildDashboard(inputs, settings.scoring, localDate(now), now.toISOString());
+    const work = rankWork(inputs, settings.scoring, localDate(now), now.toISOString());
     return {
       tickets: inputs.issues.map((i) => ({
         key: i.key,
@@ -139,6 +139,6 @@ export const loadPickerSource = (now = new Date()) =>
         lastViewedAt: i.lastViewedAt,
         blockedBy: blockInfo(i.links, inputs.blockers).blockedBy,
       })),
-      focus: dashboard.topFocus.map((f) => f.key),
+      focus: work.topFocus.map((f) => f.key),
     } satisfies PickerSource;
   });

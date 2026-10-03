@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { loadEpicHealth } from "@/services/dashboard/data";
 import type { EpicHealth as EpicHealthRow } from "@/services/dashboard/sections";
 
-/** Sprint > Epics (D50): the epic health rollup that was on the dashboard. */
+/** Sprint > Epics (D50): the epic health rollup that was on the old dashboard. */
 export function EpicsPage() {
   const epics = useQuery({
     queryKey: queryKeys.epicHealth,

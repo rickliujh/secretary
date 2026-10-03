@@ -12,8 +12,14 @@ machine as a desktop app and keeps everything local.
   what each one waits on.
 - **Waiting**: everything you are waiting on from people, teams and incidents, with
   follow-up reminders and one-click chase drafts.
-- **Dashboard**: a ranked focus list, what is due, what others wait on you for, and a
-  daily brief.
+- **Today**: one page with a capture box and three lists. *Your move*: tickets whose
+  blocker just closed, your small asks, new comments and mentions, Inbox threads
+  with decisions. *Their move*: what you wait on, most pressing first, and your
+  tickets blocked by others. *Sprint work*: your ranked sprint tickets with "due soon"
+  and "at risk" badges. Rows act in place (Done, snooze, draft a reply or a chase,
+  log a reply, resolve), and **Sweep** steps through what needs a decision from the
+  keyboard (D done, N nudge, S snooze, X drop, Space skip). The daily brief opens
+  from a button.
 - **Drafts**: Teams messages and emails written in each recipient's style, grounded in
   the tickets and the dependency history. "Open in Teams" or "Open in email" fills in
   a Teams chat or a new message in your default mail app (no Microsoft sign-in); you

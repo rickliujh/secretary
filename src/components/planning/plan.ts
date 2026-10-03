@@ -84,7 +84,7 @@ export const capacityPercent = (points: number, capacity: number | null) =>
   capacity === null || capacity <= 0 ? 0 : Math.min(100, Math.round((points / capacity) * 100));
 
 /**
- * Whether the dashboard should suggest planning: the ending sprint closes
+ * Whether Today's plan banner should suggest planning: the ending sprint closes
  * within two working days, or has already closed and the next sprint exists.
  */
 export function planningDue(

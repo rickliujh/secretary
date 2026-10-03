@@ -18,7 +18,7 @@ import { useDraftPanel } from "./use-draft-panel";
 
 /**
  * A draft mutation. Sending logs a follow-up on the dependency, which also
- * moves tickets on the dashboard, so those refresh too.
+ * moves tickets on Today, so those refresh too.
  */
 function useDraftMutation<I, A, E>(
   program: (input: I) => Effect.Effect<A, E, AppServices>,

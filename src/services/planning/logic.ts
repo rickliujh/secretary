@@ -24,7 +24,7 @@ export type PlanIssue = {
   /** Open blockers and dependencies, to flag risk. */
   blockedBy: string[];
   waitingOn: { label: string; expectedAt: string | null }[];
-  /** Focus score (dashboard ranking); higher first. */
+  /** Focus score (Today's ranking); higher first. */
   score: number;
 };
 

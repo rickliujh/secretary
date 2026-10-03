@@ -958,3 +958,86 @@ Known limits
   typecheck, lint and tests only.
 - Today (Phase 16) is not built; the current dashboard lists a returned owner's
   wait with "is back" and leaves sleeping ones out.
+
+## Phase 16: Today and the sweep (2026-10-03)
+
+Why: small asks beside planned work were trackable after Phases 11 to 15 but
+still had no single place to look, and the dashboard spread what needed the user
+over seven sections (requirements FR-12, design.md D49).
+
+Built
+- Today at `/`: the capture box, then three lists. *Your move*: woken tickets
+  (D45), your open small asks with nothing to wait for (by due date, then oldest),
+  new comments and mentions, and one row per Inbox thread with decisions. *Their
+  move*: open waits (overdue, follow-up due, owner back, the rest), your tickets
+  blocked by an open ticket, then sleeping ones (owner away, or the ticket
+  snoozed), soonest to wake first. *Sprint work*: Top focus (D29) without small
+  asks, with due-soon and at-risk tickets joined in as badges. Every row says why
+  in a few words; a list longer than 12 folds behind "Show all"; each list says
+  so in one line when empty; without a small-asks home, Your move still lists
+  the rest and one line links to the setting.
+- `buildToday` (`services/dashboard/today.ts`) is pure over one snapshot and
+  replaces `buildDashboard`. A ticket is in one list only; the precedence is
+  written down and tested (woken, snoozed, new comment, blocked, small ask,
+  sprint work). The ranking itself is unchanged and is now `rankWork`, which the
+  brief, the report, the ticket picker and the chat read.
+- Row actions without leaving the page, each with a toast (and any warning),
+  disabled while running, lists refreshed after: Done (reads the transitions; one
+  runs, several give a menu, none is an error; Jira's message when fields are
+  needed), snooze (tomorrow, Monday, after the sprint, a date; on a wait it moves
+  the next chase), reply draft (to the requester when known), chase draft, log a
+  reply, resolve. Jira writes go through the Executor.
+- The sweep (Sweep in the header): woken tickets, follow-ups due or overdue,
+  owners back, asks due or overdue, and once a week asks untouched for 14 days
+  (`sync_state` `sweep.staleAt`). Keys D done, N nudge, S snooze, X drop (asks
+  why, then closes as D43 requires: a cancel-like status when the workflow has
+  one, else a done one, and a comment with the reason), Space skip, Esc leave;
+  "3 of 9" with a progress bar, and a summary at the end.
+- The brief opens from a button into a side panel; the plan banner stays;
+  suggested prompts are on the Chat page only.
+- Chat: `pending_decisions` lists your open small asks with who asked, age, due
+  date and where each stands; `waiting_on` also lists your blocked tickets.
+- Removed: the old dashboard sections and their tests, the dashboard's prompts
+  card, `iAmWaitingOn` and the dashboard's own epic health (Sprint > Epics keeps
+  `buildEpicHealth`). Wording that pointed at the dashboard now points at Today or
+  the Chat page.
+
+Decisions and defaults
+- A new comment or mention ranks above a blocker and a small ask: someone waits
+  for an answer. Comments on a snoozed ticket wait until the snooze ends.
+- Only tickets assigned to you count as blocked in Their move; a blocked ticket of
+  someone else's that you track stays Sprint work with an "at risk" badge.
+- Waits are rows of their own, so a sprint ticket with a wait is in Sprint work
+  and its wait in Their move.
+- A wait on a snoozed ticket sleeps with it.
+- "Tomorrow" is the next working day; "after the sprint" is the first working
+  day after your active sprint ends.
+- On a wait, Done resolves it and Drop logs "Stopped waiting: <reason>" and
+  resolves it. A ticket's drop comment is "Dropped: <reason>", or "Closed without
+  being done: <reason>" when only a done status is offered.
+- The sweep leaves out an overdue wait whose next chase is already set for a
+  later day, until that day. The weekly pass counts as run when a sweep that
+  held it reaches its summary.
+- `buildDashboard` stays as an alias of `rankWork` only because two tests on
+  another branch call it.
+
+Checklist
+- FR-12 AC: `today.test.ts` builds the three lists from one fixture that mixes
+  small asks, waits (overdue, follow-up due, back, sleeping), blockers and sprint
+  work, with the order of each list, the precedence, the empty and no-home cases;
+  2,000 issues build in under 150 ms. `today.mock-jira.test.ts` loads and builds
+  Today over 2,000 synced issues in under a second.
+- Done on a small ask transitions it in the mock Jira and the row leaves Your
+  move; Drop closes one with the reason as a comment (`today.mock-jira.test.ts`).
+- The sweep's order, the weekly pass and the summary (`sweep.test.ts`); the done
+  and drop transitions and the snooze days (`closing.test.ts`); the chat's new
+  fields (`chat.test.ts`, `agenda.test.ts`).
+
+Known limits
+- Not seen in the running app: the page, the three columns, the row menus, the
+  sweep dialog and its keys, the brief panel and the draft panel over the sweep
+  were checked by typecheck, lint, the build and review only.
+- The mock Jira has one done status and no cancel-like one, so the Done menu and
+  a drop into a cancelled status are covered by unit tests, not end to end.
+- The cancel-like words are repeated in `dashboard/closing.ts`; the classify
+  check in `prompts/classify.ts` should import them from there.

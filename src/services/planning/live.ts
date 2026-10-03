@@ -56,7 +56,7 @@ const make = Effect.gen(function* () {
         Effect.provideService(Settings, settingsSvc),
       );
       const sprints = parseSprintState(yield* withDb(getState(SYNC_KEYS.sprints))).sprints;
-      // Points and resolution dates are not part of the dashboard's view.
+      // Points and resolution dates are not part of Today's view.
       const extra = new Map(
         (yield* q((d) =>
           d
@@ -80,7 +80,7 @@ const make = Effect.gen(function* () {
         openDeps
           .filter((d) => d.issueKey === key)
           .map((d) => ({ ...d, overdueDays: timing(d, today).overdueDays }));
-      // Same ranking as Top focus, so the backlog order matches the dashboard.
+      // Same ranking as Top focus, so the backlog order matches Today.
       const scores = new Map(
         rank(
           inputs.issues

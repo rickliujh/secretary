@@ -18,7 +18,8 @@ import {
 import { localDate } from "@/lib/dates";
 import { ConfluenceClient } from "@/services/confluence";
 import { textToCql, webUrl } from "@/services/confluence/cql";
-import { dashboardWithBrief } from "@/services/dashboard/brief";
+import { loadToday } from "@/services/dashboard/data";
+import type { BlockedRow, WaitRow } from "@/services/dashboard/today";
 import { type Db, query } from "@/services/db";
 import { timing } from "@/services/dependencies/logic";
 import { listDependencies } from "@/services/dependencies/queries";
@@ -33,7 +34,7 @@ import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sources } from "@/services/sources";
 import { getState, parseFieldIds, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { searchTicketKeys, ticketDetail } from "@/services/tickets/queries";
-import { pendingDecisions, weekAhead } from "./agenda";
+import { blockedFacts, pendingDecisions, smallAskFacts, weekAhead } from "./agenda";
 import { type AttachmentRef, type ImageForModel, pickImages, prepareImage } from "./images";
 
 export type ToolDeps = Db | Settings | Intake | ConfluenceClient | JiraClient | Sources;
@@ -207,7 +208,7 @@ export function chatTools(
 
     waiting_on: tool({
       description:
-        "What the user is waiting on: dependencies with owner, status, expected date and last chase. Filter by owner (a person or team name) or ticket key.",
+        "What the user is waiting on: dependencies with owner, status, expected date, last chase and whether the owner is away; and the user's tickets blocked by another open ticket. Filter by owner (a person or team name) or ticket key.",
       inputSchema: z.object({
         owner: z.string().optional().describe("Person or team name, e.g. Platform"),
         issueKey: z.string().optional(),
@@ -221,7 +222,15 @@ export function chatTools(
               issueKey: issueKey?.trim().toUpperCase() || undefined,
             });
             const today = localDate();
+            const key = issueKey?.trim().toUpperCase() || undefined;
+            // Tickets blocked by other tickets have no owner, so an owner filter leaves them out.
+            const blocked = owner
+              ? []
+              : (yield* loadToday()).theirMove.filter(
+                  (r): r is BlockedRow => r.kind === "blocked" && (!key || r.issue.key === key),
+                );
             return {
+              blockedTickets: blockedFacts(blocked),
               waiting: rows
                 .filter((r) => !owner || matches(r.owner.name, owner))
                 .map((r) => ({ r, t: timing(r, today) }))
@@ -325,10 +334,10 @@ export function chatTools(
       inputSchema: z.object({}),
       execute: () =>
         exec(
-          Effect.map(dashboardWithBrief(), ({ dashboard: d }) => ({
+          Effect.map(loadToday(), ({ facts: d, focus }) => ({
             focusCovers:
-              d.focus.mode === "sprint"
-                ? `the active sprint ${d.focus.sprints.join(", ")}${d.focus.endsOn ? `, ending ${d.focus.endsOn}` : ""}, plus pinned tickets`
+              focus.mode === "sprint"
+                ? `the active sprint ${focus.sprints.join(", ")}${focus.endsOn ? `, ending ${focus.endsOn}` : ""}, plus pinned tickets`
                 : "all open work in scope (no active sprint)",
             topFocus: d.topFocus.slice(0, 10).map((f) => ({
               key: f.key,
@@ -482,7 +491,7 @@ export function chatTools(
 
     pending_decisions: tool({
       description:
-        "What waits on a decision from the user: proposals to approve and questions to answer in the Inbox (by thread, with how long they have waited), people waiting on the user, follow-ups due, and drafts not sent yet.",
+        "What waits on a decision from the user: proposals to approve and questions to answer in the Inbox (by thread, with how long they have waited), the user's open small asks (who asked, how long ago, when due and where each stands), people waiting on the user, follow-ups due, and drafts not sent yet.",
       inputSchema: z.object({}),
       execute: () =>
         exec(
@@ -538,21 +547,22 @@ export function chatTools(
               })),
               today,
             );
-            const { dashboard: dash } = yield* dashboardWithBrief();
+            const t = yield* loadToday();
             return {
               ...decisions,
-              waitingOnMe: dash.waitingOnMe.map((w) => ({
+              smallAsks: smallAskFacts(t.smallAsks.open, today),
+              waitingOnMe: t.facts.waitingOnMe.map((w) => ({
                 key: w.issue.key,
                 summary: w.issue.summary,
                 why: w.reasons,
               })),
-              followupsDue: dash.iAmWaitingOn
-                .filter((d) => d.followupDue)
-                .map((d) => ({
+              followupsDue: t.theirMove
+                .filter((r): r is WaitRow => r.kind === "wait" && r.timing.followupDue)
+                .map(({ dependency: d, timing: w }) => ({
                   issueKey: d.issueKey,
                   label: d.label,
                   owner: d.ownerName,
-                  ...(d.reason ? { why: d.reason } : {}),
+                  ...(w.reason ? { why: w.reason } : {}),
                 })),
             };
           }),
@@ -567,7 +577,7 @@ export function chatTools(
         exec(
           Effect.gen(function* () {
             const today = localDate();
-            const { dashboard: dash } = yield* dashboardWithBrief();
+            const { facts: dash } = yield* loadToday();
             const deps = yield* listDependencies({});
             const me = (yield* getState(SYNC_KEYS.username)) ?? null;
             const sprints = parseSprintState(yield* getState(SYNC_KEYS.sprints)).sprints;

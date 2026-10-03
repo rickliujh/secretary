@@ -1,6 +1,6 @@
 /**
- * Facts for the dashboard's suggested prompts (D42), computed in code: what
- * waits on a decision from the user, and what the coming week holds.
+ * Facts for the chat's suggested prompts (D42), computed in code: what waits
+ * on a decision from the user, and what the coming week holds.
  */
 import { daysBetween } from "@/lib/dates";
 
@@ -119,4 +119,45 @@ export function weekAhead(w: WeekInputs) {
     atRisk: w.atRisk.slice(0, 5),
     sprint: w.sprint,
   };
+}
+
+/** The user's open small asks for `pending_decisions` (D49): who asked, age, due date and where each stands. */
+export function smallAskFacts(
+  asks: readonly {
+    issue: {
+      key: string;
+      summary: string;
+      created: string;
+      dueDate: string | null;
+      requester: { name: string } | null;
+    };
+    state: string;
+  }[],
+  today: string,
+) {
+  return asks.map(({ issue, state }) => ({
+    key: issue.key,
+    summary: issue.summary,
+    askedBy: issue.requester?.name ?? null,
+    ageDays: Math.max(0, daysBetween(issue.created.slice(0, 10), today)),
+    due: issue.dueDate,
+    state,
+  }));
+}
+
+/** The user's tickets blocked by open tickets, for `waiting_on`. */
+export function blockedFacts(
+  rows: readonly {
+    issue: { key: string; summary: string; status: string };
+    blockedBy: string[];
+    asleep: boolean;
+  }[],
+) {
+  return rows.map((r) => ({
+    key: r.issue.key,
+    summary: r.issue.summary,
+    status: r.issue.status,
+    blockedBy: r.blockedBy,
+    ...(r.asleep ? { note: "snoozed" } : {}),
+  }));
 }

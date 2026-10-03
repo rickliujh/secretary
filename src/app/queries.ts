@@ -37,7 +37,7 @@ export function useTicketRows({ enabled }: ListOptions = {}) {
   });
 }
 
-/** Proposals waiting for a decision, for the Inbox badge and the dashboard. */
+/** Proposals waiting for a decision, for the Inbox badge. */
 export function usePendingCount({ refetchInterval }: { refetchInterval?: number } = {}) {
   return useQuery({
     queryKey: queryKeys.pendingCount,

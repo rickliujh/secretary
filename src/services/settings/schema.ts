@@ -89,7 +89,7 @@ export const ScoringWeightsSchema = z.object({
 export type ScoringWeights = z.infer<typeof ScoringWeightsSchema>;
 export const DEFAULT_WEIGHTS: ScoringWeights = ScoringWeightsSchema.parse({});
 
-/** A one-click question for the chat, shown on the dashboard (D42). */
+/** A one-click question for the chat, shown on the Chat page (D42, D49). */
 export const SuggestedPromptSchema = z.object({
   id: z.string().min(1),
   title: z.string().trim().min(1).max(40),
@@ -181,7 +181,7 @@ export const SettingsSchema = z.object({
   scoring: ScoringWeightsSchema.prefault({}),
   smallAsks: SmallAsksSettingsSchema.prefault({}),
   dataSources: z.array(DataSourceSchema).default([]),
-  /** Dashboard questions for the chat, in order (D42). */
+  /** Suggested questions for the chat, in order (D42). */
   suggestedPrompts: z.array(SuggestedPromptSchema).max(12).default(DEFAULT_SUGGESTED_PROMPTS),
   obsidian: z
     .object({
