@@ -20,6 +20,7 @@ import { bindDb, Db } from "@/services/db";
 import { normalizeUsername } from "@/services/directory/schema";
 import { describeCorrection, describeStoredPayload } from "@/services/proposals/schema";
 import { Settings, settingsOrDefault } from "@/services/settings";
+import { defaultSmallAskType, smallAskTypes } from "@/services/small-asks/home";
 import { promptSprints } from "@/services/sprints/calendar";
 import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { BUDGETS, CANDIDATE_LIMIT, Retrieval, type SnapshotRequest } from ".";
@@ -180,6 +181,22 @@ const make = Effect.gen(function* () {
         p.statuses.add(status);
         projects.set(key, p);
       }
+      // The small-asks home is a project to create in even with none of its issues cached (D44).
+      const homeKey = settings.smallAsks.projectKey;
+      if (homeKey && !projects.has(homeKey))
+        projects.set(homeKey, { key: homeKey, issueTypes: new Set(), statuses: new Set() });
+      const homeTypes = homeKey
+        ? (projectMeta[homeKey]?.issueTypes ?? [...(projects.get(homeKey)?.issueTypes ?? [])])
+        : [];
+      const smallAsks = homeKey
+        ? {
+            projectKey: homeKey,
+            label: settings.smallAsks.label,
+            joinSprint: settings.smallAsks.joinActiveSprint,
+            issueTypes: smallAskTypes(homeTypes).sort(),
+            defaultType: defaultSmallAskType([...homeTypes].sort()),
+          }
+        : null;
       const priorities = orderPriorities(
         (yield* q((d) =>
           d.all<[string]>(
@@ -410,6 +427,7 @@ const make = Effect.gen(function* () {
         examples,
         notes,
         sprints,
+        smallAsks,
       } satisfies ItemSnapshot;
     });
 

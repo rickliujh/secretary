@@ -324,7 +324,13 @@ const make = Effect.gen(function* () {
       )).map((r) => r.key);
       const meta = parseProjectMeta(yield* withDb(getState(SYNC_KEYS.projectMeta)));
       let metaChanged = false;
-      for (const key of projectKeys.slice(0, MAX_PROJECTS_WITH_META)) {
+      // The small-asks home may hold none of the synced issues yet (D44).
+      const home = settings.smallAsks.projectKey;
+      const metaKeys = [
+        ...(home ? [home] : []),
+        ...projectKeys.filter((k) => k !== home).slice(0, MAX_PROJECTS_WITH_META),
+      ];
+      for (const key of metaKeys) {
         if (!full && meta[key]) continue;
         const types = yield* jira.projectStatuses(key).pipe(Effect.option);
         if (types._tag === "None") continue;

@@ -648,3 +648,41 @@ Built
   is not synced, or a new issue from the same thread ("$new:1"), can still be typed.
 - Live eval: two new cases (a cancellation with its reason, a later paste referring
   to an earlier ticket) pass with GLM 5.3 Flash.
+
+## Phase 11: Small-asks home (2026-10-03)
+
+- Settings > Jira > Small asks: a project (from your synced projects), a label
+  (default `small-ask`) and "add new small asks to the active sprint" (default on).
+  Saving reads the project's create metadata and lists the types a small ask can
+  take, required fields the app cannot fill, and types without a Labels field
+  (design.md D44). Sync now reads the home project's types even when none of its
+  tickets are cached.
+- Intake (prompt version 7): with a home set, every new ticket is marked as a small
+  ask or planned work. For a small ask, code sets the project (the home, or the
+  story's project for a sub-task), the label, you as assignee and the sprint flag;
+  the model writes the summary, description and due date and picks the type (Task by
+  default) and epic. Who asked is the sender, else a contact the model picks; the
+  description ends with "Asked by <name> via <source> on <date>" and the quoted text.
+  Without a home nothing changes.
+- On Track the Executor creates the ticket with its label, remembers who asked
+  (`issue_meta.requester_person_id`, migration 0011) and moves it into the active
+  sprint that holds most of your open work, preferring a board that shows the
+  ticket's project. A failed move, no such sprint, or a create screen without Labels
+  leave the ticket created with a warning on the card. Sub-tasks are not moved.
+- Inbox: a small ask and the proposals that hang on it (a dependency, a comment) show
+  as one row with type and epic pickers, what it waits on, and Track, which approves
+  them in order; a change in the row is saved as an edit you can learn from. The
+  cards are under Details. While no home is set, the new-thread page points to the
+  setting once.
+- Proposals stored before this keep working: new fields have defaults and stored
+  payloads are read through the schema, so they load, edit and execute as before.
+  The edit dialog gains Labels and Asked by.
+- The user's active sprint is now chosen the same way everywhere (planner, sprint
+  points, small asks): most open issues, finished ones break ties.
+- Tests: the FR-10 acceptance case runs end to end against the mock Jira (one row,
+  one click, ticket in the home with label, assignee, sprint, due date and
+  requester); the mock Jira stores labels. Four eval cases cover a small ask, a
+  sub-task under a candidate story, planned work and the requester; the live eval
+  sets the home per case and was not run.
+- Not verified in the running app: the Settings section, the Track row and the hint
+  were checked by typecheck and lint only, not seen on screen.

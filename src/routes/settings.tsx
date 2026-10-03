@@ -11,6 +11,7 @@ import { NetworkSection } from "@/components/settings/network-section";
 import { PromptsCard } from "@/components/settings/prompts-card";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RankingSection } from "@/components/settings/ranking-section";
+import { SmallAsksSection } from "@/components/settings/small-asks-section";
 import { SourcesSection } from "@/components/settings/sources-section";
 import { UsageSection } from "@/components/settings/usage-section";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -63,6 +64,7 @@ function SettingsPage() {
         <TabsContent value="jira" className="flex flex-col gap-4">
           <AtlassianSection product="jira" />
           <JiraSyncSection />
+          <SmallAsksSection />
         </TabsContent>
         <TabsContent value="confluence">
           <AtlassianSection product="confluence" />

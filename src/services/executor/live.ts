@@ -1,9 +1,10 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import {
   actionsLog,
   communications,
   dependencies,
+  issueMeta,
   jiraIssues,
   memories,
   people,
@@ -16,7 +17,10 @@ import { redactValue } from "@/lib/redact";
 import { bindDb, Db } from "@/services/db";
 import { CreatedIssueSchema, JiraClient } from "@/services/jira";
 import { issueRefs, type ProposalPayload } from "@/services/proposals/schema";
+import { isSubtaskType } from "@/services/small-asks/home";
+import { userActiveSprints } from "@/services/sprints/active";
 import { Sync } from "@/services/sync";
+import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import {
   describeAction,
   Executor,
@@ -30,7 +34,7 @@ import { buildCreateIssue, buildJiraWrite, MappingError } from "./jira-mapping";
 const make = Effect.gen(function* () {
   const jira = yield* JiraClient;
   const sync = yield* Sync;
-  const { q } = bindDb(yield* Db);
+  const { q, withDb } = bindDb(yield* Db);
 
   const log = (row: Omit<typeof actionsLog.$inferInsert, "id" | "at">) =>
     Effect.gen(function* () {
@@ -155,6 +159,7 @@ const make = Effect.gen(function* () {
               priority: p.priority,
               assignee: p.assignee,
               dueDate: p.dueDate,
+              labels: p.labels,
             },
             { deployment, fieldIds, fields },
           ),
@@ -190,7 +195,78 @@ const make = Effect.gen(function* () {
           { kind: "set_epic", issueKey: key, epicKey: plan.epicAfterCreate },
           { proposalId },
         );
-      return { message: `Created ${key}`, issueKey: key } satisfies ProposalResult;
+      const warnings: string[] = [];
+      if (plan.labelsDropped.length)
+        warnings.push(
+          `The ${type.name} create screen in ${p.projectKey} has no Labels field, so ${plan.labelsDropped.join(", ")} was not set.`,
+        );
+      // Who asked, so "what do I owe Dana" can be answered locally (FR-10.4).
+      if (p.requesterPersonId) {
+        const requesterPersonId = p.requesterPersonId;
+        yield* q((d) =>
+          d
+            .insert(issueMeta)
+            .values({ issueKey: key, requesterPersonId })
+            .onConflictDoUpdate({ target: issueMeta.issueKey, set: { requesterPersonId } }),
+        );
+      }
+      let message = `Created ${key}`;
+      // The issue exists now; a failed sprint move is a warning, not a failure (D44).
+      if (p.joinSprint && !type.subtask && !isSubtaskType(type.name)) {
+        const joined = yield* joinActiveSprint(key, p.projectKey, proposalId);
+        if (joined.sprint) message += ` in sprint ${joined.sprint}`;
+        if (joined.warning) warnings.push(joined.warning);
+      }
+      return {
+        message,
+        issueKey: key,
+        ...(warnings.length ? { warning: warnings.join(" ") } : {}),
+      } satisfies ProposalResult;
+    });
+
+  /**
+   * Moves a new issue into the active sprint holding most of the user's open
+   * work, preferring a board that shows its project (D44). Chosen now, from the
+   * synced sprint state, so a proposal approved days later lands in today's sprint.
+   */
+  const joinActiveSprint = (issueKey: string, projectKey: string, proposalId: string) =>
+    Effect.gen(function* () {
+      const me = yield* withDb(getState(SYNC_KEYS.username));
+      const state = parseSprintState(yield* withDb(getState(SYNC_KEYS.sprints)));
+      const mine = me
+        ? yield* q((d) =>
+            d
+              .select({
+                assignee: jiraIssues.assignee,
+                sprint: jiraIssues.sprint,
+                statusCategory: jiraIssues.statusCategory,
+              })
+              .from(jiraIssues)
+              .where(and(eq(jiraIssues.assignee, me), eq(jiraIssues.stale, false)))
+              .all(),
+          )
+        : [];
+      const sprint = userActiveSprints(state.sprints, mine, me ?? null, {
+        preferProject: projectKey,
+        boardProjects: state.boardProjects,
+      })[0];
+      if (!sprint)
+        return {
+          sprint: null,
+          warning: `No active sprint holds your work, so ${issueKey} stays in the backlog.`,
+        };
+      return yield* run(
+        { kind: "move_to_sprint", issueKey, sprintId: sprint.id, sprintName: sprint.name },
+        { proposalId },
+      ).pipe(
+        Effect.as({ sprint: sprint.name, warning: null as string | null }),
+        Effect.catchAll((e) =>
+          Effect.succeed({
+            sprint: null,
+            warning: `${issueKey} was created but could not be moved into sprint ${sprint.name}: ${e.message}`,
+          }),
+        ),
+      );
     });
 
   const transition = (

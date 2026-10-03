@@ -1,15 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { asc, eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
+import { fromFormValues, toFormValues } from "@/components/inbox/proposal-fields";
 import { dependencies, inboxItems, intakeItems, memories, proposals } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
 import { ExecutorLive } from "@/services/executor/live";
+import { inboxDetail } from "@/services/inbox/queries";
 import issueTypes from "@/test/fixtures/jira/createmeta-PAY-issuetypes.json";
 import createFields from "@/test/fixtures/jira/createmeta-PAY-story.json";
 import { fixtureIssues, syncedJiraLayer, syncOnce } from "@/test/seed";
 import { json, noContent, type StubRoute } from "@/test/stub-fetch";
-import { type ProposalError, type ProposalPayload, Proposals } from ".";
+import {
+  type ProposalError,
+  ProposalPayloadSchema,
+  Proposals,
+  type StoredProposalPayload,
+} from ".";
 import { ProposalsLive } from "./live";
 
 const pay4 = fixtureIssues.find((i) => i.key === "PAY-4");
@@ -90,7 +97,7 @@ function setup(opts: { createStatus?: number; requiredExtra?: boolean } = {}) {
 }
 
 /** Inserts an inbox item with one intake item and the given proposals (seq in order). */
-const seed = (payloads: ProposalPayload[]) =>
+const seed = (payloads: StoredProposalPayload[]) =>
   Effect.gen(function* () {
     const inboxItemId = newId();
     const intakeItemId = newId();
@@ -143,7 +150,8 @@ const rowsOf = (inboxItemId: string) =>
       .all(),
   );
 
-const create: ProposalPayload = {
+/** Stored before Phase 11: no labels, smallAsk, requesterPersonId or joinSprint. */
+const create: StoredProposalPayload = {
   kind: "create_issue",
   ref: "$new:1",
   projectKey: "PAY",
@@ -330,7 +338,10 @@ describe("Proposals", () => {
 
   test("retrying a failed edited proposal runs the edit again", async () => {
     const { layer, seen } = setup({ createStatus: 400 });
-    const edited: ProposalPayload = { ...create, summary: "Backfill refund totals for August" };
+    const edited = ProposalPayloadSchema.parse({
+      ...create,
+      summary: "Backfill refund totals for August",
+    });
     const r = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -404,5 +415,111 @@ describe("Proposals", () => {
     expect(r.question._tag === "Left" && (r.question.left as ProposalError).kind).toBe("invalid");
     // A failed proposal can be retried with approve but not rejected into a correction.
     expect(r.again._tag === "Left" && (r.again.left as ProposalError).kind).toBe("decided");
+  });
+
+  test("a create_issue stored before small asks still loads, edits and executes", async () => {
+    const { layer, seen } = setup();
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const { ids, inboxItemId } = yield* seed([create]);
+          // Loads: the Inbox sees the new fields with their defaults.
+          const loaded = (yield* inboxDetail(inboxItemId))?.proposals[0]?.payload;
+          if (!loaded) throw new Error("not loaded");
+          // Edits: the edit form round-trips it into a valid payload.
+          const values = { ...toFormValues(loaded), summary: "Backfill refund totals" };
+          const edited = ProposalPayloadSchema.parse(fromFormValues(loaded, values));
+          // Executes.
+          const result = yield* (yield* Proposals).approve(ids[0] ?? "", edited);
+          return { loaded, edited, result, rows: yield* rowsOf(inboxItemId) };
+        }),
+        layer,
+      ),
+    );
+    expect(r.loaded).toMatchObject({
+      kind: "create_issue",
+      labels: [],
+      smallAsk: false,
+      requesterPersonId: null,
+      joinSprint: false,
+    });
+    expect(r.edited).toMatchObject({ summary: "Backfill refund totals", labels: [] });
+    expect(r.result).toMatchObject({ status: "executed", issueKey: "PAY-5" });
+    const post = seen.find((x) => x.method === "POST" && x.url.endsWith("/rest/api/2/issue"));
+    expect((post?.body as { fields?: object } | undefined)?.fields).toBeDefined();
+    expect((post?.body as { fields?: object } | undefined)?.fields).not.toHaveProperty("labels");
+    expect(r.rows[0]?.editedPayload).toMatchObject({ summary: "Backfill refund totals" });
+  });
+
+  test("approving a stored payload unchanged does not record the new defaults as an edit", async () => {
+    const { layer } = setup();
+    const rows = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const { ids, inboxItemId } = yield* seed([create]);
+          yield* (yield* Proposals).approve(ids[0] ?? "");
+          return yield* rowsOf(inboxItemId);
+        }),
+        layer,
+      ),
+    );
+    expect(rows[0]?.status).toBe("executed");
+    expect(rows[0]?.editedPayload).toBeNull();
+  });
+
+  test("Track approves the bundle in order, recording the row's change as an edit (D44)", async () => {
+    const { layer, seen } = setup();
+    const ask = { ...create, epic: null, labels: ["small-ask"], smallAsk: true };
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const { ids, inboxItemId } = yield* seed([
+            ask,
+            { kind: "add_comment", target: "$new:1", bodyMd: "Asked on Teams" },
+          ]);
+          const edited = ProposalPayloadSchema.parse({ ...ask, epic: "PAY-1" });
+          const results = yield* (yield* Proposals).track(ids, { [ids[0] ?? ""]: edited });
+          return {
+            results,
+            rows: yield* rowsOf(inboxItemId),
+            mems: yield* query((d) => d.select().from(memories).all()),
+          };
+        }),
+        layer,
+      ),
+    );
+    expect(r.results.map((x) => x.status)).toEqual(["executed", "executed"]);
+    expect(r.rows[0]?.editedPayload).toMatchObject({ epic: "PAY-1" });
+    expect(r.mems[0]?.content).toContain("Changed:");
+    const post = seen.find((x) => x.method === "POST" && x.url.endsWith("/rest/api/2/issue"));
+    expect((post?.body as { fields?: object } | undefined)?.fields).toMatchObject({
+      customfield_10100: "PAY-1",
+    });
+    expect(seen.some((x) => x.method === "POST" && x.url.endsWith("/issue/PAY-5/comment"))).toBe(
+      true,
+    );
+  });
+
+  test("Track stops when the create fails, leaving what hangs on it pending", async () => {
+    const { layer } = setup({ createStatus: 400 });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const { ids, inboxItemId } = yield* seed([
+            { ...create, smallAsk: true },
+            { kind: "add_comment", target: "$new:1", bodyMd: "Asked on Teams" },
+          ]);
+          const results = yield* (yield* Proposals).track(ids);
+          return { results, rows: yield* rowsOf(inboxItemId) };
+        }),
+        layer,
+      ),
+    );
+    expect(r.results.map((x) => x.status)).toEqual(["failed"]);
+    expect(r.rows.map((x) => x.status)).toEqual(["failed", "pending"]);
   });
 });

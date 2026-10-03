@@ -3,6 +3,7 @@
  * how much the user usually finishes, and which issues are worth considering.
  * The model only chooses among the candidates this module builds.
  */
+import { userActiveSprint } from "@/services/sprints/active";
 import type { SprintInfo } from "@/services/sprints/calendar";
 
 /** One issue as the planner sees it. */
@@ -63,9 +64,7 @@ export function sprintPair(
   issues: readonly PlanIssue[],
   me: string,
 ) {
-  const mineIn = new Set(issues.filter((i) => i.assignee === me && i.sprint).map((i) => i.sprint));
-  const actives = sprints.filter((s) => s.state === "active");
-  const active = actives.find((s) => mineIn.has(s.name)) ?? actives[0] ?? null;
+  const active = userActiveSprint(sprints, issues, me);
   const board = active?.boardId ?? null;
   const next =
     sprints

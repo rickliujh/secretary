@@ -108,8 +108,15 @@ export function useDecisions() {
   const dismiss = useDecisionMutation(
     withProposals((p, inboxItemId: string) => p.dismiss(inboxItemId)),
   );
+  /** Track (D44): the small-ask create and what hangs on it, in order. */
+  const track = useDecisionMutation(
+    withProposals(
+      (p, i: { ids: readonly string[]; edits?: Readonly<Record<string, ProposalPayload>> }) =>
+        p.track(i.ids, i.edits),
+    ),
+  );
   const retriage = useDecisionMutation((inboxItemId: string) =>
     Effect.flatMap(Intake, (i) => i.retriage(inboxItemId)),
   );
-  return { approve, reject, approveAll, dismiss, retriage };
+  return { approve, reject, approveAll, track, dismiss, retriage };
 }

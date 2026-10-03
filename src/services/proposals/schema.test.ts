@@ -4,10 +4,12 @@ import {
   describeCorrection,
   describePayload,
   describeStoredPayload,
+  effectivePayload,
   issueRefs,
   MoveToSprint,
   PROPOSAL_LABELS,
   ProposalPayloadSchema,
+  parsePayload,
   payloadChanges,
   resolveRefs,
   UpdateIssue,
@@ -147,5 +149,38 @@ describe("move_to_sprint (D30)", () => {
     expect(issueRefs(p)).toEqual(["PAY-4"]);
     expect(issueRefs(p, { only: "new" })).toEqual([]);
     expect(resolveRefs(p, new Map([["$new:1", "PAY-9"]]))).toEqual(p);
+  });
+});
+
+describe("parsePayload", () => {
+  test("a create_issue stored before small asks gets the new fields' defaults (D44)", () => {
+    const stored = {
+      kind: "create_issue" as const,
+      ref: "$new:1",
+      projectKey: "PAY",
+      issueType: "Task",
+      summary: "Old",
+    };
+    expect(parsePayload(stored)).toEqual({
+      ...stored,
+      descriptionMd: null,
+      parent: null,
+      epic: null,
+      priority: null,
+      assignee: null,
+      dueDate: null,
+      labels: [],
+      smallAsk: false,
+      requesterPersonId: null,
+      joinSprint: false,
+    });
+    expect(effectivePayload({ payload: stored, editedPayload: null })).toMatchObject({
+      labels: [],
+    });
+  });
+
+  test("a value that no longer parses is returned as it is", () => {
+    const broken = { kind: "create_issue", summary: "" };
+    expect(parsePayload(broken)).toBe(broken as never);
   });
 });

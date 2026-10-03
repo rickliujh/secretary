@@ -96,6 +96,8 @@ export const FIELD_SPECS: Record<EditableKind, FieldSpec[]> = {
     { path: "priority", label: "Priority", type: "text" },
     { path: "assignee", label: "Assignee (Jira user)", type: "text", mono: true },
     { path: "dueDate", label: "Due", type: "date" },
+    { path: "labels", label: "Labels (comma separated)", type: "list", mono: true },
+    { path: "requesterPersonId", label: "Asked by", type: "select", options: peopleOpts },
   ],
   update_issue: [
     target,

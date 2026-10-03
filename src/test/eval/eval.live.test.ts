@@ -48,6 +48,7 @@ import { ReportsLive } from "@/services/report/live";
 import { RetrievalLive } from "@/services/retrieval/live";
 import { secretNames } from "@/services/secrets";
 import { makeSecretsTest } from "@/services/secrets/test";
+import { Settings } from "@/services/settings";
 import { ProviderSchema, type TierBindings } from "@/services/settings/schema";
 import { makeSettingsTest } from "@/services/settings/test";
 import { SourcesLive } from "@/services/sources/live";
@@ -59,7 +60,7 @@ import { drainStream, TODAY } from "@/test/helpers";
 import { JIRA_BASE, jiraSettings } from "@/test/layers";
 import { fixtureRoutes } from "@/test/seed";
 import { json, type StubRoute, stubFetch } from "@/test/stub-fetch";
-import { EVAL_CASES, type EvalCase } from "./cases";
+import { EVAL_CASES, EVAL_HOME, type EvalCase } from "./cases";
 
 const env = process.env;
 const configured = !!(
@@ -175,6 +176,28 @@ const runCases = (cases: EvalCase[]) =>
         createdAt: "2026-09-20T09:00:00.000Z",
       }));
       if (seeded.length) yield* query((d) => d.insert(memories).values(seeded));
+      // Small-ask cases run with a home (D44); every other case runs without one.
+      yield* (yield* Settings).update((s) => ({
+        ...s,
+        smallAsks: { ...s.smallAsks, projectKey: c.home ? EVAL_HOME : "" },
+      }));
+      // The requester is a contact id made in this run, so the expectation gets it here.
+      const scored: EvalCase = c.requester
+        ? {
+            ...c,
+            expect: {
+              ...c.expect,
+              required: c.expect.required.map((r) =>
+                r.kind === "create_issue"
+                  ? {
+                      ...r,
+                      fields: { ...r.fields, requesterPersonId: senders[c.requester ?? "ana"] },
+                    }
+                  : r,
+              ),
+            },
+          }
+        : c;
       // A provider error (timeout, rate limit) fails this case, not the whole run.
       const intake = yield* Intake;
       const attempt = yield* Effect.either(
@@ -213,7 +236,7 @@ const runCases = (cases: EvalCase[]) =>
         );
       if (attempt._tag === "Left") {
         const e = attempt.left;
-        out.push({ c, payloads: [], errors: [`${e._tag}: ${e.message}`] });
+        out.push({ c: scored, payloads: [], errors: [`${e._tag}: ${e.message}`] });
         console.log(`  error ${c.name}: ${e.message.slice(0, 200)}`);
         continue;
       }
@@ -231,7 +254,11 @@ const runCases = (cases: EvalCase[]) =>
         d.select().from(intakeItems).where(eq(intakeItems.inboxItemId, r.inboxItemId)).all(),
       );
       const payloads = rows.map((x) => x.payload as ProposalPayload);
-      out.push({ c, payloads, errors: items.map((i) => i.error).filter((e): e is string => !!e) });
+      out.push({
+        c: scored,
+        payloads,
+        errors: items.map((i) => i.error).filter((e): e is string => !!e),
+      });
       // Progress, so a slow or interrupted run still shows what each case did.
       console.log(`  done  ${c.name}: ${signature(payloads) || "(nothing)"}`);
     }

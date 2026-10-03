@@ -12,4 +12,15 @@ describe("eval cases", () => {
     }
     expect(EVAL_CASES.length).toBeGreaterThanOrEqual(5);
   });
+
+  test("small-ask cases run with a home and check what code decides (D44)", () => {
+    const small = EVAL_CASES.filter((c) => c.home);
+    expect(small.length).toBeGreaterThanOrEqual(4);
+    // Every small-ask case says whether the create is a small ask.
+    for (const c of small)
+      expect(
+        c.expect.required.some((r) => r.kind === "create_issue" && "smallAsk" in (r.fields ?? {})),
+      ).toBe(true);
+    expect(small.some((c) => c.requester && c.sender === c.requester)).toBe(true);
+  });
 });

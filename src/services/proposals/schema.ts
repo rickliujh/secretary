@@ -39,6 +39,16 @@ export const CreateIssue = z.object({
   priority: z.string().nullable().default(null),
   assignee: z.string().nullable().default(null),
   dueDate: IsoDate.nullable().default(null),
+  /** Jira labels sent on create; a small ask carries the home's label (D44). */
+  labels: z
+    .array(z.string().trim().min(1).regex(/^\S+$/, "Labels cannot contain spaces"))
+    .default([]),
+  /** A small ask (FR-10): code set the project, label, assignee and sprint flag. */
+  smallAsk: z.boolean().default(false),
+  /** The contact who asked; stored on the created issue's `issue_meta` (FR-10.4). */
+  requesterPersonId: z.string().min(1).nullable().default(null),
+  /** Move the created issue into the user's active sprint (D44); sub-tasks follow their parent. */
+  joinSprint: z.boolean().default(false),
 });
 
 export const UpdateIssue = z.object({
@@ -154,6 +164,8 @@ export const ProposalPayloadSchema = z.discriminatedUnion("kind", [
   NeedsClarification,
 ]);
 export type ProposalPayload = z.infer<typeof ProposalPayloadSchema>;
+/** A payload as it may be stored: fields added later can be missing (they have defaults). */
+export type StoredProposalPayload = z.input<typeof ProposalPayloadSchema>;
 export type ProposalKind = ProposalPayload["kind"];
 export type PayloadOf<K extends ProposalKind> = Extract<ProposalPayload, { kind: K }>;
 
@@ -171,11 +183,21 @@ export const PROPOSAL_LABELS: Record<ProposalKind, string> = {
   needs_clarification: "Question",
 };
 
+/**
+ * A stored payload with the defaults of fields added since it was stored, so
+ * proposals made before a schema change still load, edit and execute. A value
+ * that no longer parses is returned as it is; approving it fails validation.
+ */
+export function parsePayload(value: unknown): ProposalPayload {
+  const r = ProposalPayloadSchema.safeParse(value);
+  return r.success ? r.data : (value as ProposalPayload);
+}
+
 /** The payload that runs: the user's edit when there is one, else the proposal as made. */
 export const effectivePayload = (row: {
   readonly payload: unknown;
   readonly editedPayload: unknown;
-}): ProposalPayload => (row.editedPayload ?? row.payload) as ProposalPayload;
+}): ProposalPayload => parsePayload(row.editedPayload ?? row.payload);
 
 export type IssueRefsOptions = {
   /** `"new"` keeps only `$new:n` refs, `"keys"` only real issue keys. */

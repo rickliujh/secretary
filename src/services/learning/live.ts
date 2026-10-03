@@ -197,7 +197,7 @@ const make = Effect.gen(function* () {
           .pipe(
             Effect.map((x) => {
               model = x.model;
-              return mapItemOutput(x.value, item.quote).map((m) => m.payload);
+              return mapItemOutput(x.value, item.quote, snapshot).map((m) => m.payload);
             }),
             Effect.catchIf(
               (e) => e.kind === "schema",

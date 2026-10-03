@@ -2,6 +2,7 @@
  * Story point totals for a sprint (D35), for chat and anywhere else that asks
  * "how many points do I have". Computed in code; the model only reports them.
  */
+import { userActiveSprint } from "@/services/sprints/active";
 import type { SprintInfo } from "@/services/sprints/calendar";
 
 export type PointsIssue = {
@@ -92,7 +93,5 @@ export function pickSprint(
       null
     );
   }
-  const mine = new Set(issues.filter((i) => me && i.assignee === me).map((i) => i.sprint));
-  const actives = sprints.filter((s) => s.state === "active");
-  return actives.find((s) => mine.has(s.name)) ?? actives[0] ?? null;
+  return userActiveSprint(sprints, issues, me);
 }

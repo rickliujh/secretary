@@ -65,6 +65,9 @@ function PayloadView({ p, lookups }: { p: ProposalPayload; lookups: Lookups }) {
           <Row label="Priority">{p.priority}</Row>
           <Row label="Assignee">{p.assignee}</Row>
           <Row label="Due">{p.dueDate}</Row>
+          <Row label="Labels">{p.labels.length > 0 && p.labels.join(", ")}</Row>
+          <Row label="Asked by">{person(p.requesterPersonId)}</Row>
+          <Row label="Sprint">{p.joinSprint && "Joins your active sprint"}</Row>
           <Row label="Description">{p.descriptionMd && <Markdown>{p.descriptionMd}</Markdown>}</Row>
         </dl>
       );
@@ -203,6 +206,7 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
     error?: string;
     issueKey?: string;
     communicationId?: string;
+    warning?: string;
   } | null;
   const pending = proposal.status === "pending";
   const busy = approve.isPending || reject.isPending;
@@ -268,6 +272,9 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
             </>
           )}
         </p>
+      )}
+      {proposal.status === "executed" && result?.warning && (
+        <p className="text-sm text-amber-700 dark:text-amber-300">{result.warning}</p>
       )}
       {proposal.status === "failed" && result?.error && (
         <p className="text-sm text-destructive">{result.error}</p>

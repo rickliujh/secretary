@@ -30,8 +30,10 @@ import { inboxDetail, type ProposalView, type ThreadMessage } from "@/services/i
 import type { Source } from "@/services/intake";
 import type { MessagePart } from "@/services/intake/thread";
 import { describePayload } from "@/services/proposals/schema";
+import { groupSmallAsks } from "@/services/small-asks/bundle";
 import { Composer, type ComposerMessage } from "./composer";
 import { ProposalCard } from "./proposal-card";
+import { SmallAskRow } from "./small-ask-row";
 import { useDecisions, useReply } from "./use-inbox";
 
 function PastedText({ text, source }: { text: string; source: string | null }) {
@@ -170,13 +172,23 @@ function AssistantTurn({
         <Sparkles className="size-3.5 shrink-0" />
         {summary ?? (shown.length ? "Here is what I propose." : "Nothing to do here.")}
       </p>
-      {shown.map((p) =>
-        p.kind === "needs_clarification" ? (
+      {groupSmallAsks(shown).map((entry) => {
+        if (entry.type === "track")
+          return (
+            <SmallAskRow
+              key={entry.create.id}
+              create={entry.create}
+              members={entry.members}
+              lookups={lookups}
+            />
+          );
+        const p = entry.proposal;
+        return p.kind === "needs_clarification" ? (
           <QuestionCard key={p.id} proposal={p} answering={p.id === answeringId} />
         ) : (
           <ProposalCard key={p.id} proposal={p} lookups={lookups} />
-        ),
-      )}
+        );
+      })}
       {replaced.length > 0 && (
         <details className="text-xs text-muted-foreground">
           <summary className="cursor-pointer">{replaced.length} replaced by a later reply</summary>

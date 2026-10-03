@@ -91,6 +91,8 @@ export const issueMeta = sqliteTable("issue_meta", {
   snoozedUntil: text("snoozed_until"),
   lastViewedAt: text("last_viewed_at"),
   health: text("health"),
+  /** The contact who asked for this issue, for a small ask (FR-10.4, D44). */
+  requesterPersonId: text("requester_person_id"),
 });
 
 export const issueNotes = sqliteTable(

@@ -145,6 +145,8 @@ export type CreateIssueInput = {
   priority: string | null;
   assignee: string | null;
   dueDate: string | null;
+  /** Sent when the create screen has a Labels field (D44). */
+  labels?: readonly string[];
 };
 
 export type CreateContext = {
@@ -163,6 +165,8 @@ export type CreatePlan = {
   request: JiraWrite;
   /** Epic to link after creation when Jira does not accept it on the create screen. */
   epicAfterCreate: string | null;
+  /** Labels asked for that the create screen has no field for, so they were not sent. */
+  labelsDropped: string[];
 };
 
 // Fields Jira fills itself or that the app always sends.
@@ -183,6 +187,8 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
   if (input.assignee)
     set("assignee", ctx.deployment === "cloud" ? { id: input.assignee } : { name: input.assignee });
   if (input.dueDate) set("duedate", input.dueDate);
+  const labels = [...new Set(input.labels ?? [])];
+  if (labels.length) set("labels", labels);
 
   const isSubtask = /sub-?task/i.test(input.issueTypeName);
   if (isSubtask) {
@@ -220,5 +226,9 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
       `Jira requires ${missing.join(", ")} for a ${input.issueTypeName} in ${input.projectKey}. Create it in Jira, or edit the proposal once these can be set.`,
     );
   }
-  return { request: { method: "POST", path: "issue", body: { fields } }, epicAfterCreate };
+  return {
+    request: { method: "POST", path: "issue", body: { fields } },
+    epicAfterCreate,
+    labelsDropped: allowed.has("labels") ? [] : labels,
+  };
 }

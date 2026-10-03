@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { EditMetaSchema } from "@/services/jira";
 import editmeta from "@/test/fixtures/jira/editmeta-PAY-2.json";
-import { buildJiraWrite, buildMoveToSprint, MAX_SPRINT_MOVE_ISSUES } from "./jira-mapping";
+import {
+  buildCreateIssue,
+  buildJiraWrite,
+  buildMoveToSprint,
+  MAX_SPRINT_MOVE_ISSUES,
+} from "./jira-mapping";
 
 const fieldIds = {
   epicLink: "customfield_10100",
@@ -167,5 +172,59 @@ describe("sprint moves (Agile API)", () => {
     expect(() => buildMoveToSprint(7, [...keys, "PAY-99"])).toThrow("at most 50");
     expect(() => buildMoveToSprint(7, [])).toThrow("No issues");
     expect(() => buildMoveToSprint(0, ["PAY-1"])).toThrow("Invalid sprint id");
+  });
+});
+
+describe("buildCreateIssue", () => {
+  const input = {
+    projectKey: "ASK",
+    issueTypeId: "2",
+    issueTypeName: "Task",
+    summary: "Send the Q3 numbers",
+    descriptionMd: "**Asked** by Dana",
+    parent: null,
+    epic: null,
+    priority: null,
+    assignee: "rliu",
+    dueDate: "2026-09-25",
+  };
+  const field = (fieldId: string, required = false) => ({ fieldId, name: fieldId, required });
+  const screen = ["project", "issuetype", "summary", "description", "assignee", "duedate"].map(
+    (f) => field(f),
+  );
+
+  test("labels are sent when the create screen has the field (D44)", () => {
+    const plan = buildCreateIssue(
+      { ...input, labels: ["small-ask", "small-ask"] },
+      { fieldIds: {}, fields: [...screen, field("labels")] },
+    );
+    expect(plan.request.body).toEqual({
+      fields: {
+        project: { key: "ASK" },
+        issuetype: { id: "2" },
+        summary: "Send the Q3 numbers",
+        description: "*Asked* by Dana",
+        assignee: { name: "rliu" },
+        duedate: "2026-09-25",
+        labels: ["small-ask"],
+      },
+    });
+    expect(plan.labelsDropped).toEqual([]);
+  });
+
+  test("without a Labels field the labels are reported as dropped, not sent", () => {
+    const plan = buildCreateIssue(
+      { ...input, labels: ["small-ask"] },
+      { deployment: "cloud", fieldIds: {}, fields: screen },
+    );
+    const fields = (plan.request.body as { fields: Record<string, unknown> }).fields;
+    expect(fields.labels).toBeUndefined();
+    expect(fields.assignee).toEqual({ id: "rliu" });
+    expect(plan.labelsDropped).toEqual(["small-ask"]);
+  });
+
+  test("a create without labels (stored before labels existed) sends none", () => {
+    const plan = buildCreateIssue(input, { fieldIds: {}, fields: [...screen, field("labels")] });
+    expect((plan.request.body as { fields: object }).fields).not.toHaveProperty("labels");
   });
 });

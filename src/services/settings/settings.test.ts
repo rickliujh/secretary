@@ -53,6 +53,12 @@ describe("Settings schema", () => {
         dependency: 3,
         pinned: 10,
       },
+      smallAsks: {
+        projectKey: "",
+        label: "small-ask",
+        joinActiveSprint: true,
+        hintDismissed: false,
+      },
       network: {
         proxyMode: "system",
         proxyUrl: "",
@@ -62,6 +68,17 @@ describe("Settings schema", () => {
     });
     // Defaults are fresh objects, not one shared instance.
     expect(defaultSettings().jira.trackedEpics).not.toBe(defaultSettings().jira.trackedEpics);
+  });
+
+  test("small-asks home: defaults, and labels without spaces (D44)", () => {
+    expect(SettingsSchema.parse({ smallAsks: { projectKey: "ASK" } }).smallAsks).toEqual({
+      projectKey: "ASK",
+      label: "small-ask",
+      joinActiveSprint: true,
+      hintDismissed: false,
+    });
+    expect(SettingsSchema.safeParse({ smallAsks: { label: "small ask" } }).success).toBe(false);
+    expect(SettingsSchema.safeParse({ smallAsks: { projectKey: "ask" } }).success).toBe(false);
   });
 
   test("partial data keeps stored values and fills the rest", async () => {

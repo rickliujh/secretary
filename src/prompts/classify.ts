@@ -18,10 +18,11 @@ import {
   ProposalPayloadSchema,
 } from "@/services/proposals/schema";
 import type { Reason } from "@/services/retrieval/ranking";
+import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small-asks/home";
 import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 6;
+export const CLASSIFY_PROMPT_VERSION = 7;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -61,8 +62,23 @@ export type ThreadContext = {
   others?: { summary: string | null; quote: string }[];
 };
 
+/**
+ * The small-asks home (D44) as code applies it. The model only sees the types
+ * and the rule; project, label, assignee and sprint are never its choice.
+ */
+export type SmallAskHomeSnapshot = {
+  projectKey: string;
+  label: string;
+  joinSprint: boolean;
+  /** Types a small ask may take in the home; empty when Jira's metadata is not synced yet. */
+  issueTypes: string[];
+  defaultType: string | null;
+};
+
 /** Everything the model sees for one item, stored on the item for replay. */
 export type ItemSnapshot = {
+  /** Set when a small-asks home is configured (prompt version 7, D44). */
+  smallAsks?: SmallAskHomeSnapshot | null;
   /** Sprint calendar around today (D23); absent in snapshots before prompt version 5. */
   sprints?: PromptSprint[];
   promptVersion: number;
@@ -108,6 +124,8 @@ const nullableEnum = (values: readonly string[]) =>
   values.length > 0 ? enumOf(values).nullish() : z.null().optional();
 const nullableText = (description?: string) =>
   description ? z.string().nullish().describe(description) : z.string().nullish();
+
+const YES_NO = ["yes", "no"] as const;
 
 /** Fields each proposal kind must fill; the rest stay null (checked in `validateItemOutput`). */
 const REQUIRED_FIELDS: Record<string, readonly string[]> = {
@@ -158,10 +176,30 @@ export function buildItemSchema(s: ItemSnapshot) {
       (k !== "update_team" || teamIds.length > 0),
   );
   const uses = (...ks: string[]) => `Used by ${ks.join(", ")}.`;
+  const home = s.smallAsks ?? null;
+  const needs = (k: string) =>
+    k === "create_issue" && home
+      ? "ref, summary, smallAsk; projectKey and issueType too when smallAsk is no"
+      : REQUIRED_FIELDS[k]?.join(", ");
+  // Only with a home configured (D44); without one the schema is as before.
+  const smallAskFields = home
+    ? {
+        smallAsk: nullableEnum(YES_NO).describe(
+          `yes for a small ask (see the rules), no for planned work. ${uses("create_issue")}`,
+        ),
+        ...(personIds.length
+          ? {
+              requesterPersonId: nullableEnum(personIds).describe(
+                `For a small ask: the contact who asked, when it was not the sender of the input. ${uses("create_issue")}`,
+              ),
+            }
+          : {}),
+      }
+    : {};
 
   const proposal = z.object({
     kind: enumOf(kinds).describe(
-      `The action. Fields each kind needs: ${kinds.map((k) => `${k}: ${REQUIRED_FIELDS[k]?.join(", ")}`).join("; ")}. Leave other fields empty.`,
+      `The action. Fields each kind needs: ${kinds.map((k) => `${k}: ${needs(k)}`).join("; ")}. Leave other fields empty.`,
     ),
     target: nullableEnum(targets).describe(
       `The issue acted on. ${uses("add_comment", "update_issue", "transition_issue", "link_dependency")}`,
@@ -185,6 +223,7 @@ export function buildItemSchema(s: ItemSnapshot) {
       `Jira user id from the list. ${uses("create_issue", "update_issue")}`,
     ),
     dueDate: nullableText(`YYYY-MM-DD. ${uses("create_issue", "update_issue")}`),
+    ...smallAskFields,
     // add_comment
     body: nullableText(`Comment text in Markdown. ${uses("add_comment")}`),
     // transition_issue
@@ -267,9 +306,58 @@ const defined = <T extends Record<string, unknown>>(o: T) =>
     Object.entries(o).filter(([, v]) => v !== null && v !== undefined),
   ) as Partial<T>;
 
+/** A create_issue the model marked as a small ask, with a home configured (D44). */
+const isSmallAsk = (p: Record<string, unknown>, s?: ItemSnapshot) =>
+  p.kind === "create_issue" && !!s?.smallAsks && p.smallAsk === "yes";
+
+/**
+ * Where a small ask goes and what it is, decided in code (D44): the model's type
+ * or the home's default; a sub-task goes into its parent's project, anything
+ * else into the home.
+ */
+function smallAskPlacement(p: Record<string, unknown>, s: ItemSnapshot) {
+  const home = s.smallAsks as SmallAskHomeSnapshot;
+  const issueType = str(p.issueType) ?? home.defaultType ?? "Task";
+  const subtask = isSubtaskType(issueType);
+  const parent = subtask ? s.candidates.find((c) => c.key === p.parent) : undefined;
+  return { home, issueType, subtask, projectKey: parent?.projectKey ?? home.projectKey };
+}
+
+/** Maps a small ask (D44): code sets project, label, assignee, sprint flag and requester. */
+function smallAskPayload(p: ItemOutput["proposals"][number], s: ItemSnapshot): ProposalPayload {
+  const { home, issueType, subtask, projectKey } = smallAskPlacement(p, s);
+  const named = s.people.find((x) => x.id === str(p.requesterPersonId));
+  // The sender asked, unless nobody sent it; then the contact the model picked.
+  const requester = s.sender ?? named ?? null;
+  return ProposalPayloadSchema.parse({
+    kind: "create_issue",
+    ref: p.ref,
+    projectKey,
+    issueType,
+    summary: p.summary,
+    descriptionMd: withProvenance(str(p.description), {
+      requester: requester?.displayName ?? null,
+      source: s.source,
+      date: s.today,
+      quote: s.quote,
+    }),
+    parent: subtask ? str(p.parent) : null,
+    epic: subtask ? null : str(p.epic),
+    priority: str(p.priority),
+    assignee: s.me?.username ?? null,
+    dueDate: str(p.dueDate),
+    labels: [home.label],
+    smallAsk: true,
+    requesterPersonId: requester?.id ?? null,
+    // Sub-tasks follow their parent's sprint.
+    joinSprint: home.joinSprint && !subtask,
+  });
+}
+
 /** Maps one model proposal to a canonical payload (throws on shapes the schema should have prevented). */
-function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
+function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): ProposalPayload {
   const g = (k: string) => p[k];
+  if (s && isSmallAsk(p, s)) return smallAskPayload(p, s);
   switch (p.kind) {
     case "create_issue":
       return ProposalPayloadSchema.parse({
@@ -385,6 +473,35 @@ const validDate = (v: unknown) =>
 const CANCEL_STATUS =
   /cancel|won'?t\s*(do|fix)|wontfix|abandon|reject|declin|obsolete|duplicate|invalid|not\s*needed|descoped/i;
 
+/** The checks for a small ask (D44): its type and, for a sub-task, its parent. */
+function validateSmallAsk(
+  p: ItemOutput["proposals"][number],
+  s: ItemSnapshot,
+  at: string,
+): string[] {
+  const errors: string[] = [];
+  const { home, issueType, subtask, projectKey } = smallAskPlacement(p, s);
+  if (subtask) {
+    const parent = s.candidates.find((c) => c.key === p.parent);
+    if (!parent || parent.issueType === "Epic" || isSubtaskType(parent.issueType))
+      errors.push(
+        `${at}: a small ask can be a Sub-task only under an existing candidate story or task; set parent to it, or pick another type.`,
+      );
+    const proj = s.projects.find((x) => x.key === projectKey);
+    if (parent && proj?.complete && !proj.issueTypes.includes(issueType))
+      errors.push(`${at}: ${projectKey} has no issue type ${issueType}.`);
+  } else if (/epic/i.test(issueType)) {
+    errors.push(`${at}: a small ask cannot be an Epic.`);
+  } else if (p.parent) {
+    errors.push(`${at}: only a Sub-task has a parent; use epic for epics.`);
+  } else if (home.issueTypes.length > 0 && !home.issueTypes.includes(issueType)) {
+    errors.push(
+      `${at}: a small ask in ${home.projectKey} can be ${home.issueTypes.join(", ")}, not ${issueType}.`,
+    );
+  }
+  return errors;
+}
+
 export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   const errors: string[] = [];
   const candidates = new Map(s.candidates.map((c) => [c.key, c]));
@@ -402,7 +519,12 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
 
   out.proposals.forEach((p, i) => {
     const at = `Proposal ${i + 1} (${p.kind})`;
-    const missing = (REQUIRED_FIELDS[p.kind] ?? []).filter((f) => {
+    const small = isSmallAsk(p, s);
+    // Code places a small ask, so the model need not name its project or type (D44).
+    const required = (REQUIRED_FIELDS[p.kind] ?? []).filter(
+      (f) => !small || (f !== "projectKey" && f !== "issueType"),
+    );
+    const missing = required.filter((f) => {
       const v = p[f];
       return v === null || v === undefined || (typeof v === "string" && !v.trim());
     });
@@ -423,7 +545,10 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
     if (used("assignee") && typeof p.assignee === "string" && !knownUsers.has(p.assignee))
       errors.push(`${at}: assignee ${p.assignee} is not a known Jira user.`);
 
-    if (p.kind === "create_issue") {
+    if (p.kind === "create_issue" && s.smallAsks && p.smallAsk !== "yes" && p.smallAsk !== "no")
+      errors.push(`${at}: set smallAsk to yes or no.`);
+    if (small) errors.push(...validateSmallAsk(p, s, at));
+    if (p.kind === "create_issue" && !small) {
       const proj = project(String(p.projectKey));
       if (
         proj?.complete &&
@@ -437,6 +562,8 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       if (subtask && !p.parent) errors.push(`${at}: a Sub-task needs a parent.`);
       if (!subtask && p.parent)
         errors.push(`${at}: only a Sub-task has a parent; use epic for epics.`);
+    }
+    if (p.kind === "create_issue") {
       if (typeof p.epic === "string" && !isEpic(p.epic))
         errors.push(`${at}: epic ${p.epic} is not an Epic.`);
       if (p.issueType === "Epic" && p.epic) errors.push(`${at}: an Epic cannot belong to an epic.`);
@@ -480,7 +607,7 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
     if (p.kind === "add_comment" && !str(p.body)) errors.push(`${at}: comment body is empty.`);
     // A structurally valid proposal must also map cleanly to a payload.
     try {
-      toPayload(p);
+      toPayload(p, s);
     } catch (e) {
       errors.push(
         `${at}: ${e instanceof z.ZodError ? e.issues.map((x) => `${x.path.join(".")}: ${x.message}`).join("; ") : String(e)}`,
@@ -510,12 +637,15 @@ export function fromPayload(
         projectKey: p.projectKey,
         issueType: p.issueType,
         summary: p.summary,
-        description: p.descriptionMd,
+        // A small ask's provenance is code's; the model sees and returns its own words.
+        description: p.smallAsk ? stripProvenance(p.descriptionMd) : p.descriptionMd,
         parent: r(p.parent),
         epic: r(p.epic),
         priority: p.priority,
-        assignee: p.assignee,
+        // Code assigns a small ask; the user may not be in this item's list of Jira users.
+        assignee: p.smallAsk ? null : p.assignee,
         dueDate: p.dueDate,
+        ...(p.smallAsk ? { smallAsk: "yes", requesterPersonId: p.requesterPersonId } : {}),
       };
     case "update_issue":
       return {
@@ -586,9 +716,9 @@ export function fromPayload(
  * `quote` stands in for missing evidence: a model that forgets to quote has not
  * made the action wrong, so it is not worth a repair or a question.
  */
-export function mapItemOutput(out: ItemOutput, quote = ""): MappedProposal[] {
+export function mapItemOutput(out: ItemOutput, quote = "", s?: ItemSnapshot): MappedProposal[] {
   return out.proposals.map((p) => ({
-    payload: toPayload(p),
+    payload: toPayload(p, s),
     rationale: p.rationale,
     evidence: p.evidence?.trim() || quote.slice(0, 300),
     confidence: clamp01(p.confidence),
@@ -611,7 +741,15 @@ ${HARD_RULES}
 - When the input asks to cancel, close, drop or stop a ticket, propose a transition_issue to the project's status for that: a cancel-like status (Cancelled, Won't Do, Rejected, Obsolete) if the project lists one, otherwise its done or closed status. A comment alone does not close a ticket.
 - When you move an issue to a closing status (cancelled, won't do, rejected, duplicate, obsolete, done or closed) for a reason in the input, also add an add_comment on the same issue that says why, in one or two sentences drawn from the input, so people reading the ticket know. When the closing status is a done status but the work was not done, the comment says the ticket was closed without being done. A cancellation always gets that comment.
 - Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
-- Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
+${
+  s.smallAsks
+    ? `- A small ask is a small task for the user that arrives beside planned work: a reply they owe, something to send, a question to answer, something to chase or check, a document to update. When the input holds one that no candidate issue covers, propose create_issue with smallAsk yes. Write the summary as the action ("Send Dana the Q3 numbers"), set dueDate when a deadline is given, pick issueType from the small-asks home's types (leave it empty for the default), and set epic only when a candidate epic clearly fits. Do not choose its project, assignee or labels; code sets them and records who asked.
+- When a small ask belongs to an existing candidate story or task, make it a Sub-task of that issue (issueType Sub-task, parent that issue, smallAsk yes). When a candidate issue already covers the ask, act on that issue instead of creating one.
+- Planned work (a feature, a bug, a project task, an epic) is not a small ask: create_issue with smallAsk no, choosing projectKey and issueType yourself.
+- When the input says the small ask waits on someone or something, add a link_dependency whose target is the new issue's ref.
+`
+    : ""
+}- Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
 - Use remember for rules and preferences the user states about how to handle future work.
 - The user reviews and can edit every proposal before it runs, so a sensible proposal with a stated assumption beats a question. Decide details yourself: the priority (from urgency, deadlines, blocking and customer impact), wording, and which listed value fits. Say what you assumed in the rationale.
 - Ask a question only when you cannot tell which issue, person or kind of action the input is about. Never ask the user to pick a value you could reasonably choose, such as a priority.
@@ -666,8 +804,13 @@ ${
       `## Notes\n${s.notes.map((n) => `- About ${n.about}: ${n.title}\n  ${n.excerpt}`).join("\n")}`,
     );
   }
+  const home = s.smallAsks;
   blocks.push(
-    `## Projects\n${s.projects.map((p) => `- ${p.key}: issue types ${p.issueTypes.join(", ") || "unknown"}; statuses ${p.statuses.join(", ") || "unknown"}`).join("\n") || "- none"}\nPriorities (highest first): ${s.priorities.join(", ") || "unknown"}`,
+    `## Projects\n${s.projects.map((p) => `- ${p.key}: issue types ${p.issueTypes.join(", ") || "unknown"}; statuses ${p.statuses.join(", ") || "unknown"}`).join("\n") || "- none"}\nPriorities (highest first): ${s.priorities.join(", ") || "unknown"}${
+      home
+        ? `\nSmall-asks home: project ${home.projectKey}; issue types ${home.issueTypes.join(", ") || "unknown"}${home.defaultType ? `; default ${home.defaultType}` : ""}`
+        : ""
+    }`,
   );
   if (s.sprints?.length) {
     blocks.push(

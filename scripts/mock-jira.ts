@@ -619,6 +619,7 @@ export function createHandler(issues: Map<string, Issue>) {
         { fieldId: "priority", name: "Priority", required: false, hasDefaultValue: true },
         { fieldId: "assignee", name: "Assignee", required: false },
         { fieldId: "duedate", name: "Due Date", required: false },
+        { fieldId: "labels", name: "Labels", required: false },
         ...(meta[2] === "Sub-task" ? [{ fieldId: "parent", name: "Parent", required: true }] : []),
         ...(meta[2] === "Epic" ? [{ fieldId: EPIC_NAME, name: "Epic Name", required: true }] : []),
         ...(meta[2] !== "Epic" && meta[2] !== "Sub-task"
@@ -652,7 +653,7 @@ export function createHandler(issues: Map<string, Issue>) {
         epic: (f[EPIC_LINK] as string | undefined) ?? null,
         epicName: (f[EPIC_NAME] as string | undefined) ?? null,
         parent: (f.parent as { key?: string } | undefined)?.key ?? null,
-        labels: [],
+        labels: Array.isArray(f.labels) ? f.labels.map(String) : [],
         due: (f.duedate as string | undefined) ?? null,
         created: now,
         updated: now,

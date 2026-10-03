@@ -10,7 +10,7 @@ import { makeScriptedModels, type Scripted } from "@/services/llm/test";
 import { PlanningLive } from "@/services/planning/live";
 import { ReportsLive } from "@/services/report/live";
 import { RetrievalLive } from "@/services/retrieval/live";
-import type { DataSource } from "@/services/settings/schema";
+import type { AppSettings, DataSource } from "@/services/settings/schema";
 import { SourcesLive } from "@/services/sources/live";
 import { type MemoryVaults, makeObsidianCliTest } from "@/services/sources/test";
 import { testProvider } from "./helpers";
@@ -21,9 +21,10 @@ import type { StubRoute } from "./stub-fetch";
 export function intakeTestLayer(
   scripts: Record<string, Scripted[]>,
   extraRoutes: StubRoute[] = [],
-  opts: { vaults?: MemoryVaults; dataSources?: DataSource[] } = {},
+  opts: { vaults?: MemoryVaults; dataSources?: DataSource[]; settings?: Partial<AppSettings> } = {},
 ) {
   const jira = syncedJiraLayer(extraRoutes, {
+    ...opts.settings,
     dataSources: opts.dataSources ?? [],
     providers: [testProvider],
     tiers: {

@@ -125,6 +125,27 @@ export const DataSourceSchema = z.object({
 });
 export type DataSource = z.infer<typeof DataSourceSchema>;
 
+/** A Jira label: no spaces (Jira splits on them). */
+export const JiraLabel = z
+  .string()
+  .trim()
+  .min(1, "Enter a label")
+  .max(255)
+  .regex(/^\S+$/, "Labels cannot contain spaces");
+
+/**
+ * The small-asks home (FR-10, D44): where small asks become tickets. An empty
+ * project key means no home; intake then behaves as before.
+ */
+export const SmallAsksSettingsSchema = z.object({
+  projectKey: z.union([z.literal(""), z.string().regex(/^[A-Z][A-Z0-9_]+$/)]).default(""),
+  label: JiraLabel.default("small-ask"),
+  joinActiveSprint: z.boolean().default(true),
+  /** The Inbox points to this setting once while no home is set. */
+  hintDismissed: z.boolean().default(false),
+});
+export type SmallAsksSettings = z.infer<typeof SmallAsksSettingsSchema>;
+
 export const SettingsSchema = z.object({
   version: z.literal(1).default(1),
   providers: z.array(ProviderSchema).default([]),
@@ -154,6 +175,7 @@ export const SettingsSchema = z.object({
     })
     .prefault({}),
   scoring: ScoringWeightsSchema.prefault({}),
+  smallAsks: SmallAsksSettingsSchema.prefault({}),
   dataSources: z.array(DataSourceSchema).default([]),
   /** Dashboard questions for the chat, in order (D42). */
   suggestedPrompts: z.array(SuggestedPromptSchema).max(12).default(DEFAULT_SUGGESTED_PROMPTS),
