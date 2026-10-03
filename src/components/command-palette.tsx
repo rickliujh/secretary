@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Building2, NotebookPen, Settings2, Ticket, UserRound } from "lucide-react";
+import { Building2, NotebookPen, PenLine, Settings2, Ticket, UserRound } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { openCapture } from "@/app/capture";
-import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
+import { ALL_PAGES, PAGE_TABS } from "@/app/nav";
 import { usePeople, useTeams, useTicketRows } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { SETTINGS_TABS } from "@/app/settings-tabs";
+import { useDraftPanel } from "@/components/drafts/use-draft-panel";
 import { useTicketPanel } from "@/components/tickets/ticket-link";
 import {
   Command,
@@ -23,7 +24,7 @@ import { searchTicketKeys } from "@/services/tickets/queries";
 
 const MAX_TICKETS = 20;
 
-/** Ctrl/Cmd+K palette: pages, settings tabs, tickets, contacts and teams. */
+/** Ctrl/Cmd+K palette: pages and their tabs, settings tabs, tickets, contacts, teams and a new draft. */
 export function CommandPalette({
   open,
   onOpenChange,
@@ -33,6 +34,7 @@ export function CommandPalette({
 }) {
   const navigate = useNavigate();
   const openTicket = useTicketPanel();
+  const drafts = useDraftPanel();
   const [input, setInput] = useState("");
   const q = useDeferredValue(input.trim());
   const rows = useTicketRows({ enabled: open });
@@ -108,7 +110,9 @@ export function CommandPalette({
                 <CommandItem
                   key={p.id}
                   value={`person ${p.displayName} ${p.jiraUsername ?? ""} ${p.title ?? ""}`}
-                  onSelect={() => go(() => navigate({ to: "/people", search: { id: p.id } }))}
+                  onSelect={() =>
+                    go(() => navigate({ to: "/context", search: { tab: "people", id: p.id } }))
+                  }
                 >
                   <UserRound />
                   {p.displayName}
@@ -123,7 +127,9 @@ export function CommandPalette({
                 <CommandItem
                   key={t.id}
                   value={`team ${t.name}`}
-                  onSelect={() => go(() => navigate({ to: "/teams", search: { id: t.id } }))}
+                  onSelect={() =>
+                    go(() => navigate({ to: "/context", search: { tab: "teams", id: t.id } }))
+                  }
                 >
                   <Building2 />
                   {t.name}
@@ -131,11 +137,31 @@ export function CommandPalette({
               ))}
             </CommandGroup>
           )}
+          <CommandGroup heading="Drafts">
+            <CommandItem
+              value="new draft message email teams"
+              onSelect={() => go(() => drafts.open({ prefill: {} }))}
+            >
+              <PenLine />
+              New draft
+            </CommandItem>
+          </CommandGroup>
           <CommandGroup heading="Pages">
-            {[...WORK_NAV, ...CONTEXT_NAV, SETTINGS_NAV].map((item) => (
+            {ALL_PAGES.map((item) => (
               <CommandItem key={item.to} onSelect={() => go(() => navigate({ to: item.to }))}>
                 <item.icon />
                 {item.label}
+              </CommandItem>
+            ))}
+            {PAGE_TABS.map((t) => (
+              <CommandItem
+                key={`${t.page}-${t.label}`}
+                value={`${t.page} ${t.label}`}
+                onSelect={() => go(() => navigate(t.link))}
+              >
+                <t.icon />
+                {t.label}
+                <CommandShortcut>{t.page}</CommandShortcut>
               </CommandItem>
             ))}
           </CommandGroup>

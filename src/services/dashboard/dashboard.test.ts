@@ -9,7 +9,7 @@ import { promptOf } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { dashboardWithBrief, generateBrief } from "./brief";
-import { loadDashboardInputs, setOverride, setPinned, snooze } from "./data";
+import { loadDashboardInputs, loadEpicHealth, setOverride, setPinned, snooze } from "./data";
 import { buildDashboard } from "./sections";
 
 // Wednesday 24 September 2026, mid-morning.
@@ -76,6 +76,16 @@ describe("dashboard data", () => {
       todo: 1,
       blocked: 1,
     });
+  });
+
+  test("epic health loads on its own for Sprint > Epics (D50)", async () => {
+    const { layer } = intakeTestLayer({});
+    const epics = await Effect.runPromise(
+      Effect.provide(Effect.zipRight(seedWork, loadEpicHealth(NOW)), layer),
+    );
+    expect(epics).toEqual([
+      expect.objectContaining({ key: "PAY-1", total: 2, done: 0, inProgress: 1, todo: 1 }),
+    ]);
   });
 
   test("pin, snooze and override change the local ranking only", async () => {

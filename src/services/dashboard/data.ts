@@ -3,13 +3,14 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { z } from "zod";
 import { issueMeta, jiraComments, jiraIssues } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { readJson } from "@/lib/json";
 import { query } from "@/services/db";
 import { listDependencies } from "@/services/dependencies/queries";
 import { type IssueLink, IssueLinkSchema } from "@/services/jira/schemas";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
-import type { DashboardInputs, DashIssue } from "./sections";
+import { buildEpicHealth, type DashboardInputs, type DashIssue } from "./sections";
 
 const COMMENT_WINDOW_DAYS = 14;
 
@@ -100,6 +101,10 @@ export const loadDashboardInputs = (now = new Date()) =>
       comments: comments.map((c) => ({ ...c, mentionsMe: !!Number(c.mentionsMe) })),
     } satisfies DashboardInputs;
   });
+
+/** Sprint > Epics (D50): the tracked epics' rollup, without building the whole dashboard. */
+export const loadEpicHealth = (now = new Date()) =>
+  Effect.map(loadDashboardInputs(now), (input) => buildEpicHealth(input, localDate(now)));
 
 // ---------------------------------------------------------------------------
 // Local, secretary-only ticket state (FR-5.3): never written to Jira.

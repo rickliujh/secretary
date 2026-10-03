@@ -62,7 +62,7 @@ export function RecipientPicker({
         <Command>
           <CommandInput placeholder="Search contacts and teams" />
           <CommandList>
-            <CommandEmpty>No match. Add contacts on the People page.</CommandEmpty>
+            <CommandEmpty>No match. Add contacts in Context &gt; People.</CommandEmpty>
             <CommandGroup heading="People">
               {people.map((p) => (
                 <CommandItem

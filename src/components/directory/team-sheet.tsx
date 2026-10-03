@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, Pencil, Trash2 } from "lucide-react";
+import { ExternalLink, Pencil, PenLine, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
+import { useDraftPanel } from "@/components/drafts/use-draft-panel";
 import { Markdown } from "@/components/markdown";
 import {
   AlertDialog,
@@ -46,6 +47,7 @@ export function TeamSheet({
     enabled: !!teamId,
   });
   const remove = useDirectoryMutation((id: string) => deleteTeam(id), "Team deleted");
+  const drafts = useDraftPanel();
   const d = detail.data;
   return (
     <Sheet open={!!teamId} onOpenChange={(o) => !o && onClose()}>
@@ -55,6 +57,14 @@ export function TeamSheet({
           <SheetTitle className="text-lg">{d?.team.name}</SheetTitle>
           {d && (
             <div className="flex gap-2 pt-2">
+              <Button
+                size="sm"
+                onClick={() =>
+                  drafts.open({ prefill: { recipient: { type: "team", id: d.team.id } } })
+                }
+              >
+                <PenLine /> Draft a message
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
                 <Pencil /> Edit
               </Button>
@@ -102,7 +112,11 @@ export function TeamSheet({
                 <ul className="flex flex-col gap-1">
                   {d.members.map((m) => (
                     <li key={m.id}>
-                      <Link to="/people" search={{ id: m.id }} className="underline">
+                      <Link
+                        to="/context"
+                        search={{ tab: "people", id: m.id }}
+                        className="underline"
+                      >
                         {m.displayName}
                       </Link>
                       {m.title && <span className="text-muted-foreground"> · {m.title}</span>}

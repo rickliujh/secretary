@@ -166,6 +166,8 @@ export const SettingsSchema = z.object({
       outputLanguage: z.string().trim().min(1).default("English"),
       /** Month (1-12) the fiscal year starts; quarters in the sprint calendar follow it (D23). */
       fiscalYearStartMonth: z.number().int().min(1).max(12).default(1),
+      /** Puts the Drafts page back in the sidebar; drafts open as a panel either way (D50). */
+      draftsInSidebar: z.boolean().default(false),
     })
     .prefault({}),
   dependencies: z

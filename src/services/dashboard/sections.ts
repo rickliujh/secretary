@@ -62,6 +62,18 @@ export type DashboardInputs = {
   comments: RecentComment[];
 };
 
+/** One tracked epic's rollup over its cached children (FR-5.1; Sprint > Epics, D50). */
+export type EpicHealth = {
+  epic: DashIssue | null;
+  key: string;
+  total: number;
+  done: number;
+  inProgress: number;
+  todo: number;
+  blocked: number;
+  stale: number;
+};
+
 export type FocusItem = DashIssue & Scored;
 export type Flagged = { issue: DashIssue; reasons: string[] };
 
@@ -75,16 +87,7 @@ export type Dashboard = {
   })[];
   atRisk: Flagged[];
   dueSoon: (DashIssue & { daysLeft: number })[];
-  epicHealth: {
-    epic: DashIssue | null;
-    key: string;
-    total: number;
-    done: number;
-    inProgress: number;
-    todo: number;
-    blocked: number;
-    stale: number;
-  }[];
+  epicHealth: EpicHealth[];
   snoozed: number;
   inScope: number;
   /**
@@ -113,6 +116,33 @@ export function blockInfo(links: readonly IssueLink[]): { blockedBy: string[]; b
     if (l.outwardIssue && open(l.outwardIssue)) blocks.push(l.outwardIssue.key);
   }
   return { blockedBy, blocks };
+}
+
+/** Done / in progress / to do per tracked epic, plus blocked and stale counts. */
+export function buildEpicHealth(
+  input: Pick<DashboardInputs, "trackedEpics" | "issues">,
+  today: string,
+): EpicHealth[] {
+  const byKey = new Map(input.issues.map((i) => [i.key, i]));
+  return input.trackedEpics.map((key) => {
+    const children = input.issues.filter((i) => i.epicKey === key && !i.isSubtask);
+    const count = (cat: DashIssue["statusCategory"]) =>
+      children.filter((c) => c.statusCategory === cat).length;
+    const openChildren = children.filter((c) => c.statusCategory !== "done");
+    return {
+      epic: byKey.get(key) ?? null,
+      key,
+      total: children.length,
+      done: count("done"),
+      inProgress: count("indeterminate"),
+      todo: count("new"),
+      blocked: openChildren.filter(
+        (c) => blockInfo(c.links).blockedBy.length > 0 || /block|on hold/i.test(c.status),
+      ).length,
+      stale: openChildren.filter((c) => staleValue(c.updated, today).idle >= AT_RISK_IDLE_DAYS)
+        .length,
+    };
+  });
 }
 
 export function buildDashboard(
@@ -251,25 +281,7 @@ export function buildDashboard(
     .map((i) => ({ ...i, daysLeft: daysBetween(today, i.dueDate ?? today) }))
     .sort((a, b) => a.daysLeft - b.daysLeft || a.key.localeCompare(b.key));
 
-  const epicHealth = input.trackedEpics.map((key) => {
-    const children = input.issues.filter((i) => i.epicKey === key && !i.isSubtask);
-    const count = (cat: DashIssue["statusCategory"]) =>
-      children.filter((c) => c.statusCategory === cat).length;
-    const openChildren = children.filter((c) => c.statusCategory !== "done");
-    return {
-      epic: byKey.get(key) ?? null,
-      key,
-      total: children.length,
-      done: count("done"),
-      inProgress: count("indeterminate"),
-      todo: count("new"),
-      blocked: openChildren.filter(
-        (c) => blockInfo(c.links).blockedBy.length > 0 || /block|on hold/i.test(c.status),
-      ).length,
-      stale: openChildren.filter((c) => staleValue(c.updated, today).idle >= AT_RISK_IDLE_DAYS)
-        .length,
-    };
-  });
+  const epicHealth = buildEpicHealth(input, today);
 
   return {
     topFocus,

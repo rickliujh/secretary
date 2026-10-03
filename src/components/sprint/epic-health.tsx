@@ -1,9 +1,55 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { ChartNoAxesColumn, RefreshCw } from "lucide-react";
+import { describeError } from "@/app/errors";
+import { queryKeys } from "@/app/query-client";
+import { run } from "@/app/runtime";
+import { EmptyState, PageHeader } from "@/components/page";
 import { TicketLink } from "@/components/tickets/ticket-link";
-import type { Dashboard } from "@/services/dashboard/sections";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { loadEpicHealth } from "@/services/dashboard/data";
+import type { EpicHealth as EpicHealthRow } from "@/services/dashboard/sections";
+
+/** Sprint > Epics (D50): the epic health rollup that was on the dashboard. */
+export function EpicsPage() {
+  const epics = useQuery({
+    queryKey: queryKeys.epicHealth,
+    queryFn: ({ signal }) => run(loadEpicHealth(), signal),
+  });
+  return (
+    <div className="mx-auto flex max-w-4xl flex-col gap-4">
+      <PageHeader
+        title="Epics"
+        description="Each tracked epic's children: done, in progress and to do, with blocked and stale counts."
+      />
+      {epics.isPending ? (
+        <Skeleton className="h-40" />
+      ) : epics.isError ? (
+        <EmptyState
+          icon={ChartNoAxesColumn}
+          title={describeError(epics.error).title}
+          description={describeError(epics.error).description ?? "Epic health could not load."}
+          action={
+            <Button variant="outline" onClick={() => void epics.refetch()}>
+              <RefreshCw /> Retry
+            </Button>
+          }
+        />
+      ) : (
+        <Card size="sm">
+          <CardContent>
+            <EpicHealth epics={epics.data} />
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
 
 /** Per tracked epic: done / in progress / to do, plus blocked and stale counts (FR-5.1). */
-export function EpicHealth({ epics }: { epics: Dashboard["epicHealth"] }) {
+export function EpicHealth({ epics }: { epics: EpicHealthRow[] }) {
   if (epics.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">

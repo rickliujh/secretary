@@ -37,7 +37,7 @@ describe("Settings schema", () => {
         fields: {},
       },
       confluence: { baseUrl: "", deployment: "auto", email: "" },
-      general: { outputLanguage: "English", fiscalYearStartMonth: 1 },
+      general: { outputLanguage: "English", fiscalYearStartMonth: 1, draftsInSidebar: false },
       dependencies: { followupDays: 3, reminders: true },
       dataSources: [],
       suggestedPrompts: DEFAULT_SUGGESTED_PROMPTS,

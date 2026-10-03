@@ -286,14 +286,23 @@ function RoutingCard({ settings }: { settings: AppSettings }) {
   );
 }
 
+/** Settings > Models: which provider and model each tier uses. */
 export function ModelsSection() {
   const { data: settings } = useSettings();
   if (!settings) return null;
-  return (
-    <div className="flex flex-col gap-4">
-      <TiersCard settings={settings} />
-      <RoutingCard settings={settings} />
-      <ReplayCard settings={settings} />
-    </div>
-  );
+  return <TiersCard settings={settings} />;
+}
+
+/** Settings > Advanced (D50): the tier each task uses, and escalation. */
+export function RoutingSection() {
+  const { data: settings } = useSettings();
+  if (!settings) return null;
+  return <RoutingCard settings={settings} />;
+}
+
+/** Settings > Advanced (D50): replay decided items on another tier or model. */
+export function ReplaySection() {
+  const { data: settings } = useSettings();
+  if (!settings) return null;
+  return <ReplayCard settings={settings} />;
 }

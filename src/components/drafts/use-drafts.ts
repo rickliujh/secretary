@@ -1,4 +1,3 @@
-import { useNavigate } from "@tanstack/react-router";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Effect } from "effect";
@@ -15,6 +14,7 @@ import {
   saveDraft,
 } from "@/services/comms/queries";
 import { requestChaseDraft } from "@/services/dependencies/queries";
+import { useDraftPanel } from "./use-draft-panel";
 
 /**
  * A draft mutation. Sending logs a follow-up on the dependency, which also
@@ -70,26 +70,22 @@ export function useDraftActions(id: string) {
   return { generate, save, copy, handoff, sent, remove };
 }
 
-/** Creates a draft from the composer and opens it, writing it straight away. */
-export function useCreateDraft() {
-  const navigate = useNavigate();
+/** Creates a draft from the composer; `onCreated` opens it to be written straight away. */
+export function useCreateDraft(onCreated: (id: string) => void) {
   return useDraftMutation((req: DraftRequest) =>
-    createDraft(req).pipe(
-      Effect.tap((id) =>
-        Effect.sync(() => navigate({ to: "/drafts", search: { id, write: true } })),
-      ),
-    ),
+    createDraft(req).pipe(Effect.tap((id) => Effect.sync(() => onCreated(id)))),
   );
 }
 
-/** "Draft a chase" on the Waiting page and dependency cards (Phase 6 task 3). */
+/**
+ * "Draft a chase" on the Waiting page and dependency cards (Phase 6 task 3):
+ * the draft opens in the panel and is written at once (D50).
+ */
 export function useChaseDraft() {
-  const navigate = useNavigate();
+  const panel = useDraftPanel();
   return useDraftMutation((dependencyId: string) =>
     requestChaseDraft(dependencyId).pipe(
-      Effect.tap((id) =>
-        Effect.sync(() => navigate({ to: "/drafts", search: { id, write: true } })),
-      ),
+      Effect.tap((id) => Effect.sync(() => panel.open({ draftId: id, write: true }))),
     ),
   );
 }

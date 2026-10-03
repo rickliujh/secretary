@@ -743,3 +743,46 @@ Known limits
   window.
 - On Linux and Windows the hidden webview's timers may be throttled by the engine;
   the 10-minute sync and reminder timers tolerate that.
+
+## Phase 15: Navigation (2026-10-03)
+
+Built
+- Seven pages in the sidebar (design.md D50, FR-13): Today, Inbox, Tickets, Waiting
+  on, Sprint, Chat, Context. Today is the dashboard under its new name; Phase 16
+  rebuilds it.
+- `/sprint` has tabs Plan (was `/planning`), Report (was `/report`) and Epics, which
+  takes the epic health rollup off the dashboard and loads it on its own.
+  `/context` has tabs People, Teams and Memory. The tab is a zod-validated search
+  parameter (`?tab=`); a missing or unknown tab opens the first.
+- `/planning`, `/report`, `/people`, `/teams` and `/memory` redirect to their tab and
+  keep their search parameters: a contact or team `id`, an open ticket, and the
+  Memory page's own `tab`, which is now `list` (`memories` or `corrections`). Every
+  link in the app, the chat agenda's and the Inbox's "plan it" and "edit rules"
+  hints, and the command palette point at the new tabs.
+- The draft composer opens as a panel (a Sheet over the current page) from a ticket,
+  a contact, a team, Waiting on and dependency cards ("Draft a chase"), the Inbox's
+  "write it now" and Ctrl+K "New draft". A new draft can start with a recipient,
+  tickets, a dependency, a purpose, a channel and notes; writing it shows it in the
+  same panel. "All drafts" opens the Drafts page.
+- The Drafts page stays and comes back to the sidebar with Settings > General "Show
+  Drafts in the sidebar" (`general.draftsInSidebar`, default off). The command
+  palette always lists it, and each Sprint and Context tab.
+- Settings > Advanced holds task routing and evaluation replay (from Models, which
+  keeps the tiers) and the ranking weights (the Ranking tab is gone);
+  `?tab=ranking` opens Advanced. Nothing was removed.
+- Route tests run the app's route tree in a memory history: every old path lands on
+  its tab with its parameters, the tab parameter falls back, and the old settings
+  tab opens Advanced.
+
+Decisions and defaults
+- The panel closes when its own links go to another page (a dependency, a contact);
+  a ticket link opens the ticket panel on top of it.
+- Teams get "Draft a message" too; a ticket's draft starts with that ticket, a
+  contact's or a team's with them as the recipient.
+- Switching Sprint or Context tabs unmounts the other tabs, as leaving the old pages
+  did: a drafted sprint plan that was not sent is lost when you switch away.
+
+Not verified yet
+- Nothing here was run in the desktop app: the sidebar, the tabs, the panel over the
+  ticket and dependency sheets, and the redirects in a real window were checked by
+  typecheck, the route tests and review only.

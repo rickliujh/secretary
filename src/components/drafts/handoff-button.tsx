@@ -9,7 +9,7 @@ const NEEDS = { teams: "Teams chats need", email: "Emails need" } as const;
 
 const blockedReason = (kind: DraftDetail["draft"]["kind"], block: HandoffBlock) =>
   block === "no-email"
-    ? `${NEEDS[kind]} a person's email; add one on the People page.`
+    ? `${NEEDS[kind]} a person's email; add one in Context > People.`
     : block === "team"
       ? `${NEEDS[kind]} a person's email. Pick a person, or copy the message.`
       : "Pick a person, or copy the message.";
@@ -77,8 +77,8 @@ export function HandoffHint({ detail: d }: { detail: DraftDetail }) {
     <p className="text-xs text-muted-foreground">
       No email for {d.person.displayName}, so it cannot open in{" "}
       {d.draft.kind === "teams" ? "Teams" : "your mail app"}.{" "}
-      <Link to="/people" search={{ id: d.person.id }} className="underline">
-        Add it on the People page
+      <Link to="/context" search={{ tab: "people", id: d.person.id }} className="underline">
+        Add it in Context &gt; People
       </Link>
     </p>
   );

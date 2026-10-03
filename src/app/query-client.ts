@@ -20,6 +20,8 @@ export const queryKeys = {
   ticketRows: ["tickets", "rows"] as const,
   /** Under "tickets" so sync, decisions and dependency changes refresh it. */
   dashboard: ["tickets", "dashboard"] as const,
+  /** Sprint > Epics (D50); under "tickets" like the dashboard. */
+  epicHealth: ["tickets", "epic-health"] as const,
   ticketSearch: (q: string) => ["tickets", "search", q] as const,
   ticketDetail: (key: string) => ["tickets", "detail", key] as const,
   transitions: (key: string) => ["tickets", "transitions", key] as const,

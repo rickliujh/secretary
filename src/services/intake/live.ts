@@ -670,8 +670,8 @@ const make = Effect.gen(function* () {
         kind: "read_only",
         message:
           origin === "planner"
-            ? "This thread holds a sprint plan. Change the plan on the Planning page."
-            : "This thread holds suggested rules. Approve or reject them here, or edit rules on the Memory page.",
+            ? "This thread holds a sprint plan. Change the plan in Sprint > Plan."
+            : "This thread holds suggested rules. Approve or reject them here, or edit rules in Context > Memory.",
       }),
     );
   };

@@ -3,7 +3,6 @@ import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { usePendingCount } from "@/app/queries";
 import { BriefPanel } from "@/components/dashboard/brief-panel";
-import { EpicHealth } from "@/components/dashboard/epic-health";
 import { FocusList } from "@/components/dashboard/focus-list";
 import { PlanCard } from "@/components/dashboard/plan-card";
 import { PromptsCard } from "@/components/dashboard/prompts-card";
@@ -231,9 +230,6 @@ function Dashboard() {
           )}
         </Section>
         <div className="flex flex-col gap-4">
-          <Section title="Epic health">
-            <EpicHealth epics={d.epicHealth} />
-          </Section>
           <Section
             title="Inbox"
             action={

@@ -100,17 +100,17 @@ function ReadOnlyNote({ origin }: { origin: "planner" | "rules" }) {
     <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
       {origin === "planner" ? (
         <>
-          This thread holds a sprint plan. Approve or reject the moves here; change the plan on the{" "}
-          <Link to="/planning" className="underline">
-            Planning page
+          This thread holds a sprint plan. Approve or reject the moves here; change the plan in{" "}
+          <Link to="/sprint" search={{ tab: "plan" }} className="underline">
+            Sprint &gt; Plan
           </Link>
           .
         </>
       ) : (
         <>
-          Approve or reject the suggested rules here; edit rules on the{" "}
-          <Link to="/memory" search={{ tab: "memories" }} className="underline">
-            Memory page
+          Approve or reject the suggested rules here; edit rules in{" "}
+          <Link to="/context" search={{ tab: "memory", list: "memories" }} className="underline">
+            Context &gt; Memory
           </Link>
           .
         </>

@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { useLookups } from "@/app/queries";
@@ -24,6 +24,7 @@ import { listDependencies } from "@/services/dependencies/queries";
 import { MESSAGE_INTENTS } from "@/services/proposals/schema";
 import { groupForPicker, loadPickerSource, type PickerRecipient } from "@/services/tickets/picker";
 import { type Recipient, RecipientPicker, TicketPicker } from "./pickers";
+import type { DraftPrefill } from "./use-draft-panel";
 import { useCreateDraft } from "./use-drafts";
 
 const NO_DEPENDENCY = "none";
@@ -41,8 +42,17 @@ const Form = z.object({
 });
 type FormInput = z.input<typeof Form>;
 
-/** New draft (FR-6.1): who, why, about what, and what it should say. */
-export function DraftComposer() {
+/**
+ * New draft (FR-6.1): who, why, about what, and what it should say. `onCreated`
+ * gets the new draft's id; the panel shows it, the Drafts page opens it.
+ */
+export function DraftComposer({
+  prefill = {},
+  onCreated,
+}: {
+  prefill?: DraftPrefill;
+  onCreated: (id: string) => void;
+}) {
   const lookups = useLookups();
   const deps = useQuery({
     queryKey: queryKeys.dependencyList(false),
@@ -54,16 +64,16 @@ export function DraftComposer() {
     // Opening a ticket marks it viewed without invalidating; read fresh on open.
     staleTime: 0,
   });
-  const create = useCreateDraft();
+  const create = useCreateDraft(onCreated);
   const form = useForm<FormInput, unknown, z.output<typeof Form>>({
     resolver: zodResolver(Form),
     defaultValues: {
-      kind: "teams",
-      intent: "chase",
-      recipient: null,
-      issueKeys: [],
+      kind: prefill.kind ?? "teams",
+      intent: prefill.intent ?? "chase",
+      recipient: prefill.recipient ?? null,
+      issueKeys: prefill.issueKeys ?? [],
       dependencyId: NO_DEPENDENCY,
-      notes: "",
+      notes: prefill.notes ?? "",
     },
   });
 
@@ -103,6 +113,23 @@ export function DraftComposer() {
       else if (dep.ownerTeamId) pickRecipient({ type: "team", id: dep.ownerTeamId });
     }
   };
+
+  // A prefill (D50) behaves as if picked here: a person's usual channel, a
+  // dependency's ticket and owner. Each applies once, when its list has loaded.
+  const prefilled = useRef({ channel: false, dependency: false });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: applies the prefill once per list.
+  useEffect(() => {
+    const done = prefilled.current;
+    const r = prefill.recipient;
+    if (!done.channel && r?.type === "person" && !prefill.kind && lookups.person.has(r.id)) {
+      done.channel = true;
+      pickRecipient(r);
+    }
+    if (!done.dependency && prefill.dependencyId && deps.data) {
+      done.dependency = true;
+      pickDependency(prefill.dependencyId);
+    }
+  }, [lookups.person, deps.data]);
 
   const onSubmit = form.handleSubmit((v) =>
     create.mutate({

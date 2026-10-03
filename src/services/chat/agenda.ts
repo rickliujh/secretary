@@ -109,7 +109,7 @@ export function weekAhead(w: WeekInputs) {
     events.push({
       date: w.sprint.end,
       daysAway: sprintEnd,
-      what: `Sprint ${w.sprint.name} ends: ${w.sprint.done} of ${w.sprint.total} points done; plan the next sprint on the Planning page`,
+      what: `Sprint ${w.sprint.name} ends: ${w.sprint.done} of ${w.sprint.total} points done; plan the next sprint in Sprint > Plan`,
     });
   events.sort((a, b) => a.date.localeCompare(b.date) || a.what.localeCompare(b.what));
   return {

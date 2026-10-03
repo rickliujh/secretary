@@ -62,7 +62,7 @@ function WhyHere({ item }: { item: FocusItem }) {
             ))}
           </tbody>
         </table>
-        <p className="mt-2 text-xs text-muted-foreground">Weights are in Settings &gt; Ranking.</p>
+        <p className="mt-2 text-xs text-muted-foreground">Weights are in Settings &gt; Advanced.</p>
       </PopoverContent>
     </Popover>
   );

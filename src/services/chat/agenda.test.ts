@@ -81,7 +81,7 @@ describe("weekAhead", () => {
       ["2026-10-01", "Network expected to deliver Firewall rule for PAY-2"],
       [
         "2026-10-02",
-        "Sprint PAY 15 ends: 13 of 21 points done; plan the next sprint on the Planning page",
+        "Sprint PAY 15 ends: 13 of 21 points done; plan the next sprint in Sprint > Plan",
       ],
     ]);
   });

@@ -1,7 +1,7 @@
-import { Link } from "@tanstack/react-router";
 import { Check, Loader2, Pencil, RotateCcw, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type { Lookups } from "@/app/queries";
+import { useDraftPanel } from "@/components/drafts/use-draft-panel";
 import { CHANNEL_LABELS, INTENT_LABELS } from "@/components/labels";
 import { Markdown } from "@/components/markdown";
 import { TicketLink } from "@/components/tickets/ticket-link";
@@ -208,6 +208,8 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
     communicationId?: string;
     warning?: string;
   } | null;
+  const drafts = useDraftPanel();
+  const draftId = result?.communicationId;
   const pending = proposal.status === "pending";
   const busy = approve.isPending || reject.isPending;
   const canApprove = pending || proposal.status === "failed";
@@ -259,16 +261,16 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
               </TicketLink>
             </>
           )}
-          {result.communicationId && (
+          {draftId && (
             <>
               {" "}
-              <Link
-                to="/drafts"
-                search={{ id: result.communicationId, write: true }}
+              <button
+                type="button"
                 className="underline"
+                onClick={() => drafts.open({ draftId, write: true })}
               >
                 write it now
-              </Link>
+              </button>
             </>
           )}
         </p>
