@@ -7,7 +7,7 @@ import { sanitiseProposalWiki, type WikiSafety } from "@/lib/wiki-safe";
 import type { Deployment } from "@/services/atlassian/deployment";
 import type { EditMeta, JiraWrite } from "@/services/jira";
 import type { FieldIds } from "@/services/jira/fields";
-import { literalWiki, splitProvenance } from "@/services/small-asks/home";
+import { literalWiki, provenanceLineWiki, splitProvenance } from "@/services/small-asks/home";
 import type { JiraAction } from "./actions";
 
 export type MappingContext = {
@@ -228,14 +228,15 @@ export function droppedFieldsWarning(
 /**
  * A create's Markdown description as wiki markup. The provenance block's quote
  * is pasted text (untrusted), so it goes to Jira as a literal `{noformat}` block:
- * it cannot embed remote images, mention users or run macros (D44).
+ * it cannot embed remote images, mention users or run macros (D44). The "Asked
+ * by" line is escaped, since the requester's name may come from a sender.
  */
 export function descriptionToWiki(descriptionMd: string): string {
   const block = splitProvenance(descriptionMd);
   if (!block) return markdownToWiki(descriptionMd);
   return [
     block.base && markdownToWiki(block.base),
-    markdownToWiki(`${block.line}`),
+    provenanceLineWiki(block.line),
     block.quote && literalWiki(block.quote),
   ]
     .filter(Boolean)

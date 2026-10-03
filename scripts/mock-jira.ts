@@ -29,7 +29,9 @@
  * /issueLink/{id}`, and `issuelinks` on every issue from both sides. A posted
  * Blocks link means "inwardIssue blocks outwardIssue"; `--reversed-links`
  * stores it the other way round, as some instances appear to. JQL
- * `key in (...)` on its own (the blocker check) returns just those keys.
+ * `key in (...)` on its own (the blocker check) returns just those keys; in the
+ * Cloud shape one unknown key fails it with 400, as Cloud does. Tests can also
+ * hide issues (403), move them to a new key, and cap the search page size.
  *
  *   bun run mock:jira --cloud         # Cloud shape: Basic auth, POST /search/jql
  *                                     # token paging (old /search is 410), account
@@ -510,6 +512,15 @@ export type MockOptions = {
   cloud?: boolean;
   /** Store a posted Blocks link the other way round, to test the direction check (D45). */
   reversedLinks?: boolean;
+  /**
+   * Keys the user may not read: `GET /issue/{key}` answers 403 and a search
+   * treats them as unknown. Mutable, so a test can hide an issue mid-way.
+   */
+  hidden?: Set<string>;
+  /** Moved or renamed issues, old key to current key: both GET and `key in` find them. */
+  moved?: Map<string, string>;
+  /** Most issues on one search page, below what was asked (Cloud may do this). */
+  searchPageSize?: number;
 };
 
 export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}) {
@@ -703,13 +714,22 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
     if (path === searchPath && req.method === "POST") {
       const jql = String(body?.jql ?? "");
       const startAt = cloud ? Number(body?.nextPageToken ?? 0) : Number(body?.startAt ?? 0);
-      const max = Math.min(Number(body?.maxResults ?? 50), 100);
-      let list = [...issues.values()];
+      const max = Math.min(Number(body?.maxResults ?? 50), 100, opts.searchPageSize ?? 100);
+      let list = [...issues.values()].filter((i) => !opts.hidden?.has(i.key));
       const parents = /^\(parent in \(([^)]*)\)\)/.exec(jql)?.[1]?.split(/,\s*/);
       if (parents) list = list.filter((i) => i.parent && parents.includes(i.parent));
-      // The blocker check reads exactly these keys (D45).
-      const keys = /^key in \(([^)]*)\)$/.exec(jql.trim())?.[1]?.split(/,\s*/);
-      if (keys) list = list.filter((i) => keys.includes(i.key));
+      // The blocker check reads exactly these keys (D45); a moved key finds the issue's new key.
+      const keys = /^key in \(([^)]*)\)$/
+        .exec(jql.trim())?.[1]
+        ?.split(/,\s*/)
+        .map((k) => opts.moved?.get(k) ?? k);
+      if (keys) {
+        // Cloud has no validateQuery "warn": one unknown key fails the whole search.
+        const unknown = keys.find((k) => !issues.has(k) || opts.hidden?.has(k));
+        if (cloud && unknown)
+          return error(`An issue with key '${unknown}' does not exist for field 'key'.`);
+        list = list.filter((i) => keys.includes(i.key));
+      }
       const since = /updated >= "([^"]+)"/.exec(jql)?.[1];
       if (since)
         list = list.filter(
@@ -806,7 +826,10 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
     }
 
     const m = /^issue\/([^/]+)(\/.*)?$/.exec(path);
-    const issue = m ? issues.get(decodeURIComponent(m[1] ?? "")) : undefined;
+    const asked = decodeURIComponent(m?.[1] ?? "");
+    const issue = m ? issues.get(opts.moved?.get(asked) ?? asked) : undefined;
+    if (m && issue && opts.hidden?.has(issue.key))
+      return error("You do not have the permission to see the specified issue.", 403);
     if (m && !issue) return error("Issue Does Not Exist", 404);
     if (issue) {
       const sub = m?.[2] ?? "";

@@ -39,6 +39,7 @@ import { bindDb, Db } from "@/services/db";
 import { Llm } from "@/services/llm";
 import { describePayload, effectivePayload, issueRefs } from "@/services/proposals/schema";
 import { Retrieval } from "@/services/retrieval";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sync } from "@/services/sync";
 import {
   Intake,
@@ -49,7 +50,13 @@ import {
   type TriageResult,
 } from ".";
 import { mergeItemProposals } from "./merge";
-import { cleanInput, extractReferences, needsSegmentation, type References } from "./preprocess";
+import {
+  cleanInput,
+  extractReferences,
+  jiraHost,
+  needsSegmentation,
+  type References,
+} from "./preprocess";
 import { partsOf, splitMessage, UserContentSchema, withLinkedItems } from "./thread";
 
 const UNSURE_QUESTION =
@@ -101,14 +108,20 @@ const make = Effect.gen(function* () {
   const llm = yield* Llm;
   const retrieval = yield* Retrieval;
   const sync = yield* Sync;
+  const settingsSvc = yield* Settings;
   const { q } = bindDb(yield* Db);
 
-  /** Keys already read from Jira in this session, found or not, so each is read once (D45). */
+  /**
+   * Keys Jira answered for in this session (found, 404 or 403), so each is read
+   * once (D45); a transient failure is not recorded, so a later item retries it.
+   */
   const readKeys = new Set<string>();
   /**
    * A ticket named in the text that the cache does not hold (outside the sync
    * scope, such as another team's PLAT-812) is read once from Jira, so it can be
-   * a candidate, for example as a blocker (D45). A failure only leaves it out.
+   * a candidate, for example as a blocker (D45). Pasted text is untrusted and
+   * must not widen the scope, so it is stored out of scope (`candidate`): it is
+   * offered by its key and nowhere else. A failure only leaves it out.
    */
   const readMissingKeys = (keys: readonly string[]) =>
     Effect.gen(function* () {
@@ -124,14 +137,10 @@ const make = Effect.gen(function* () {
         )).map((r) => r.key),
       );
       for (const key of fresh.filter((k) => !cached.has(k)).slice(0, MAX_KEY_READS)) {
-        readKeys.add(key);
-        yield* sync
-          .refreshIssue(key)
-          .pipe(
-            Effect.catchAll((e) =>
-              Effect.sync(() => logger.info(`${key} named in the input was not read`, e.message)),
-            ),
-          );
+        const r = yield* Effect.either(sync.refreshIssue(key, { candidate: true }));
+        const status = Either.isLeft(r) && r.left._tag === "JiraError" ? r.left.status : undefined;
+        if (Either.isRight(r) || status === 404 || status === 403) readKeys.add(key);
+        if (Either.isLeft(r)) logger.info(`${key} named in the input was not read`, r.left.message);
       }
     });
 
@@ -283,11 +292,12 @@ const make = Effect.gen(function* () {
         job.instructions.length || pending.length || ctx.thread.decided.length || others.length
           ? { instructions: job.instructions, decided: ctx.thread.decided, pending, others }
           : null;
+      const site = { jiraHost: jiraHost((yield* settingsOrDefault(settingsSvc)).jira.baseUrl) };
       const references = [
-        extractReferences(job.quote, contacts),
-        extractReferences(job.instructions.join("\n"), contacts),
+        extractReferences(job.quote, contacts, site),
+        extractReferences(job.instructions.join("\n"), contacts, site),
         // Tickets named anywhere earlier in the thread stay candidates for this item.
-        ...others.map((o) => extractReferences(o.quote, contacts)),
+        ...others.map((o) => extractReferences(o.quote, contacts, site)),
         {
           ...noRefs,
           issueKeys: [

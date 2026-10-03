@@ -28,6 +28,8 @@ export const SYNC_KEYS = {
   linkTypes: "jira.linkTypes",
   /** JSON BlockerMap: fresh status of the blockers of the user's open issues, after each sync (D45). */
   blockers: "jira.blockers",
+  /** JSON UnreadBlockers: blockers Jira answered 404 or 403 for, so they are not read every sync (D45). */
+  blockersUnread: "jira.blockersUnread",
   /** JSON CleanupResult of the last storage cleanup (D34). */
   lastCleanup: "app.lastCleanup",
 } as const;

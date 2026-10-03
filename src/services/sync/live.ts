@@ -18,7 +18,7 @@ import {
   type SyncResult,
   type SyncStatus,
 } from ".";
-import { syncBlockers } from "./blockers";
+import { refreshBlocker, syncBlockers } from "./blockers";
 import { buildScopeJql, chunk, withUpdatedSince } from "./jql";
 import {
   getState,
@@ -57,6 +57,8 @@ const make = Effect.gen(function* () {
   const jira = yield* JiraClient;
   const { q, withDb } = bindDb(yield* Db);
   const lock = yield* Effect.makeSemaphore(1);
+  /** The blocker step and a refresh's blocker update write the same state (D45). */
+  const blockerLock = yield* Effect.makeSemaphore(1);
   const status = yield* SubscriptionRef.make(initialStatus);
 
   const patch = (p: Partial<SyncStatus>) => SubscriptionRef.update(status, (s) => ({ ...s, ...p }));
@@ -404,6 +406,7 @@ const make = Effect.gen(function* () {
       }).pipe(
         withDb,
         Effect.provideService(JiraClient, jira),
+        blockerLock.withPermits(1),
         Effect.catchAll((e) =>
           Effect.sync(() => {
             logger.warn("Blocker check failed", e.message);
@@ -446,7 +449,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const refreshIssue = (key: string) =>
+  const refreshIssue = (key: string, opts: { candidate?: boolean } = {}) =>
     Effect.gen(function* () {
       const settings = yield* settingsOrDefault(settingsSvc);
       const { effective: fieldIds } = yield* withDb(fieldInfo);
@@ -459,9 +462,40 @@ const make = Effect.gen(function* () {
         trackedEpics: new Set(settings.jira.trackedEpics),
         syncedAt: nowIso(),
       });
-      const comments = m.commentsComplete ? m.comments : yield* allComments(key);
-      yield* withDb(upsertIssues([m.issue]));
-      yield* withDb(replaceComments([key], comments));
+      // One read says nothing about the sync scope: a cached issue keeps its flag,
+      // and an issue read only as a candidate stays out of scope (D45 review).
+      const cached = yield* q((d) =>
+        d
+          .select({ stale: jiraIssues.stale })
+          .from(jiraIssues)
+          .where(eq(jiraIssues.key, m.issue.key))
+          .get(),
+      );
+      const issue = { ...m.issue, stale: cached ? cached.stale : !!opts.candidate };
+      const comments = m.commentsComplete ? m.comments : yield* allComments(m.issue.key);
+      yield* withDb(upsertIssues([issue]));
+      yield* withDb(replaceComments([m.issue.key], comments));
+      // A blocker closed (or reopened) from the app shows at once (D45 review).
+      yield* blockerLock
+        .withPermits(1)(
+          withDb(
+            refreshBlocker({
+              key,
+              state: {
+                status: issue.status,
+                statusCategory: issue.statusCategory,
+                resolvedAt: issue.resolved ?? null,
+              },
+              at: nowIso(),
+            }),
+          ),
+        )
+        .pipe(
+          // The issue itself is stored; the next sync repairs the blocker state.
+          Effect.catchAll((e) =>
+            Effect.sync(() => logger.warn(`Blocker update for ${key} failed`, e.message)),
+          ),
+        );
     });
 
   return Sync.of({

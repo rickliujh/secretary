@@ -390,6 +390,42 @@ describe("proposal text bound for Jira (D51)", () => {
     );
   });
 
+  test("an edit that leaves the block not last: the quote converts, but images and strangers are made safe", () => {
+    const md = `${withProvenance("Send it.", {
+      requester: "Dana",
+      source: "teams",
+      date: "2026-10-01",
+      quote: "![](https://x/p.png) !https://x/q.png|width=1! [~jsmith] [Boss|~boss]",
+    })}\n\nAdded by me after the quote.`;
+    const safe = proposalTextToWiki(md, []);
+    // Not the literal block any more (D44), but D51 still applies to the whole text.
+    expect(safe.wiki).not.toContain("{noformat}");
+    expect(safe.wiki).not.toMatch(/(?<!\\)!(https?:|\/\/)/);
+    expect(safe.wiki).not.toMatch(/(?<!\\)\[(?:[^\]|]*\|)?~/);
+    expect(safe.images).toEqual(["https://x/p.png", "https://x/q.png"]);
+    expect(safe.mentions).toEqual(["jsmith", "boss"]);
+  });
+
+  test("the requester's name in the Asked by line is text, not markup", () => {
+    const md = withProvenance("Send it.", {
+      requester: "[~boss] ![](https://x/p.png) {color:red}x{color} [a](http://evil.example) *b*",
+      source: "email",
+      date: "2026-10-01",
+      quote: "q",
+    });
+    const safe = proposalTextToWiki(md, []);
+    const line = safe.wiki.split("\n").find((l) => l.includes("Asked by")) ?? "";
+    expect(line).toStartWith("_Asked by ");
+    expect(line).toEndWith(" via email on 2026-10-01:_");
+    const name = line.slice("_Asked by ".length, -" via email on 2026-10-01:_".length);
+    // Every wiki markup character in the name is escaped, so Jira shows it as typed.
+    expect(name).not.toMatch(/(?<!\\)[[\]{}!*_~|^+?#-]/);
+    expect(name.replace(/\\(.)/g, "$1")).toBe(
+      "[~boss] ![](https://x/p.png) {color:red}x{color} [a](http://evil.example) *b*",
+    );
+    expect(safe).toMatchObject({ images: [], mentions: [] });
+  });
+
   test("proposalTextToWiki converts, keeps the quote literal, then makes safe", () => {
     expect(proposalTextToWiki("**Hi** [~bob] !https://x/i.png!", ["bob"])).toEqual({
       wiki: "*Hi* [~bob] [https://x/i.png]",

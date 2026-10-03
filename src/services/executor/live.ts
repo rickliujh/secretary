@@ -20,7 +20,7 @@ import { type BlockLink, blockLinks } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
 import { nextFollowupAfter } from "@/services/dependencies/logic";
 import { logFollowup, mirror, setDates, setStatus } from "@/services/dependencies/queries";
-import { CreatedIssueSchema, JiraClient } from "@/services/jira";
+import { CreatedIssueSchema, JiraClient, JiraError } from "@/services/jira";
 import { parseIssueLinks } from "@/services/jira/schemas";
 import {
   describeWaitUpdate,
@@ -356,7 +356,9 @@ const make = Effect.gen(function* () {
    * "target is blocked by blocker" (D45). Link direction in Jira's API is easy to
    * get backwards and some instances store it reversed, so after the POST the
    * target is read again; a link that came out the wrong way round is deleted and
-   * posted swapped.
+   * posted swapped. Only a link this POST made is ever deleted, never one the
+   * user already had; a target that already blocks the blocker is refused, since
+   * the two would block each other and neither could ever wake.
    */
   const linkIssues = (p: Extract<ProposalPayload, { kind: "link_issues" }>, proposalId: string) =>
     Effect.gen(function* () {
@@ -369,15 +371,22 @@ const make = Effect.gen(function* () {
       const message = `${p.target} is now blocked by ${p.blocker}`;
       const isRight = (links: readonly BlockLink[]) =>
         links.some((l) => l.direction === "blockedBy" && l.key === p.blocker);
-      const reversed = (links: readonly BlockLink[]) =>
-        links.find((l) => l.direction === "blocks" && l.key === p.blocker && l.id);
-      if (isRight(yield* blockLinksOf(p.target))) {
+      const blocksBlocker = (links: readonly BlockLink[]) =>
+        links.filter((l) => l.direction === "blocks" && l.key === p.blocker);
+      const before = yield* blockLinksOf(p.target);
+      if (isRight(before)) {
         yield* audit(proposalId, "link_issues", p.target, p, { skipped: "already linked" });
         return {
           message: `${p.target} is already blocked by ${p.blocker}`,
           issueKey: p.target,
         } satisfies ProposalResult;
       }
+      if (blocksBlocker(before).length > 0)
+        return yield* fail(
+          "invalid",
+          `${p.target} already blocks ${p.blocker} in Jira, so it cannot also wait for it: the two would block each other. Remove that link in Jira first if it is wrong.`,
+        );
+      const existing = new Set(before.flatMap((l) => (l.id ? [l.id] : [])));
       const link = (swapped: boolean) =>
         run(
           {
@@ -392,7 +401,8 @@ const make = Effect.gen(function* () {
       yield* link(false);
       const after = yield* blockLinksOf(p.target);
       if (isRight(after)) return { message, issueKey: p.target } satisfies ProposalResult;
-      const wrong = reversed(after);
+      // Only a link that was not there before this POST is ours to replace.
+      const wrong = blocksBlocker(after).find((l) => l.id && !existing.has(l.id));
       if (!wrong?.id)
         return {
           message: `Linked ${p.target} and ${p.blocker}`,
@@ -405,7 +415,18 @@ const make = Effect.gen(function* () {
         { kind: "delete_issue_link", issueKey: p.target, linkId: wrong.id },
         { proposalId },
       );
-      yield* link(true);
+      // The delete went through, so a failure here leaves the issues unlinked.
+      yield* link(true).pipe(
+        Effect.mapError((e) =>
+          e instanceof JiraError
+            ? new JiraError({
+                kind: e.kind,
+                status: e.status,
+                message: `${p.target} and ${p.blocker} are not linked now: Jira stored the link the wrong way round, so it was removed, and linking them the right way failed (${e.message}). Retry links them again.`,
+              })
+            : e,
+        ),
+      );
       if (isRight(yield* blockLinksOf(p.target)))
         return { message, issueKey: p.target } satisfies ProposalResult;
       return {

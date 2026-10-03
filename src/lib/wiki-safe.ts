@@ -76,6 +76,14 @@ export function sanitiseProposalWiki(
   return out;
 }
 
+/**
+ * Plain text as wiki markup that Jira shows as typed: every markup character
+ * gets a backslash. A backslash in the text becomes `⧵` (U+29F5), since `\\`
+ * is a line break in wiki markup and a lone one would escape what follows.
+ */
+export const escapeWikiText = (text: string) =>
+  text.replace(/\\/g, "⧵").replace(/[[\]{}!*_~|^+?#-]/g, "\\$&");
+
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 /**

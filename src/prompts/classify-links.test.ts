@@ -120,6 +120,10 @@ describe("validating and mapping link_issues", () => {
     expect(errorsOf({ ...link, target: "OPS-7", blocker: "PAY-1" })).toContain(
       "Proposal 1 (link_issues): OPS-7 is already blocked by PAY-1 in Jira; leave it out.",
     );
+    // OPS-7 is blocked by PAY-1 in Jira: PAY-1 waiting for OPS-7 would be a cycle.
+    expect(errorsOf({ ...link, target: "PAY-1", blocker: "OPS-7" })).toContain(
+      "Proposal 1 (link_issues): OPS-7 is already blocked by PAY-1 in Jira, so PAY-1 cannot also wait for OPS-7; leave it out or swap target and blocker if the input says OPS-7 waits for PAY-1.",
+    );
     expect(errorsOf(link, { ...link, target: "OPS-7", blocker: "PAY-2" })).toContain(
       "Proposal 1 (link_issues): PAY-2 and OPS-7 cannot block each other.",
     );

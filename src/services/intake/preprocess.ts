@@ -22,8 +22,8 @@ export type References = {
 const ISSUE_KEY = /\b([A-Z][A-Z0-9_]{1,9}-\d{1,7})\b/g;
 const SNOW = /\b((?:INC|RITM|REQ|CHG|PRB|SCTASK)\d{7,})\b/g;
 const EMAIL = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g;
-const URL = /\bhttps?:\/\/[^\s<>"')\]]+/g;
-const BROWSE_URL = /\/browse\/([A-Z][A-Z0-9_]{1,9}-\d{1,7})\b/g;
+const URL_RE = /\bhttps?:\/\/[^\s<>"')\]]+/g;
+const BROWSE_PATH = /\/browse\/([A-Z][A-Z0-9_]{1,9}-\d{1,7})(?![\w-])/;
 
 /** Keys that look like issue keys but are not (ServiceNow, encodings, standards). */
 const NOT_ISSUE_PREFIX = /^(UTF|ISO|SHA|MD|RFC|TLS|SSL|HTTP|COVID|INC|RITM|REQ|CHG|PRB|SCTASK)$/;
@@ -73,11 +73,43 @@ export function cleanInput(raw: string): string {
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-export function extractReferences(text: string, contacts: readonly Contact[] = []): References {
+/** The host of the configured Jira site (`jira.example.com`), or null when unset or invalid. */
+export function jiraHost(baseUrl: string | null | undefined): string | null {
+  try {
+    return baseUrl ? new URL(baseUrl).host.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The issue key of a `/browse/KEY` link to the configured Jira site, else null.
+ * A key in a link to any other site (another Jira, a code host) is not a
+ * ticket of this instance, so it does not count.
+ */
+function browseKey(url: string, host: string | null): string | null {
+  if (!host) return null;
+  try {
+    const u = new URL(url);
+    if (u.host.toLowerCase() !== host) return null;
+    return BROWSE_PATH.exec(u.pathname)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function extractReferences(
+  text: string,
+  contacts: readonly Contact[] = [],
+  opts: { jiraHost?: string | null } = {},
+): References {
+  const urls = unique([...text.matchAll(URL_RE)].map((m) => m[0].replace(/[.,;:]+$/, "")));
+  // Keys inside links count only as `/browse/KEY` on the configured Jira site.
+  const plain = text.replace(URL_RE, " ");
   const keys = [
-    ...[...text.matchAll(ISSUE_KEY)].map((m) => m[1] ?? ""),
-    ...[...text.matchAll(BROWSE_URL)].map((m) => m[1] ?? ""),
-  ].filter((k) => !NOT_ISSUE_PREFIX.test(k.split("-")[0] ?? ""));
+    ...[...plain.matchAll(ISSUE_KEY)].map((m) => m[1] ?? ""),
+    ...urls.map((u) => browseKey(u, opts.jiraHost ?? null) ?? ""),
+  ].filter((k) => k && !NOT_ISSUE_PREFIX.test(k.split("-")[0] ?? ""));
   const emails = unique([...text.matchAll(EMAIL)].map((m) => m[0].toLowerCase()));
   const lower = text.toLowerCase();
 
@@ -111,7 +143,7 @@ export function extractReferences(text: string, contacts: readonly Contact[] = [
     issueKeys: unique(keys),
     tickets: unique([...text.matchAll(SNOW)].map((m) => m[1] ?? "")),
     emails,
-    urls: unique([...text.matchAll(URL)].map((m) => m[0].replace(/[.,;:]+$/, ""))),
+    urls,
     contactIds: unique(contactIds),
   };
 }

@@ -869,6 +869,36 @@ Known limits
 - Only "blocked by" links are written; other link types are not.
 - No Today UI yet; woken tickets are only notified until Phase 16 lists them.
 
+Review fixes
+- Links never make a cycle: validation sends back a link whose blocker is already
+  blocked by the target, and the Executor refuses it before posting. The swap after a
+  reversed POST deletes only a link id that was not there before that POST, so a link
+  the user had is never removed; if the swapped POST fails, the error says the issues
+  are unlinked now and Retry links them again.
+- Only a definite answer changes blocker state: a blocker not read this run keeps its
+  last entry in `jira.blockers`, and a ticket with a blocker of unknown state (no
+  entry, or 403) does not wake. A search that fails with 400 is split in two until
+  the bad keys are found; 404 means the link is gone (stored with `gone`, read as not
+  blocking, "no longer blocks it"); 404 and 403 are remembered for seven days in
+  `jira.blockersUnread` and forgotten when the link goes. A key the search did not
+  return (moved, renamed) is read on its own and stored under the key the link
+  names; Cloud's next-page token is followed. Other failures stop reading for that
+  run.
+- A ticket that is no longer one of your open tickets forgets its blockers, so it
+  returns as first seen; woken tickets must still be assigned to you.
+- The re-fetch after every Executor write updates that issue's entry in
+  `jira.blockers` and runs the wake-up for the tickets it blocks, so closing a
+  blocker from the app shows at once.
+- A ticket named in pasted text is stored out of scope (`stale`): offered by its key,
+  but not in project lists, the tickets tree, ranking or the blocker step, and
+  removed by cleanup. A re-fetch keeps a cached issue's scope flag. `/browse/KEY`
+  links count only on the configured Jira site, and a key is marked read only after
+  Jira answered (found, 404, 403).
+- The requester's name in a small ask's "Asked by" line is escaped for Jira. Edited
+  descriptions where the block is no longer last were already covered by D51.
+- While reminders are off, wake-ups are marked notified without a notification, so
+  turning reminders on sends no burst.
+
 ## Polish: Sprint plan, tray notice, palette (2026-10-03)
 
 - Sprint: the Plan tab stays mounted, hidden, once opened, so a drafted plan that

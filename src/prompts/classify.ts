@@ -665,6 +665,11 @@ function validateLink(
   const candidate = s.candidates.find((c) => c.key === target);
   if (candidate?.blockedBy?.includes(blocker))
     errors.push(`${at}: ${target} is already blocked by ${blocker} in Jira; leave it out.`);
+  // The reverse link already in Jira would make a cycle neither issue wakes from.
+  if (s.candidates.find((c) => c.key === blocker)?.blockedBy?.includes(target))
+    errors.push(
+      `${at}: ${blocker} is already blocked by ${target} in Jira, so ${target} cannot also wait for ${blocker}; leave it out or swap target and blocker if the input says ${blocker} waits for ${target}.`,
+    );
   const first = out.proposals.findIndex(
     (o) => o.kind === "link_issues" && o.target === target && o.blocker === blocker,
   );

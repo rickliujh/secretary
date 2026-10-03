@@ -2,12 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { blockInfo, blockLinks, type IssueLink } from "@/services/dashboard/sections";
 import {
   type BlockerMap,
+  decideWake,
+  GONE_BLOCKER,
+  mergeBlockerMap,
+  nextUnread,
   nextWakeState,
   openBlockers,
   parseBlockers,
   parseLinkTypes,
   pickBlocksType,
+  settledBlockers,
   unblockReason,
+  unreadStillValid,
   type WakeState,
   type WokenRow,
   wokenTickets,
@@ -161,5 +167,97 @@ describe("wake-up", () => {
       ["PAY-6", false],
     ]);
     expect(list[1]?.reason).toBe("PLAT-1 moved to Done on 2 Oct");
+  });
+});
+
+describe("partial reads (D45 review)", () => {
+  const open = { status: "In Progress", statusCategory: "indeterminate", resolvedAt: null };
+  const done = { status: "Done", statusCategory: "done", resolvedAt: "2026-10-02T09:00:00.000Z" };
+  const AT = "2026-10-03T10:00:00.000Z";
+  const asleep: WakeState = {
+    openBlockers: ["PLAT-1"],
+    unblockedAt: null,
+    unblockedBy: null,
+    unblockNotifiedAt: null,
+  };
+
+  test("a map stored before `gone` was kept still loads", () => {
+    expect(
+      parseBlockers(JSON.stringify({ "PLAT-1": { status: "Done", statusCategory: "done" } })),
+    ).toEqual({ "PLAT-1": { status: "Done", statusCategory: "done", resolvedAt: null } });
+  });
+
+  test("a wanted key not read keeps its last entry; a gone key reads as done; unwanted keys go", () => {
+    const map = mergeBlockerMap({
+      wanted: ["PLAT-1", "PLAT-2", "PLAT-3", "PLAT-4"],
+      read: new Map([["PLAT-2", done]]),
+      gone: new Set(["PLAT-3"]),
+      previous: { "PLAT-1": open, "PLAT-2": open, "OLD-1": open },
+    });
+    expect(map).toEqual({ "PLAT-1": open, "PLAT-2": done, "PLAT-3": GONE_BLOCKER });
+    expect(unblockReason("PLAT-3", map)).toBe("PLAT-3 no longer blocks it");
+    // Every reader that only looks at the category treats it as not blocking.
+    expect(openBlockers(blockLinks([blockedBy("PLAT-3", "new")]), map)).toEqual([]);
+  });
+
+  test("an unsettled blocker never wakes an issue, even when its link says done", () => {
+    const links = blockLinks([blockedBy("PLAT-1", "done")]);
+    // No entry and no definite answer: the embedded "done" is not trusted.
+    expect(
+      decideWake({ prev: asleep, links, blockers: {}, settled: new Set(), at: AT }),
+    ).toBeNull();
+    // Unreadable (403) with an old entry: not trusted either.
+    const map: BlockerMap = { "PLAT-1": done };
+    expect(
+      decideWake({
+        prev: asleep,
+        links,
+        blockers: map,
+        settled: settledBlockers(["PLAT-1"], new Set(), map, new Set(["PLAT-1"])),
+        at: AT,
+      }),
+    ).toBeNull();
+    // Read this run: it wakes.
+    expect(
+      decideWake({ prev: asleep, links, blockers: map, settled: new Set(["PLAT-1"]), at: AT }),
+    ).toMatchObject({ openBlockers: [], unblockedAt: AT, unblockedBy: "PLAT-1" });
+  });
+
+  test("a settled open blocker still puts an issue to sleep beside an unsettled one", () => {
+    const links = blockLinks([blockedBy("PLAT-1", "done", "1"), blockedBy("PLAT-2", "new", "2")]);
+    const awake: WakeState = { ...asleep, openBlockers: [], unblockedAt: "2026-10-01T00:00:00Z" };
+    expect(
+      decideWake({
+        prev: awake,
+        links,
+        blockers: { "PLAT-2": open },
+        settled: new Set(["PLAT-2"]),
+        at: AT,
+      }),
+    ).toMatchObject({ openBlockers: ["PLAT-2"], unblockedAt: null });
+  });
+
+  test("404 and 403 are remembered for wanted keys, kept while skipped, forgotten when read or unwanted", () => {
+    const previous = {
+      "PLAT-1": { reason: "gone" as const, at: "2026-10-01T00:00:00.000Z" },
+      "PLAT-5": { reason: "forbidden" as const, at: "2026-10-01T00:00:00.000Z" },
+      "PLAT-9": { reason: "forbidden" as const, at: "2026-10-01T00:00:00.000Z" },
+    };
+    expect(
+      nextUnread({
+        wanted: ["PLAT-1", "PLAT-2", "PLAT-3", "PLAT-5"],
+        gone: new Set(["PLAT-1", "PLAT-2"]),
+        forbidden: new Set(["PLAT-3"]),
+        skipped: new Set(["PLAT-1"]),
+        previous,
+        at: AT,
+      }),
+    ).toEqual({
+      "PLAT-1": previous["PLAT-1"],
+      "PLAT-2": { reason: "gone", at: AT },
+      "PLAT-3": { reason: "forbidden", at: AT },
+    });
+    expect(unreadStillValid(previous["PLAT-1"], AT)).toBe(true);
+    expect(unreadStillValid(previous["PLAT-1"], "2026-10-09T00:00:00.000Z")).toBe(false);
   });
 });

@@ -14,6 +14,12 @@ export type BlockerState = {
   statusCategory: string;
   /** ISO time Jira resolved it; null while open or when unknown. */
   resolvedAt: string | null;
+  /**
+   * Jira says the issue does not exist (404): it was deleted, so the link is
+   * gone too. Stored with the done category, so every reader treats it as not
+   * blocking. Absent in maps stored before it was kept.
+   */
+  gone?: boolean;
 };
 export type BlockerMap = Record<string, BlockerState>;
 
@@ -23,11 +29,90 @@ const BlockerMapSchema = z.record(
     status: z.string(),
     statusCategory: z.string(),
     resolvedAt: z.string().nullable().default(null),
+    gone: z.boolean().optional(),
   }),
 );
 
 export const parseBlockers = (value: string | undefined): BlockerMap =>
   readJson(value, BlockerMapSchema, {});
+
+/** The map entry of a blocker Jira no longer has (404). */
+export const GONE_BLOCKER: BlockerState = {
+  status: "Not found",
+  statusCategory: "done",
+  resolvedAt: null,
+  gone: true,
+};
+
+/**
+ * Blockers the step could not read with a definite answer, so it does not ask
+ * again every sync (`sync_state` `jira.blockersUnread`): "gone" (404) or
+ * "forbidden" (403, state unknown), and when that was seen.
+ */
+export type UnreadBlockers = Record<string, { reason: "gone" | "forbidden"; at: string }>;
+
+const UnreadBlockersSchema = z.record(
+  z.string(),
+  z.object({ reason: z.enum(["gone", "forbidden"]), at: z.string() }),
+);
+
+export const parseUnreadBlockers = (value: string | undefined): UnreadBlockers =>
+  readJson(value, UnreadBlockersSchema, {});
+
+/** A blocker that was not found or not readable is asked again after this long. */
+export const UNREAD_RECHECK_MS = 7 * 86_400_000;
+/** Most unreadable blockers remembered. */
+export const MAX_UNREAD = 500;
+
+/** Whether an unread blocker is still remembered at `at`, so it is not read again. */
+export const unreadStillValid = (entry: UnreadBlockers[string] | undefined, at: string) =>
+  !!entry && Date.parse(at) - Date.parse(entry.at) < UNREAD_RECHECK_MS;
+
+/**
+ * The blocker map after a run (D45). `wanted` are the blockers of the user's
+ * open issues; `read` what this run learned (search, single reads, issues the
+ * sync returned); `gone` keys Jira does not have. A wanted key this run did not
+ * read keeps its previous entry, so a failed or partial read changes nothing;
+ * keys no longer wanted are dropped.
+ */
+export function mergeBlockerMap(opts: {
+  wanted: readonly string[];
+  read: ReadonlyMap<string, BlockerState>;
+  gone: ReadonlySet<string>;
+  previous: BlockerMap;
+}): BlockerMap {
+  const map: BlockerMap = {};
+  for (const key of opts.wanted) {
+    const s = opts.read.get(key) ?? (opts.gone.has(key) ? GONE_BLOCKER : opts.previous[key]);
+    if (s) map[key] = s;
+  }
+  return map;
+}
+
+/**
+ * The unread record after a run: wanted keys that answered 404 or 403 now, and
+ * remembered ones not asked again yet; anything read or no longer wanted is
+ * forgotten. Newest kept when over `MAX_UNREAD`.
+ */
+export function nextUnread(opts: {
+  wanted: readonly string[];
+  gone: ReadonlySet<string>;
+  forbidden: ReadonlySet<string>;
+  /** Keys skipped this run because they are remembered. */
+  skipped: ReadonlySet<string>;
+  previous: UnreadBlockers;
+  at: string;
+}): UnreadBlockers {
+  const entries: [string, UnreadBlockers[string]][] = [];
+  for (const key of opts.wanted) {
+    const prev = opts.previous[key];
+    if (opts.skipped.has(key) && prev) entries.push([key, prev]);
+    else if (opts.gone.has(key)) entries.push([key, { reason: "gone", at: opts.at }]);
+    else if (opts.forbidden.has(key)) entries.push([key, { reason: "forbidden", at: opts.at }]);
+  }
+  entries.sort(([, a], [, b]) => b.at.localeCompare(a.at));
+  return Object.fromEntries(entries.slice(0, MAX_UNREAD));
+}
 
 /** `sync_state` `jira.linkTypes`: the instance's "blocks" link type, or null when it has none. */
 export type LinkTypes = { blocks: IssueLinkType | null };
@@ -106,6 +191,50 @@ export function nextWakeState(
   return { ...prev, openBlockers };
 }
 
+/**
+ * The next wake state when not every blocker's state is known (D45 review).
+ * `settled` are the blockers whose state can be trusted: read this run, gone,
+ * or kept from an earlier read and not unreadable now. A blocker outside it
+ * falls back to the status embedded in the link, which is only as fresh as the
+ * issue's last fetch, so it never wakes an issue: with an unsettled blocker and
+ * no settled open one, the state stays as it was (null). A settled open blocker
+ * puts the issue to sleep as usual.
+ */
+export function decideWake(opts: {
+  prev: WakeState;
+  links: readonly BlockLink[];
+  blockers: BlockerMap;
+  settled: ReadonlySet<string>;
+  at: string;
+}): WakeState | null {
+  const open = openBlockers(opts.links, opts.blockers);
+  const unsettled = blockerKeys(opts.links).filter((k) => !opts.settled.has(k));
+  if (unsettled.length > 0 && !open.some((k) => opts.settled.has(k))) return null;
+  return nextWakeState(opts.prev, open, opts.blockers, opts.at);
+}
+
+/**
+ * Blockers whose state the wake-up may trust: those `known` this run (read,
+ * returned by the sync, gone) and those with a stored entry that are not
+ * unreadable (`forbidden`) now.
+ */
+export function settledBlockers(
+  keys: readonly string[],
+  known: ReadonlySet<string>,
+  blockers: BlockerMap,
+  forbidden: ReadonlySet<string>,
+): Set<string> {
+  return new Set(keys.filter((k) => known.has(k) || (!!blockers[k] && !forbidden.has(k))));
+}
+
+/** The wake state of an issue that is not one of the user's open issues: first seen when it returns. */
+export const CLEARED_WAKE: WakeState = {
+  openBlockers: null,
+  unblockedAt: null,
+  unblockedBy: null,
+  unblockNotifiedAt: null,
+};
+
 export const sameWakeState = (a: WakeState, b: WakeState) =>
   JSON.stringify(a.openBlockers) === JSON.stringify(b.openBlockers) &&
   a.unblockedAt === b.unblockedAt &&
@@ -120,7 +249,7 @@ const shortDate = (iso: string) =>
 export function unblockReason(blocker: string | null, blockers: BlockerMap): string {
   if (!blocker) return "Its blockers are done";
   const s = blockers[blocker];
-  if (s?.statusCategory !== "done") return `${blocker} no longer blocks it`;
+  if (s?.statusCategory !== "done" || s.gone) return `${blocker} no longer blocks it`;
   return `${blocker} moved to ${s.status}${s.resolvedAt ? ` on ${shortDate(s.resolvedAt)}` : ""}`;
 }
 

@@ -5,7 +5,11 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { useEffect } from "react";
 import { logger } from "@/lib/log";
-import { dueUnblockNotifications, markUnblockNotified } from "@/services/blockers/queries";
+import {
+  dueUnblockNotifications,
+  markUnblockNotified,
+  silenceUnblockNotifications,
+} from "@/services/blockers/queries";
 import { dueForReminder, markNotified } from "@/services/dependencies/queries";
 import { localDate } from "@/services/intake";
 import { useSettings } from "./hooks";
@@ -51,18 +55,26 @@ async function notifyUnblocked() {
 
 export function useFollowupReminders() {
   const { data: settings } = useSettings();
+  const loaded = settings !== undefined;
   const enabled = settings?.dependencies.reminders ?? false;
   useEffect(() => {
-    if (!enabled || !isTauri()) return;
-    const tick = () => {
-      void notifyDue().catch((e) => logger.warn("Follow-up reminder failed", e));
-      void notifyUnblocked().catch((e) => logger.warn("Unblocked reminder failed", e));
-    };
+    if (!loaded || !isTauri()) return;
+    const tick = enabled
+      ? () => {
+          void notifyDue().catch((e) => logger.warn("Follow-up reminder failed", e));
+          void notifyUnblocked().catch((e) => logger.warn("Unblocked reminder failed", e));
+        }
+      : // Off: wake-ups count as notified, so turning reminders on sends no burst.
+        () => {
+          void run(silenceUnblockNotifications()).catch((e) =>
+            logger.warn("Marking wake-ups failed", e),
+          );
+        };
     const first = setTimeout(tick, 5000);
     const every = setInterval(tick, CHECK_EVERY_MS);
     return () => {
       clearTimeout(first);
       clearInterval(every);
     };
-  }, [enabled]);
+  }, [loaded, enabled]);
 }

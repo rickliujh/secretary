@@ -2,6 +2,7 @@
  * The small-asks home (FR-10, D44): pure rules code applies to a small ask, so
  * the model never chooses its project, label, assignee or sprint.
  */
+import { escapeWikiText } from "@/lib/wiki-safe";
 
 /**
  * Whether a type is a sub-task type. `subtaskTypes` are the names Jira flags as
@@ -151,6 +152,21 @@ export function splitProvenance(
       .join("\n")
       .trim(),
   };
+}
+
+const LINE_RE = new RegExp(`^_Asked (?:by (.+?) )?via (.+?) on (${DATE}):_$`);
+
+/**
+ * The "Asked by" line of a provenance block as wiki markup. The requester's
+ * name comes from a contact, which may come from a message's sender, so the
+ * words are escaped and Jira shows them as typed: a name cannot add links,
+ * images, mentions, formatting or macros (D44, D51).
+ */
+export function provenanceLineWiki(line: string): string {
+  const m = LINE_RE.exec(line.trim());
+  if (!m) return `_${escapeWikiText(line.replace(/^_|:?_$/g, ""))}:_`;
+  const [, name, via, date] = m;
+  return `_Asked ${name ? `by ${escapeWikiText(name)} ` : ""}via ${escapeWikiText(via ?? "")} on ${date}:_`;
 }
 
 /** The date in a description's provenance block, so a revision keeps it. */

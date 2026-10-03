@@ -11,11 +11,13 @@ import { parseBlockers, type WokenTicket, wokenTickets } from "./logic";
 
 /**
  * Tickets whose last open blocker closed in the last seven days and that are
- * still open, not viewed since and not snoozed, newest first, with the reason
- * ("PLAT-812 moved to Done on 2 Oct").
+ * still open, still assigned to the user, not viewed since and not snoozed,
+ * newest first, with the reason ("PLAT-812 moved to Done on 2 Oct").
  */
 export const loadWokenTickets = (now = new Date()) =>
   Effect.gen(function* () {
+    const me = yield* getState(SYNC_KEYS.username);
+    if (!me) return [] as WokenTicket[];
     const rows = yield* query((d) =>
       d
         .select({
@@ -30,7 +32,13 @@ export const loadWokenTickets = (now = new Date()) =>
         })
         .from(issueMeta)
         .innerJoin(jiraIssues, eq(jiraIssues.key, issueMeta.issueKey))
-        .where(and(isNotNull(issueMeta.unblockedAt), eq(jiraIssues.stale, false)))
+        .where(
+          and(
+            isNotNull(issueMeta.unblockedAt),
+            eq(jiraIssues.stale, false),
+            eq(jiraIssues.assignee, me),
+          ),
+        )
         .all(),
     );
     const blockers = parseBlockers(yield* getState(SYNC_KEYS.blockers));
@@ -40,6 +48,18 @@ export const loadWokenTickets = (now = new Date()) =>
 /** Woken tickets whose one notification has not been sent yet. */
 export const dueUnblockNotifications = (now = new Date()) =>
   Effect.map(loadWokenTickets(now), (list): WokenTicket[] => list.filter((t) => !t.notified));
+
+/**
+ * While reminders are off, woken tickets are marked as notified without a
+ * notification, so turning reminders on later does not send a burst for every
+ * ticket that woke in the last seven days. Returns the keys marked.
+ */
+export const silenceUnblockNotifications = (now = new Date()) =>
+  Effect.gen(function* () {
+    const keys = (yield* dueUnblockNotifications(now)).map((t) => t.key);
+    if (keys.length) yield* markUnblockNotified(keys, now.toISOString());
+    return keys;
+  });
 
 /** Records that the wake-up notification for these tickets was sent. */
 export const markUnblockNotified = (keys: readonly string[], at: string) =>
