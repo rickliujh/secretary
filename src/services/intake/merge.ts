@@ -20,6 +20,8 @@ function identity(p: ProposalPayload): string {
   if (p.kind === "add_comment") return `comment:${p.target}:${norm(p.bodyMd)}`;
   if (p.kind === "link_dependency") return `dep:${p.target}:${p.externalRef ?? norm(p.label)}`;
   if (p.kind === "link_issues") return `blocks:${p.blocker}:${p.target}`;
+  // One change of each kind per wait; two items both resolving it are one proposal.
+  if (p.kind === "update_dependency") return `wait:${p.dependencyId}:${p.action}`;
   if (p.kind === "transition_issue") return `transition:${p.target}`;
   if (p.kind === "move_to_sprint") return `sprint:${p.target}:${p.sprintId}`;
   if (p.kind === "remember") return `remember:${norm(p.content)}`;

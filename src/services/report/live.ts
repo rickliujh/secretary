@@ -234,6 +234,7 @@ const make = Effect.gen(function* () {
           followups: logged
             .filter((f) => f.dependencyId === x.id)
             .map((f) => ({ at: f.at, channel: f.channel, summary: f.summary })),
+          ownerAway: x.ownerAway,
         })),
         asks,
       });

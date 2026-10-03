@@ -34,8 +34,8 @@ const fields = (s: ItemSnapshot) =>
   buildItemSchema(s).shape.proposals.element.shape as unknown as Record<string, z.ZodType>;
 
 describe("link_issues in the schema", () => {
-  test("prompt version 8", () => {
-    expect(CLASSIFY_PROMPT_VERSION).toBe(8);
+  test("prompt version 8 or later", () => {
+    expect(CLASSIFY_PROMPT_VERSION).toBeGreaterThanOrEqual(8);
   });
 
   test("without a blocks link type the kind, its field and its rule are absent", () => {

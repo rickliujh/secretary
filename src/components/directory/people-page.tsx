@@ -30,6 +30,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { localDate } from "@/lib/dates";
+import { awayLabel } from "@/services/directory/away";
 import { createPerson, jiraUsersWithoutContact } from "@/services/directory/queries";
 import type { Profile } from "@/services/directory/schema";
 import { exportDirectory, importDirectory } from "@/services/directory/transfer";
@@ -119,6 +121,7 @@ export function PeoplePage({
     [teams.data],
   );
   const q = text.trim().toLowerCase();
+  const today = localDate();
   const rows = (people.data ?? []).filter(
     (p) =>
       !q ||
@@ -195,7 +198,14 @@ export function PeoplePage({
                   onClick={() => onSelect(p.id)}
                   onKeyDown={(e) => e.key === "Enter" && onSelect(p.id)}
                 >
-                  <TableCell className="font-medium">{p.displayName}</TableCell>
+                  <TableCell className="font-medium">
+                    {p.displayName}
+                    {awayLabel(p.awayUntil, today) && (
+                      <Badge variant="secondary" className="ml-2">
+                        {awayLabel(p.awayUntil, today)}
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell>{p.title}</TableCell>
                   <TableCell>{p.teamId ? teamName.get(p.teamId) : ""}</TableCell>
                   <TableCell className="font-mono text-xs">{p.jiraUsername}</TableCell>

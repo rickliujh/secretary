@@ -153,6 +153,7 @@ function Dashboard() {
                       {w.externalRef && <span className="font-mono text-xs"> {w.externalRef}</span>}
                     </Link>
                     <span className="text-xs text-muted-foreground">{w.ownerName}</span>
+                    {w.reason && <Badge variant="outline">{w.reason}</Badge>}
                     {w.overdueDays > 0 ? (
                       <Badge variant="destructive">{w.overdueDays}d</Badge>
                     ) : (

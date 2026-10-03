@@ -57,6 +57,12 @@ export const PersonInputSchema = z.object({
   responsibilities: optionalText(2000),
   profile: ProfileSchema.default({}),
   notesMd: optionalText(20000),
+  /** Last day away, YYYY-MM-DD (D47); "" or null when not away. */
+  awayUntil: z
+    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")])
+    .transform((v) => (v === "" ? null : v))
+    .nullable()
+    .default(null),
 });
 export type PersonInput = z.input<typeof PersonInputSchema>;
 

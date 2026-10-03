@@ -88,7 +88,7 @@ export function DependencySheet({
     : d?.ownerTeamId
       ? lookups.team.get(d.ownerTeamId)?.name
       : undefined;
-  const t = d ? timing(d, localDate()) : null;
+  const t = detail.data ? timing(detail.data.timingInput, localDate()) : null;
   const resolved = d?.status === "resolved";
 
   return (

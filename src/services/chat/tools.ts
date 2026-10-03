@@ -20,6 +20,7 @@ import { ConfluenceClient } from "@/services/confluence";
 import { textToCql, webUrl } from "@/services/confluence/cql";
 import { dashboardWithBrief } from "@/services/dashboard/brief";
 import { type Db, query } from "@/services/db";
+import { timing } from "@/services/dependencies/logic";
 import { listDependencies } from "@/services/dependencies/queries";
 import { searchNoteIds } from "@/services/directory/notes";
 import { Intake } from "@/services/intake";
@@ -219,10 +220,12 @@ export function chatTools(
               includeResolved: includeResolved ?? false,
               issueKey: issueKey?.trim().toUpperCase() || undefined,
             });
+            const today = localDate();
             return {
               waiting: rows
                 .filter((r) => !owner || matches(r.owner.name, owner))
-                .map((r) => ({
+                .map((r) => ({ r, t: timing(r, today) }))
+                .map(({ r, t }) => ({
                   issueKey: r.issueKey,
                   issueSummary: r.issueSummary,
                   label: r.label,
@@ -233,7 +236,12 @@ export function chatTools(
                   requestedAt: r.requestedAt?.slice(0, 10) ?? null,
                   expectedAt: r.expectedAt,
                   lastChased: r.lastFollowupAt?.slice(0, 10) ?? null,
-                  nextChase: r.nextFollowupAt,
+                  nextChase: t.followupOn,
+                  overdueDays: t.overdueDays,
+                  followUpDue: t.followupDue,
+                  // The owner is away (D47): do not chase before they are back.
+                  ownerAwayUntil: t.awayUntil,
+                  note: t.reason,
                 })),
             };
           }),
@@ -540,7 +548,12 @@ export function chatTools(
               })),
               followupsDue: dash.iAmWaitingOn
                 .filter((d) => d.followupDue)
-                .map((d) => ({ issueKey: d.issueKey, label: d.label, owner: d.ownerName })),
+                .map((d) => ({
+                  issueKey: d.issueKey,
+                  label: d.label,
+                  owner: d.ownerName,
+                  ...(d.reason ? { why: d.reason } : {}),
+                })),
             };
           }),
         ),
@@ -593,7 +606,8 @@ export function chatTools(
                   label: d.label,
                   owner: d.owner.name,
                   expectedAt: d.expectedAt,
-                  nextFollowupAt: d.nextFollowupAt,
+                  // A sleeping wait is chased the day its owner is back (D47).
+                  nextFollowupAt: timing(d, today).followupOn,
                 })),
               sprint:
                 active && active.state === "active"

@@ -19,6 +19,8 @@ import { takeWithinBudget } from "@/prompts/common";
 import { parseLinkTypes } from "@/services/blockers/logic";
 import { blockLinks } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
+import { listDependencies } from "@/services/dependencies/queries";
+import { isAway } from "@/services/directory/away";
 import { normalizeUsername } from "@/services/directory/schema";
 import { parseIssueLinks } from "@/services/jira/schemas";
 import { describeCorrection, describeStoredPayload } from "@/services/proposals/schema";
@@ -35,6 +37,7 @@ import {
   rankMemories,
   retrievalFtsQuery,
 } from "./ranking";
+import { pickWaits } from "./waits";
 
 const FTS_LIMIT = 15;
 const RECENT_LIMIT = 5;
@@ -256,6 +259,8 @@ const make = Effect.gen(function* () {
           title: p.title,
           team: p.teamId ? (teamName.get(p.teamId) ?? null) : null,
           jiraUsername: p.jiraUsername,
+          // Only while away, so the model does not propose the date again (D47).
+          ...(isAway(p.awayUntil, req.today) ? { awayUntil: p.awayUntil } : {}),
         })),
         (p) => `${p.id} ${p.displayName} ${p.title ?? ""} ${p.team ?? ""}`,
         BUDGETS.people,
@@ -292,6 +297,37 @@ const make = Effect.gen(function* () {
               .all(),
           )
         : [];
+
+      // --- open waits update_dependency may pick (D46) ------------------------
+      const personTeam = new Map(allPeople.map((p) => [p.id, p.teamId]));
+      const waits = pickWaits(
+        (yield* withDb(listDependencies())).map((d) => ({
+          id: d.id,
+          issueKey: d.issueKey,
+          label: d.label,
+          kind: d.kind,
+          externalRef: d.externalRef,
+          status: d.status,
+          ownerPersonId: d.ownerPersonId,
+          ownerTeamId: d.ownerTeamId,
+          owner: d.owner.type === "none" ? null : d.owner.name,
+          ownerPersonTeamId: d.ownerPersonId ? (personTeam.get(d.ownerPersonId) ?? null) : null,
+          ownerAwayUntil: d.ownerAway?.awayUntil ?? null,
+          requestedAt: d.requestedAt,
+          expectedAt: d.expectedAt,
+          nextFollowupAt: d.nextFollowupAt,
+          issueSummary: d.issueSummary,
+        })),
+        {
+          senderPersonId: sender?.id ?? null,
+          senderTeamId: sender?.teamId ?? null,
+          namedPersonIds: req.references.contactIds,
+          candidateKeys: candidates.map((c) => c.key),
+          mentionedKeys: req.references.issueKeys,
+          quote: req.quote,
+          today: req.today,
+        },
+      );
 
       // --- memories and correction examples (D26) ---------------------------
       const memoryRows = yield* q((d) =>
@@ -441,6 +477,7 @@ const make = Effect.gen(function* () {
         teams: teamsOut,
         people: peopleOut,
         dependencies: deps,
+        waits,
         memories: rules,
         examples,
         notes,

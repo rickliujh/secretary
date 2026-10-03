@@ -12,6 +12,7 @@ import {
   MESSAGE_INTENTS,
   type ProposalKind,
   type ProposalPayload,
+  WAIT_ACTIONS,
 } from "@/services/proposals/schema";
 
 /** Which tickets an issue field offers: epics, possible sub-task parents, or any. */
@@ -130,12 +131,19 @@ export const FIELD_SPECS: Record<EditableKind, FieldSpec[]> = {
     { path: "expectedAt", label: "Expected", type: "date" },
     { path: "nextFollowupAt", label: "Next follow-up", type: "date" },
   ],
+  update_dependency: [
+    { path: "action", label: "Do", type: "select", options: opts(WAIT_ACTIONS) },
+    { path: "summary", label: "What they said", type: "textarea" },
+    { path: "expectedAt", label: "Expected", type: "date" },
+    { path: "nextFollowupAt", label: "Ask again on", type: "date" },
+  ],
   link_issues: [
     { path: "target", label: "Waits (is blocked)", type: "issue", issues: "any" },
     { path: "blocker", label: "Until this is done", type: "issue", issues: "any" },
   ],
   update_person: [
     { path: "personId", label: "Contact", type: "select", options: peopleOpts },
+    { path: "changes.awayUntil", label: "Away until", type: "date", optionalChange: true },
     { path: "changes.title", label: "Title", type: "text", optionalChange: true },
     {
       path: "changes.responsibilities",

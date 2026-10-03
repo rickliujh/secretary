@@ -1,4 +1,4 @@
-import { Check, Loader2, Pencil, RotateCcw, X } from "lucide-react";
+import { Check, ChevronDown, Loader2, Pencil, RotateCcw, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type { Lookups } from "@/app/queries";
 import { useDraftPanel } from "@/components/drafts/use-draft-panel";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
+import { compactLine, isCompact } from "@/services/proposals/compact";
 import { NEW_REF_RE, PROPOSAL_LABELS, type ProposalPayload } from "@/services/proposals/schema";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
 import { isEditable, viewPayload } from "./proposal-fields";
@@ -139,6 +140,22 @@ function PayloadView({ p, lookups }: { p: ProposalPayload; lookups: Lookups }) {
           <Row label="In Jira">A "blocks" link; the issue wakes up when the blocker is done</Row>
         </dl>
       );
+    case "update_dependency":
+      return (
+        <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-sm">
+          <Row label="Wait">
+            {p.issueKey && <IssueRef value={p.issueKey} lookups={lookups} />}{" "}
+            {p.label && <span>waits on {p.label}</span>}
+          </Row>
+          <Row label="Do">
+            <Badge variant="secondary">{p.action.replace("_", " ")}</Badge>
+          </Row>
+          <Row label="They said">{p.summary}</Row>
+          <Row label="Expected">{p.expectedAt}</Row>
+          <Row label="Ask again">{p.nextFollowupAt}</Row>
+          <Row label="Logged as">{p.channel}</Row>
+        </dl>
+      );
     case "update_person":
     case "update_team": {
       const changes = Object.entries(p.changes).flatMap(([k, v]) =>
@@ -226,42 +243,11 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
   const busy = approve.isPending || reject.isPending;
   const canApprove = pending || proposal.status === "failed";
   const canEdit = canApprove && isEditable(payload);
-
-  return (
-    <article
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: the card takes a/e/r shortcuts when focused (NFR-6).
-      tabIndex={0}
-      aria-label={`${PROPOSAL_LABELS[proposal.payload.kind]} proposal, ${proposal.status}`}
-      className={cn(
-        "flex flex-col gap-2 rounded-lg border p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        !pending && proposal.status !== "failed" && "opacity-75",
-      )}
-      onKeyDown={(e) => {
-        if (e.target !== e.currentTarget || busy) return;
-        if (e.key === "a" && canApprove) approve.mutate({ id: proposal.id });
-        if (e.key === "r" && pending) reject.mutate(proposal.id);
-        if (e.key === "e" && canEdit) setEditing(true);
-      }}
-    >
-      <header className="flex items-center gap-2">
-        <Badge variant="secondary">{PROPOSAL_LABELS[proposal.payload.kind]}</Badge>
-        <Badge
-          variant="secondary"
-          className={cn("border-transparent", STATUS_TONE[proposal.status])}
-        >
-          {proposal.status}
-        </Badge>
-        {proposal.editedPayload && <Badge variant="outline">edited</Badge>}
-        <span className="ml-auto" />
-        <Confidence value={proposal.confidence} />
-      </header>
-      <PayloadView p={viewPayload(payload)} lookups={lookups} />
-      {proposal.rationale && <p className="text-xs text-muted-foreground">{proposal.rationale}</p>}
-      {proposal.evidence && (
-        <blockquote className="border-l-2 pl-2 text-xs text-muted-foreground italic">
-          “{proposal.evidence}”
-        </blockquote>
-      )}
+  // Dependency proposals are one line with one approve button (D46).
+  const compact = isCompact(payload);
+  const [expanded, setExpanded] = useState(false);
+  const outcome = (
+    <>
       {proposal.status === "executed" && result?.message && (
         <p className="text-sm text-emerald-700 dark:text-emerald-300">
           {result.message}
@@ -293,18 +279,115 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
       {proposal.status === "failed" && result?.error && (
         <p className="text-sm text-destructive">{result.error}</p>
       )}
+    </>
+  );
+  const approveButton = (
+    <Button size="sm" disabled={busy} onClick={() => approve.mutate({ id: proposal.id })}>
+      {approve.isPending ? (
+        <Loader2 className="animate-spin" />
+      ) : proposal.status === "failed" ? (
+        <RotateCcw />
+      ) : (
+        <Check />
+      )}
+      {proposal.status === "failed" ? "Retry" : "Approve"}
+    </Button>
+  );
+  const expandButton = compact && (
+    <Button
+      size="icon"
+      variant="ghost"
+      className="size-7"
+      aria-label={expanded ? "Hide details" : "Show details"}
+      aria-expanded={expanded}
+      onClick={() => setExpanded((x) => !x)}
+    >
+      <ChevronDown className={cn("transition-transform", expanded && "rotate-180")} />
+    </Button>
+  );
+
+  if (compact && !expanded) {
+    const line = compactLine(viewPayload(payload), {
+      person: (id) => lookups.person.get(id)?.displayName ?? null,
+      team: (id) => lookups.team.get(id)?.name ?? null,
+    });
+    return (
+      <article
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the row takes the card's a/r shortcuts when focused (NFR-6).
+        tabIndex={0}
+        aria-label={`${PROPOSAL_LABELS[proposal.payload.kind]} proposal, ${proposal.status}`}
+        className={cn(
+          "flex flex-col gap-1 rounded-lg border px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          !pending && proposal.status !== "failed" && "opacity-75",
+        )}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget || busy) return;
+          if (e.key === "a" && canApprove) approve.mutate({ id: proposal.id });
+          if (e.key === "r" && pending) reject.mutate(proposal.id);
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">{PROPOSAL_LABELS[proposal.payload.kind]}</Badge>
+          <span className="min-w-0 flex-1 truncate text-sm" title={line ?? undefined}>
+            {line}
+          </span>
+          {!pending && (
+            <Badge
+              variant="secondary"
+              className={cn("border-transparent", STATUS_TONE[proposal.status])}
+            >
+              {proposal.status}
+            </Badge>
+          )}
+          {proposal.editedPayload && <Badge variant="outline">edited</Badge>}
+          {canApprove && approveButton}
+          {expandButton}
+        </div>
+        {outcome}
+      </article>
+    );
+  }
+
+  return (
+    <article
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: the card takes a/e/r shortcuts when focused (NFR-6).
+      tabIndex={0}
+      aria-label={`${PROPOSAL_LABELS[proposal.payload.kind]} proposal, ${proposal.status}`}
+      className={cn(
+        "flex flex-col gap-2 rounded-lg border p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        !pending && proposal.status !== "failed" && "opacity-75",
+      )}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget || busy) return;
+        if (e.key === "a" && canApprove) approve.mutate({ id: proposal.id });
+        if (e.key === "r" && pending) reject.mutate(proposal.id);
+        if (e.key === "e" && canEdit) setEditing(true);
+      }}
+    >
+      <header className="flex items-center gap-2">
+        <Badge variant="secondary">{PROPOSAL_LABELS[proposal.payload.kind]}</Badge>
+        <Badge
+          variant="secondary"
+          className={cn("border-transparent", STATUS_TONE[proposal.status])}
+        >
+          {proposal.status}
+        </Badge>
+        {proposal.editedPayload && <Badge variant="outline">edited</Badge>}
+        <span className="ml-auto" />
+        <Confidence value={proposal.confidence} />
+        {expandButton}
+      </header>
+      <PayloadView p={viewPayload(payload)} lookups={lookups} />
+      {proposal.rationale && <p className="text-xs text-muted-foreground">{proposal.rationale}</p>}
+      {proposal.evidence && (
+        <blockquote className="border-l-2 pl-2 text-xs text-muted-foreground italic">
+          “{proposal.evidence}”
+        </blockquote>
+      )}
+      {outcome}
       {canApprove && (
         <footer className="flex gap-2">
-          <Button size="sm" disabled={busy} onClick={() => approve.mutate({ id: proposal.id })}>
-            {approve.isPending ? (
-              <Loader2 className="animate-spin" />
-            ) : proposal.status === "failed" ? (
-              <RotateCcw />
-            ) : (
-              <Check />
-            )}
-            {proposal.status === "failed" ? "Retry" : "Approve"}
-          </Button>
+          {approveButton}
           {canEdit && (
             <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing(true)}>
               <Pencil /> Edit

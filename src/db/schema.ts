@@ -151,6 +151,12 @@ export const people = sqliteTable(
     responsibilities: text("responsibilities"),
     profile: text("profile", { mode: "json" }).$type<CommunicationProfile>().notNull().default({}),
     notesMd: text("notes_md"),
+    /**
+     * Last day away (YYYY-MM-DD, local), set by hand or from an out-of-office reply
+     * (D47). Their waits sleep until the first working day after it. A past date is
+     * ignored, not cleared.
+     */
+    awayUntil: text("away_until"),
   },
   (t) => [
     index("people_team_idx").on(t.teamId),

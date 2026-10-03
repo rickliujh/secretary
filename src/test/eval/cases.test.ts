@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { fixtureIssues } from "@/test/seed";
-import { EVAL_CASES, EVAL_OUTSIDE_ISSUES } from "./cases";
+import { contactTarget, EVAL_CASES, EVAL_OUTSIDE_ISSUES } from "./cases";
 
 describe("eval cases", () => {
   test("every expected issue target exists in the fixtures or is served from outside", () => {
@@ -32,5 +32,29 @@ describe("eval cases", () => {
     expect(links.some((c) => c.home && c.text.includes("PLAT-1"))).toBe(true);
     // PLAT-1 is not a synced fixture: the eval reads it once from Jira.
     expect(fixtureIssues.some((i) => i.key === "PLAT-1")).toBe(false);
+  });
+
+  test("wait cases: an answer resolves a wait, a partial one logs a reply, an out-of-office sets the date (D46, D47)", () => {
+    const actionOf = (action: string) =>
+      EVAL_CASES.filter(
+        (c) =>
+          c.wait &&
+          c.expect.required.some(
+            (r) =>
+              r.kind === "update_dependency" &&
+              r.target === c.wait?.issueKey &&
+              r.fields?.action === action,
+          ),
+      );
+    expect(actionOf("resolve")).toHaveLength(1);
+    expect(actionOf("log_reply")).toHaveLength(1);
+    const away = EVAL_CASES.filter((c) =>
+      c.expect.required.some((r) => r.kind === "update_person" && "awayUntil" in (r.fields ?? {})),
+    );
+    expect(away).toHaveLength(1);
+    // The person is the sender, named by the run's contact id.
+    expect(away[0]?.expect.required[0]?.target).toBe(contactTarget(away[0]?.sender ?? "ana"));
+    for (const c of EVAL_CASES.filter((x) => x.wait))
+      expect(fixtureIssues.some((i) => i.key === c.wait?.issueKey)).toBe(true);
   });
 });

@@ -885,3 +885,76 @@ Known limits
 - Command palette: "New draft" moved into the Actions group, after Capture.
 - Not run in the desktop app: the notification and the hidden Plan tab were checked
   by cargo check, typecheck, unit tests and review only.
+
+## Phase 13: Waits from intake, away dates (2026-10-03)
+
+Why: pasting the answer to something you were waiting on did nothing to the wait,
+and "ask again when they are back from leave" needed a date set by hand on every
+wait (requirements FR-3.6, FR-3.7, design.md D46, D47).
+
+Built
+- Intake (prompt version 9) sees up to 12 open waits that the pasted text may be
+  about: the sender's, a named contact's, the sender's team's, those on a
+  candidate ticket, and those sharing words or an incident number with it. It
+  can propose `update_dependency` on one of them: resolve ("Bob sent the
+  numbers"), log their reply (with a new expected date when they give one), or
+  reschedule. A new dependency that a listed wait already covers goes back for
+  repair.
+- Approving it writes the timeline entry, the new date or the resolution through
+  the Waiting page's functions, then updates the remote link of a mirrored wait;
+  a failed link update is a warning on the executed card.
+- Dependency proposals (a change to a wait, a wait on an existing ticket) show as
+  one line with Approve; the full card, with Edit and Reject, is behind the
+  expand arrow. A wait on a new small ask still joins its Track row.
+- Contacts have an "away until" date (migration 0013): a field on the contact, a
+  badge on the People list and the contact, and `update_person.awayUntil` from a
+  pasted out-of-office reply.
+- While the owner is away a wait sleeps: not overdue, no follow-up due, no
+  reminder, no ranking points, last in its group on the Waiting page with "Bob is
+  away until 14 Oct". From the first working day after, it is due with "Bob is
+  back" until a follow-up is logged; the reminder says so too. The dashboard's
+  waiting list, the report facts, planning and the chat tools use the same timing.
+- Drafts to someone away say so in the composer and the draft, and the draft
+  prompt is told not to ask for anything before they are back.
+
+Proposal text bound for Jira (D51)
+- A create's description and a comment's body from a proposal are made safe after
+  conversion to wiki markup: a remote image (`![](https://...)`, `!https://...!`,
+  with or without `|width=...`) becomes a plain link, and a mention
+  (`[~user]`, `[~accountid:...]`, `[name|~user]`) stays only for a contact with a
+  Jira id, the ticket's assignee or reporter, or you; any other is written as
+  text. The card says what was changed. Image names without a scheme (attachments
+  of the same ticket), `{code}` and `{noformat}` blocks, links and formatting are
+  left alone. What you type in the ticket view is sent as typed.
+
+Decisions and defaults
+- "Back" is the first working day after the away date; "is back" applies only to
+  waits opened before that day, so an old date needs no clearing.
+- An away date the model proposes must be a real date from today to 180 days
+  ahead.
+- The next chase after a reply is the date given, else the working day after a new
+  expected date, else the usual interval (Settings > dependencies).
+- A reschedule needs a new expected date or follow-up date; dates before today go
+  back for repair.
+
+Checklist
+- FR-3 AC in a service test (`intake/waits.test.ts`): "Bob sent the numbers" from
+  Bob offers Bob's wait, and one approval resolves it with a timeline entry and
+  the mirrored link marked resolved. An out-of-office reply sets the away date;
+  no reminder while away, one with "Bob Ray is back" on the first working day
+  after.
+- A wait whose owner is away until tomorrow is not due today and is due, with the
+  reason, on the first working day after (`dependencies/logic.test.ts`), also
+  across a weekend.
+- Scripted-model tests for the schema, rule, validation and mapping
+  (`prompts/classify-waits.test.ts`); Executor tests for each action, an already
+  resolved wait, a missing one and a failed mirror update; three eval cases (a
+  wait resolved, a partial reply logged, an out-of-office). The live eval was not
+  run.
+
+Known limits
+- Not seen in the running app: the compact rows, the contact's away field and
+  badges, the Waiting page badges and the draft warning were checked by
+  typecheck, lint and tests only.
+- Today (Phase 16) is not built; the current dashboard lists a returned owner's
+  wait with "is back" and leaves sleeping ones out.

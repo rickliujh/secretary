@@ -18,9 +18,17 @@ import { wikiSafetyWarning } from "@/lib/wiki-safe";
 import { parseLinkTypes } from "@/services/blockers/logic";
 import { type BlockLink, blockLinks } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
+import { nextFollowupAfter } from "@/services/dependencies/logic";
+import { logFollowup, mirror, setDates, setStatus } from "@/services/dependencies/queries";
 import { CreatedIssueSchema, JiraClient } from "@/services/jira";
 import { parseIssueLinks } from "@/services/jira/schemas";
-import { issueRefs, type ProposalPayload } from "@/services/proposals/schema";
+import {
+  describeWaitUpdate,
+  issueRefs,
+  type PayloadOf,
+  type ProposalPayload,
+} from "@/services/proposals/schema";
+import { Settings } from "@/services/settings";
 import { userActiveSprints } from "@/services/sprints/active";
 import { Sync } from "@/services/sync";
 import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
@@ -43,7 +51,9 @@ import {
 const make = Effect.gen(function* () {
   const jira = yield* JiraClient;
   const sync = yield* Sync;
-  const { q, withDb } = bindDb(yield* Db);
+  const settings = yield* Settings;
+  const db = yield* Db;
+  const { q, withDb } = bindDb(db);
 
   const log = (row: Omit<typeof actionsLog.$inferInsert, "id" | "at">) =>
     Effect.gen(function* () {
@@ -470,6 +480,66 @@ const make = Effect.gen(function* () {
       return { message, issueKey: p.target } satisfies ProposalResult;
     });
 
+  /**
+   * A change to an open dependency from intake (D46), through the functions the
+   * Waiting page uses: the new date, the timeline entry (which schedules the next
+   * chase) and the resolution, then the remote link of a mirrored dependency. The
+   * local change stands once made, so a failed link update is a warning.
+   */
+  const updateWait = (p: PayloadOf<"update_dependency">, proposalId: string) =>
+    Effect.gen(function* () {
+      const dep = yield* q((d) =>
+        d.select().from(dependencies).where(eq(dependencies.id, p.dependencyId)).get(),
+      );
+      if (!dep) return yield* fail("invalid", "That dependency no longer exists.");
+      const what = `${dep.issueKey} waits on ${dep.label}`;
+      const ids = { dependencyId: dep.id, issueKey: dep.issueKey };
+      if (dep.status === "resolved") {
+        if (p.action !== "resolve")
+          return yield* fail(
+            "invalid",
+            `${what} is resolved; reopen it on the Waiting page first.`,
+          );
+        yield* audit(proposalId, "update_dependency", dep.id, p, { skipped: "already resolved" });
+        return { message: `${what} was already resolved`, ...ids } satisfies ProposalResult;
+      }
+      // The Waiting page's functions read the Executor (for the remote link), the
+      // settings (the chase interval) and the database from their context.
+      const local = <A, E>(e: Effect.Effect<A, E, Executor | Settings | Db>) =>
+        e.pipe(
+          Effect.provideService(Executor, self),
+          Effect.provideService(Settings, settings),
+          Effect.provideService(Db, db),
+        );
+      if (p.action !== "resolve" && p.expectedAt && p.expectedAt !== dep.expectedAt)
+        yield* local(setDates(dep.id, { expectedAt: p.expectedAt }, { mirror: false }));
+      const followupId = yield* local(
+        logFollowup(dep.id, {
+          channel: p.channel,
+          summary:
+            p.summary ?? describeWaitUpdate({ ...p, issueKey: dep.issueKey, label: dep.label }),
+          nextFollowupAt: p.action === "resolve" ? null : nextFollowupAfter(p),
+        }),
+      );
+      if (p.action === "resolve") yield* local(setStatus(dep.id, "resolved", { mirror: false }));
+      const warning = yield* local(mirror(dep.id, "refresh")).pipe(
+        Effect.as(null),
+        Effect.catchAll((e) =>
+          Effect.succeed(
+            `The wait was updated here, but its link on ${dep.issueKey} in Jira was not: ${e.message}`,
+          ),
+        ),
+      );
+      yield* audit(proposalId, "update_dependency", dep.id, p, { followupId });
+      const message =
+        p.action === "resolve"
+          ? `Resolved: ${what}`
+          : p.action === "log_reply"
+            ? `Logged the reply on ${what}`
+            : `Rescheduled ${what}`;
+      return { message, ...ids, ...(warning ? { warning } : {}) } satisfies ProposalResult;
+    });
+
   const runProposal = (
     payload: ProposalPayload,
     opts: { proposalId: string; inboxItemId: string | null },
@@ -552,6 +622,8 @@ const make = Effect.gen(function* () {
         }
         case "link_issues":
           return yield* linkIssues(payload, proposalId);
+        case "update_dependency":
+          return yield* updateWait(payload, proposalId);
         case "update_person": {
           const person = yield* q((d) =>
             d.select().from(people).where(eq(people.id, payload.personId)).get(),
@@ -622,10 +694,11 @@ const make = Effect.gen(function* () {
       }
     });
 
-  return Executor.of({
+  const self = Executor.of({
     runProposal,
     run: (input, opts = {}) => run(input, opts),
   });
+  return self;
 });
 
 export const ExecutorLive = Layer.effect(Executor, make);

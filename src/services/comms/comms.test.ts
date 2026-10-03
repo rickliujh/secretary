@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { communications, followups } from "@/db/schema";
+import { communications, followups, people } from "@/db/schema";
 import { longDate } from "@/prompts/draft";
 import { query } from "@/services/db";
 import {
@@ -86,6 +86,35 @@ describe("Comms.generate", () => {
     expect(p).toContain("INC0012345");
     expect(p).toContain("Formal: a proper greeting");
     expect(p).toContain("Chase Platform fix (INC0012345) for PAY-2");
+  });
+
+  test("a recipient who is away: the prompt is told, a past date is not (D47)", async () => {
+    const promptFor = async (awayUntil: string) => {
+      let requested = "";
+      const { layer, models } = intakeTestLayer({
+        "std-m": [
+          {
+            get text() {
+              return JSON.stringify(good(requested));
+            },
+          },
+        ],
+      });
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const s = yield* setup;
+            requested = s.requested;
+            yield* query((d) => d.update(people).set({ awayUntil }).where(eq(people.id, s.priya)));
+            yield* (yield* Comms).generate(s.draftId, { today: "2026-09-26" });
+          }),
+          layer,
+        ),
+      );
+      return promptOf(models.calls, 0);
+    };
+    expect(await promptFor("2026-09-30")).toContain("Away (out of office) until 30 September 2026");
+    expect(await promptFor("2026-09-25")).not.toContain("Away (out of office)");
   });
 
   test("a draft that leaves out the incident is repaired, then saved", async () => {

@@ -3,7 +3,7 @@
  * local cache; output is what each card renders.
  */
 import { daysBetween } from "@/lib/dates";
-import { timing } from "@/services/dependencies/logic";
+import { type OwnerAway, timing } from "@/services/dependencies/logic";
 import type { IssueLink as JiraIssueLink } from "@/services/jira/schemas";
 import type { ScoringWeights } from "@/services/settings/schema";
 import { rank, type Scored, type ScoreInput, staleValue } from "./scoring";
@@ -41,6 +41,10 @@ export type DashDependency = {
   expectedAt: string | null;
   nextFollowupAt: string | null;
   ownerName: string;
+  /** For `timing` (D47): when it was opened, the last follow-up and the owner's away date. */
+  requestedAt?: string | null;
+  lastFollowupAt?: string | null;
+  ownerAway?: OwnerAway | null;
 };
 
 export type RecentComment = {
@@ -85,6 +89,8 @@ export type Dashboard = {
   iAmWaitingOn: (DashDependency & {
     overdueDays: number;
     followupDue: boolean;
+    /** "Bob is back" when the owner returned from leave (D47); else null. */
+    reason: string | null;
     issueSummary: string | null;
   })[];
   atRisk: Flagged[];
@@ -296,6 +302,7 @@ export function buildDashboard(
         ...d,
         overdueDays: t.overdueDays,
         followupDue: t.followupDue,
+        reason: t.reason,
         issueSummary: byKey.get(d.issueKey)?.summary ?? null,
       };
     })

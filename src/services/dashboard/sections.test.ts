@@ -153,6 +153,41 @@ describe("buildDashboard", () => {
     ]);
   });
 
+  test("a wait whose owner is away sleeps: not listed, not at risk, no score; back, it is listed with the reason (D47)", () => {
+    const dep = {
+      id: "d1",
+      issueKey: "W-1",
+      label: "Numbers",
+      externalRef: null,
+      status: "waiting" as const,
+      expectedAt: "2026-09-20",
+      nextFollowupAt: "2026-09-22",
+      ownerName: "Bob",
+      requestedAt: "2026-09-15T09:00:00.000Z",
+      lastFollowupAt: null,
+      // 2026-09-25 is a Friday: back on Monday the 28th.
+      ownerAway: { name: "Bob", awayUntil: "2026-09-25" },
+    };
+    const build = (today: string) =>
+      buildDashboard(
+        inputs({ issues: [issue("W-1")], dependencies: [dep] }),
+        DEFAULT_WEIGHTS,
+        today,
+        `${today}T09:00:00.000Z`,
+      );
+    const away = build(TODAY);
+    expect(away.iAmWaitingOn).toEqual([]);
+    expect(away.atRisk.find((r) => r.issue.key === "W-1")).toBeUndefined();
+    const why = (d: typeof away) =>
+      JSON.stringify(d.topFocus.find((f) => f.key === "W-1")?.contributions ?? []);
+    expect(why(away)).not.toContain("Waiting on");
+    const back = build("2026-09-28");
+    expect(back.iAmWaitingOn.map((x) => [x.label, x.followupDue, x.reason])).toEqual([
+      ["Numbers", true, "Bob is back"],
+    ]);
+    expect(why(back)).toContain("Waiting on Numbers");
+  });
+
   test("I am waiting on, at risk and due soon", () => {
     const d = buildDashboard(
       inputs({

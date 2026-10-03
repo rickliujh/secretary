@@ -17,6 +17,10 @@ export const IsoDate = z.string().regex(ISO_DATE_RE, "Use YYYY-MM-DD");
 
 export const ISSUE_TYPES = ["Epic", "Story", "Task", "Sub-task", "Bug"] as const;
 export const DEPENDENCY_KINDS = ["person", "team", "incident", "external"] as const;
+/** How a follow-up on a dependency happened (its timeline, FR-3.1). */
+export const FOLLOWUP_CHANNELS = ["teams", "email", "meeting", "phone", "jira", "other"] as const;
+/** What intake may do to an open dependency (D46). */
+export const WAIT_ACTIONS = ["log_reply", "reschedule", "resolve"] as const;
 export const MEMORY_KINDS = ["rule", "fact", "preference"] as const;
 export const MESSAGE_INTENTS = [
   "chase",
@@ -115,6 +119,30 @@ export const LinkIssues = z
     path: ["blocker"],
   });
 
+/**
+ * A change to an open dependency from intake (FR-3.7, D46): log their reply on
+ * its timeline, give it a new date, or resolve it. The id is one of the open
+ * dependencies retrieval offered; `issueKey`, `label` and `channel` are set by
+ * code from that dependency and the input's source, for the card and timeline.
+ */
+export const UpdateDependency = z
+  .object({
+    kind: z.literal("update_dependency"),
+    dependencyId: z.string().min(1),
+    action: z.enum(WAIT_ACTIONS),
+    /** What they said or what changed: the timeline entry. */
+    summary: z.string().trim().min(1).max(2000).nullable().default(null),
+    expectedAt: IsoDate.nullable().default(null),
+    nextFollowupAt: IsoDate.nullable().default(null),
+    channel: z.enum(FOLLOWUP_CHANNELS).default("other"),
+    issueKey: IssueKey.nullable().default(null),
+    label: z.string().nullable().default(null),
+  })
+  .refine((p) => p.action !== "reschedule" || !!p.expectedAt || !!p.nextFollowupAt, {
+    message: "A reschedule needs a new expected date or follow-up date",
+    path: ["expectedAt"],
+  });
+
 export const UpdatePerson = z.object({
   kind: z.literal("update_person"),
   personId: z.string().min(1),
@@ -123,6 +151,8 @@ export const UpdatePerson = z.object({
       title: z.string().trim().min(1).max(200).optional(),
       responsibilities: z.string().trim().min(1).max(2000).optional(),
       profile: ProfileSchema.optional(),
+      /** Last day away, from an out-of-office reply (D47). */
+      awayUntil: IsoDate.optional(),
     })
     .default({}),
   noteAppend: z.string().trim().min(1).nullable().default(null),
@@ -173,6 +203,7 @@ export const ProposalPayloadSchema = z.discriminatedUnion("kind", [
   MoveToSprint,
   LinkDependency,
   LinkIssues,
+  UpdateDependency,
   UpdatePerson,
   UpdateTeam,
   Remember,
@@ -193,6 +224,7 @@ export const PROPOSAL_LABELS: Record<ProposalKind, string> = {
   move_to_sprint: "Move to sprint",
   link_dependency: "Track dependency",
   link_issues: "Blocked by",
+  update_dependency: "Update wait",
   update_person: "Update contact",
   update_team: "Update team",
   remember: "Remember",
@@ -244,6 +276,9 @@ export function issueRefs(p: ProposalPayload, opts: IssueRefsOptions = {}): stri
       break;
     case "link_issues":
       values.push(p.target, p.blocker);
+      break;
+    case "update_dependency":
+      values.push(p.issueKey);
       break;
     case "draft_message":
       values.push(...p.issueKeys);
@@ -297,8 +332,10 @@ export function describePayload(p: ProposalPayload): string {
       return `${p.target} waits on ${p.label}`;
     case "link_issues":
       return `${p.target} is blocked by ${p.blocker}`;
+    case "update_dependency":
+      return describeWaitUpdate(p);
     case "update_person":
-      return "Update contact profile";
+      return p.changes.awayUntil ? `Away until ${p.changes.awayUntil}` : "Update contact profile";
     case "update_team":
       return "Update team";
     case "remember":
@@ -307,6 +344,24 @@ export function describePayload(p: ProposalPayload): string {
       return `Draft ${p.intent.replace("_", " ")} (${p.channel})`;
     case "needs_clarification":
       return p.question;
+  }
+}
+
+/** "Resolve: PAY-2 waits on numbers from finance" (D46). */
+export function describeWaitUpdate(p: PayloadOf<"update_dependency">): string {
+  const what = p.label ? `${p.issueKey ? `${p.issueKey} waits on ` : ""}${p.label}` : "a wait";
+  switch (p.action) {
+    case "resolve":
+      return `Resolve: ${what}`;
+    case "log_reply":
+      return `Log reply on ${what}${p.expectedAt ? `, expected ${p.expectedAt}` : ""}`;
+    case "reschedule":
+      return `Reschedule ${what}: ${[
+        p.expectedAt && `expected ${p.expectedAt}`,
+        p.nextFollowupAt && `ask again ${p.nextFollowupAt}`,
+      ]
+        .filter(Boolean)
+        .join(", ")}`;
   }
 }
 

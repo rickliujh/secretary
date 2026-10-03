@@ -6,23 +6,26 @@
  * works with strict structured-output modes across providers.
  */
 import { z } from "zod";
+import { awayDateProblem } from "@/services/directory/away";
 import { CHANNELS, DETAIL, FORMALITY, RESPONSIVENESS } from "@/services/directory/schema";
 import { NONE } from "@/services/llm/portable";
 import {
   DEPENDENCY_KINDS,
+  FOLLOWUP_CHANNELS,
   ISO_DATE_RE,
   MEMORY_KINDS,
   MESSAGE_INTENTS,
   NEW_REF_RE,
   type ProposalPayload,
   ProposalPayloadSchema,
+  WAIT_ACTIONS,
 } from "@/services/proposals/schema";
 import type { Reason } from "@/services/retrieval/ranking";
 import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small-asks/home";
 import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 8;
+export const CLASSIFY_PROMPT_VERSION = 9;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -43,6 +46,34 @@ export type CandidateIssue = {
   reasons: Reason[];
   /** Issues it is already blocked by in Jira, whatever their status (prompt version 8, D45). */
   blockedBy?: string[];
+};
+
+/** Why retrieval offered an open dependency (D46). */
+export type WaitReason = "sender" | "team" | "named" | "ticket" | "wording";
+
+/**
+ * An open dependency the input may answer (prompt version 9, D46): owned by the
+ * sender or the sender's team, by a contact the input names, on a candidate
+ * ticket, or sharing words with the input. update_dependency picks one by id.
+ */
+export type WaitCandidate = {
+  id: string;
+  issueKey: string;
+  label: string;
+  kind: string;
+  /** The owner's name (person or team), or null. */
+  owner: string | null;
+  ownerPersonId: string | null;
+  ownerTeamId: string | null;
+  externalRef: string | null;
+  status: string;
+  /** YYYY-MM-DD the wait was opened. */
+  requestedOn: string | null;
+  expectedAt: string | null;
+  nextFollowupAt: string | null;
+  /** The owner's last day away while they are away (D47); else null. */
+  awayUntil: string | null;
+  reasons: WaitReason[];
 };
 
 /**
@@ -126,8 +157,13 @@ export type ItemSnapshot = {
     title: string | null;
     team: string | null;
     jiraUsername: string | null;
+    /** Their last day away while away (prompt version 9, D47). */
+    awayUntil?: string | null;
   }[];
+  /** Open dependencies on candidate tickets; the prompt lists them only for snapshots without `waits`. */
   dependencies: { issueKey: string; label: string; status: string }[];
+  /** Open dependencies update_dependency may pick from (prompt version 9, D46). */
+  waits?: WaitCandidate[];
   memories: { kind: string; content: string }[];
   examples: { input: string; proposed: string; corrected: string | null }[];
   notes: { about: string; title: string; excerpt: string }[];
@@ -153,6 +189,7 @@ const REQUIRED_FIELDS: Record<string, readonly string[]> = {
   add_comment: ["target", "body"],
   transition_issue: ["target", "toStatus"],
   link_dependency: ["target", "dependencyKind", "label"],
+  update_dependency: ["dependencyId", "waitAction"],
   link_issues: ["target", "blocker"],
   update_person: ["personId"],
   update_team: ["teamId"],
@@ -170,6 +207,7 @@ const OFFERED: Partial<Record<string, (s: ItemSnapshot) => boolean>> = {
   update_person: (s) => s.people.length > 0,
   update_team: (s) => s.teams.length > 0,
   link_issues: (s) => !!s.blockLinkType,
+  update_dependency: (s) => !!s.waits?.length,
 };
 
 /** The kinds the model may propose for this item. */
@@ -183,7 +221,8 @@ const FIELD_KINDS: Record<string, readonly string[]> = {
   parent: ["create_issue"],
   epic: ["create_issue"],
   dueDate: ["create_issue", "update_issue"],
-  expectedAt: ["link_dependency"],
+  expectedAt: ["link_dependency", "update_dependency"],
+  nextFollowupAt: ["update_dependency"],
   assignee: ["create_issue", "update_issue"],
 };
 
@@ -230,6 +269,23 @@ export function buildItemSchema(s: ItemSnapshot) {
               ),
             }
           : {}),
+      }
+    : {};
+  // Only with open dependencies to pick from (D46).
+  const waitFields = offered("update_dependency")
+    ? {
+        dependencyId: nullableEnum((s.waits ?? []).map((w) => w.id)).describe(
+          `The open wait, by its id in the Open waits list. ${uses("update_dependency")}`,
+        ),
+        waitAction: nullableEnum(WAIT_ACTIONS).describe(
+          `resolve: what was waited for arrived or is no longer needed; log_reply: they answered but it is not done; reschedule: only its date changes. ${uses("update_dependency")}`,
+        ),
+        reply: nullableText(
+          `What they said or what changed, in one sentence, for the wait's timeline. ${uses("update_dependency")}`,
+        ),
+        nextFollowupAt: nullableText(
+          `YYYY-MM-DD: when to ask again, only if the input says. ${uses("update_dependency")}`,
+        ),
       }
     : {};
   // Only when the instance has a "blocks" link type (D45).
@@ -280,7 +336,11 @@ export function buildItemSchema(s: ItemSnapshot) {
     ownerPersonId: nullableEnum(personIds).describe(uses("link_dependency")),
     ownerTeamId: nullableEnum(teamIds).describe(uses("link_dependency")),
     externalRef: nullableText(`For incidents: the ServiceNow number. ${uses("link_dependency")}`),
-    expectedAt: nullableText(`YYYY-MM-DD. ${uses("link_dependency")}`),
+    expectedAt: nullableText(
+      `YYYY-MM-DD: when it is expected. ${uses("link_dependency", "update_dependency")}`,
+    ),
+    // update_dependency
+    ...waitFields,
     // link_issues
     ...linkFields,
     // remember
@@ -307,6 +367,9 @@ export function buildItemSchema(s: ItemSnapshot) {
     responsiveness: nullableEnum(RESPONSIVENESS).describe(uses("update_person")),
     preferredChannel: nullableEnum(CHANNELS).describe(uses("update_person")),
     tone: nullableText(uses("update_person")),
+    awayUntil: nullableText(
+      `YYYY-MM-DD: the person's last day away, from an out-of-office or leave notice. ${uses("update_person")}`,
+    ),
     // update_team
     teamId: nullableEnum(teamIds).describe(uses("update_team")),
     function: nullableText(uses("update_team")),
@@ -410,6 +473,12 @@ function smallAskPayload(p: ItemOutput["proposals"][number], s: ItemSnapshot): P
   });
 }
 
+/** The timeline channel of a reply, from the input's source (D46). */
+const followupChannel = (source: string | undefined): (typeof FOLLOWUP_CHANNELS)[number] =>
+  (FOLLOWUP_CHANNELS as readonly string[]).includes(source ?? "")
+    ? (source as (typeof FOLLOWUP_CHANNELS)[number])
+    : "other";
+
 /** Maps one model proposal to a canonical payload (throws on shapes the schema should have prevented). */
 function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): ProposalPayload {
   const g = (k: string) => p[k];
@@ -469,6 +538,21 @@ function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): Propos
         target: g("target"),
         blocker: g("blocker"),
       });
+    case "update_dependency": {
+      // The wait's ticket and label for the card, and the timeline channel, are code's.
+      const wait = s?.waits?.find((w) => w.id === g("dependencyId"));
+      return ProposalPayloadSchema.parse({
+        kind: "update_dependency",
+        dependencyId: g("dependencyId"),
+        action: g("waitAction"),
+        summary: str(g("reply")),
+        expectedAt: str(g("expectedAt")),
+        nextFollowupAt: str(g("nextFollowupAt")),
+        channel: followupChannel(s?.source),
+        issueKey: wait?.issueKey ?? null,
+        label: wait?.label ?? null,
+      });
+    }
     case "update_person":
       return ProposalPayloadSchema.parse({
         kind: "update_person",
@@ -476,6 +560,7 @@ function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): Propos
         changes: defined({
           title: str(g("title")),
           responsibilities: str(g("responsibilities")),
+          awayUntil: str(g("awayUntil")),
           profile: (() => {
             const profile = defined({
               formality: str(g("formality")),
@@ -593,6 +678,50 @@ function validateLink(
   return errors;
 }
 
+/**
+ * The checks for a change to an open dependency (D46): one of the listed waits,
+ * once per answer, a reschedule with a date, and dates from today on.
+ */
+function validateWaitUpdate(
+  p: ItemOutput["proposals"][number],
+  index: number,
+  out: ItemOutput,
+  s: ItemSnapshot,
+  at: string,
+): string[] {
+  const errors: string[] = [];
+  const id = typeof p.dependencyId === "string" ? p.dependencyId : null;
+  if (!id) return errors;
+  if (!s.waits?.some((w) => w.id === id))
+    errors.push(`${at}: dependencyId ${id} is not one of the open waits.`);
+  const first = out.proposals.findIndex(
+    (o) => o.kind === "update_dependency" && o.dependencyId === id,
+  );
+  if (first < index) errors.push(`${at}: wait ${id} is updated twice; propose one change for it.`);
+  if (p.waitAction === "reschedule" && !str(p.expectedAt) && !str(p.nextFollowupAt))
+    errors.push(`${at}: a reschedule needs expectedAt or nextFollowupAt.`);
+  for (const field of ["expectedAt", "nextFollowupAt"]) {
+    const v = str(p[field]);
+    if (v && ISO_DATE_RE.test(v) && v < s.today)
+      errors.push(`${at}: ${field} ${v} is in the past (today is ${s.today}).`);
+  }
+  return errors;
+}
+
+/**
+ * A new dependency the listed waits already cover (D46): the same ticket and the
+ * same owner or reference. It should be an update_dependency, or nothing.
+ */
+function coveringWait(p: ItemOutput["proposals"][number], s: ItemSnapshot) {
+  return s.waits?.find(
+    (w) =>
+      w.issueKey === p.target &&
+      ((!!w.ownerPersonId && w.ownerPersonId === p.ownerPersonId) ||
+        (!!w.ownerTeamId && w.ownerTeamId === p.ownerTeamId) ||
+        (!!w.externalRef && w.externalRef === str(p.externalRef))),
+  );
+}
+
 export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   const errors: string[] = [];
   const candidates = new Map(s.candidates.map((c) => [c.key, c]));
@@ -630,7 +759,7 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       if (typeof v === "string" && !NEW_REF_RE.test(v) && !candidates.has(v))
         errors.push(`${at}: ${field} ${v} is not one of the candidate issues.`);
     }
-    for (const field of ["dueDate", "expectedAt"].filter(used)) {
+    for (const field of ["dueDate", "expectedAt", "nextFollowupAt"].filter(used)) {
       if (!validDate(p[field])) errors.push(`${at}: ${field} must be YYYY-MM-DD or null.`);
     }
     if (used("assignee") && typeof p.assignee === "string" && !knownUsers.has(p.assignee))
@@ -697,6 +826,18 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       errors.push(`${at}: draft_message needs a recipient person or team.`);
     if (p.kind === "add_comment" && !str(p.body)) errors.push(`${at}: comment body is empty.`);
     if (p.kind === "link_issues") errors.push(...validateLink(p, i, out, s, at));
+    if (p.kind === "update_dependency") errors.push(...validateWaitUpdate(p, i, out, s, at));
+    if (p.kind === "link_dependency") {
+      const wait = coveringWait(p, s);
+      if (wait)
+        errors.push(
+          `${at}: open wait ${wait.id} already tracks ${wait.label} on ${wait.issueKey}; use update_dependency for it, or leave this out.`,
+        );
+    }
+    if (p.kind === "update_person" && str(p.awayUntil)) {
+      const problem = awayDateProblem(String(str(p.awayUntil)), s.today);
+      if (problem) errors.push(`${at}: awayUntil ${problem}.`);
+    }
     // A structurally valid proposal must also map cleanly to a payload.
     try {
       toPayload(p, s);
@@ -765,10 +906,20 @@ export function fromPayload(
       };
     case "link_issues":
       return { kind: p.kind, target: r(p.target), blocker: r(p.blocker) };
+    case "update_dependency":
+      return {
+        kind: p.kind,
+        dependencyId: p.dependencyId,
+        waitAction: p.action,
+        reply: p.summary,
+        expectedAt: p.expectedAt,
+        nextFollowupAt: p.nextFollowupAt,
+      };
     case "update_person":
       return {
         kind: p.kind,
         personId: p.personId,
+        awayUntil: p.changes.awayUntil ?? null,
         title: p.changes.title ?? null,
         responsibilities: p.changes.responsibilities ?? null,
         formality: p.changes.profile?.formality ?? null,
@@ -836,6 +987,16 @@ ${HARD_RULES}
 - When you move an issue to a closing status (cancelled, won't do, rejected, duplicate, obsolete, done or closed) for a reason in the input, also add an add_comment on the same issue that says why, in one or two sentences drawn from the input, so people reading the ticket know. When the closing status is a done status but the work was not done, the comment says the ticket was closed without being done. A cancellation always gets that comment.
 - Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
 ${
+  s.waits?.length
+    ? `- Open waits lists what the user already waits on. When the input answers or moves one of them, propose update_dependency with its dependencyId: resolve when what was waited for arrived or is no longer needed ("Bob sent the numbers"); log_reply when they answered but it is not done yet, with what they said in reply and expectedAt when they give a date; reschedule when only the date changes (expectedAt, or nextFollowupAt for when to ask again). Never propose link_dependency for a wait that list already has; update it instead.
+`
+    : ""
+}${
+  s.people.length
+    ? `- When the input is an out-of-office or leave notice ("I'm out until the 14th", "on leave until 14 Oct", "back on Monday"), propose update_person for that person with awayUntil: their last day away as YYYY-MM-DD, worked out from today's date${s.sprints?.length ? " (and the Sprints list when it names a sprint)" : ""}. When it gives the day they return, awayUntil is the working day before it. The person is the sender of the input, or the contact from the People list it is about. Their waits pause until they are back, so do not resolve or reschedule a wait only because they are away.
+`
+    : ""
+}${
   s.blockLinkType
     ? `- When the input says something can only happen when or after a Jira ticket is done ("when PLAT-1 is done", "after X ships", "once X is deployed", "blocked by X"), propose link_issues: target is the issue that waits (a candidate, or the ref of an issue you create), blocker is the candidate ticket it waits for. Use link_dependency instead when it waits on a person, a team or something that is not a candidate ticket. Do not link issues the candidate list already shows as blocked by that ticket.
 `
@@ -898,7 +1059,7 @@ ${
       s.people
         .map(
           (p) =>
-            `- ${p.id}: ${line([p.displayName, p.title, p.team, p.jiraUsername && `jira ${p.jiraUsername}`])}`,
+            `- ${p.id}: ${line([p.displayName, p.title, p.team, p.jiraUsername && `jira ${p.jiraUsername}`, p.awayUntil && `away until ${p.awayUntil}`])}`,
         )
         .join("\n") || "- none"
     }\nJira users: ${s.jiraUsers.map((u) => `${u.username} (${u.displayName})`).join(", ") || "none"}`,
@@ -934,8 +1095,31 @@ ${
             `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}${c.priority ? `, priority ${c.priority}` : ""}${c.dueDate ? `, due ${c.dueDate}` : ""}${s.blockLinkType && c.blockedBy?.length ? `, blocked by ${c.blockedBy.join(", ")}` : ""}] ${c.summary} (${c.reasons.join(", ")})`,
         )
         .join("\n") || "- none found"
-    }${s.dependencies.length ? `\nOpen dependencies:\n${s.dependencies.map((d) => `- ${d.issueKey} waits on ${d.label} (${d.status})`).join("\n")}` : ""}`,
+    }${
+      // Snapshots before prompt version 9 list open dependencies here; later ones as Open waits.
+      !s.waits && s.dependencies.length
+        ? `\nOpen dependencies:\n${s.dependencies.map((d) => `- ${d.issueKey} waits on ${d.label} (${d.status})`).join("\n")}`
+        : ""
+    }`,
   );
+  if (s.waits?.length) {
+    blocks.push(
+      `## Open waits (what the user is waiting on from others; update_dependency picks one by id)\n${s.waits
+        .map(
+          (w) =>
+            `- ${w.id}: ${w.issueKey} waits on ${w.label} [${line([
+              w.owner && `owner ${w.owner}`,
+              w.externalRef,
+              w.status,
+              w.requestedOn && `asked ${w.requestedOn}`,
+              w.expectedAt && `expected ${w.expectedAt}`,
+              w.nextFollowupAt && `next chase ${w.nextFollowupAt}`,
+              w.awayUntil && `owner away until ${w.awayUntil}`,
+            ])}] (${w.reasons.join(", ")})`,
+        )
+        .join("\n")}`,
+    );
+  }
   blocks.push(
     `## Input\n${untrusted(s.quote, {
       source: s.source,

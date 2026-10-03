@@ -24,6 +24,7 @@ import { listDependencies } from "@/services/dependencies/queries";
 import { MESSAGE_INTENTS } from "@/services/proposals/schema";
 import { groupForPicker, loadPickerSource, type PickerRecipient } from "@/services/tickets/picker";
 import { type Recipient, RecipientPicker, TicketPicker } from "./pickers";
+import { RecipientAway } from "./recipient-away";
 import type { DraftPrefill } from "./use-draft-panel";
 import { useCreateDraft } from "./use-drafts";
 
@@ -159,6 +160,12 @@ export function DraftComposer({
                 value={field.value}
                 onChange={pickRecipient}
               />
+              {field.value?.type === "person" && (
+                <RecipientAway
+                  name={lookups.person.get(field.value.id)?.displayName}
+                  awayUntil={lookups.person.get(field.value.id)?.awayUntil}
+                />
+              )}
               <FieldError errors={[fieldState.error]} />
             </Field>
           )}

@@ -103,6 +103,12 @@ function WaitingPage() {
               <h2 className="font-medium">{g.owner.name}</h2>
               <span className="text-sm text-muted-foreground">{g.items.length}</span>
               <span className="ml-auto flex gap-1">
+                {/* The owner is away (D47); every wait on them sleeps. */}
+                {g.items.some((i) => i.timing.asleep) && (
+                  <Badge variant="outline">
+                    away until {g.items.find((i) => i.timing.asleep)?.timing.awayUntil}
+                  </Badge>
+                )}
                 {g.maxOverdue > 0 && (
                   <Badge variant="destructive">up to {g.maxOverdue}d overdue</Badge>
                 )}

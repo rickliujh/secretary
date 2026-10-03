@@ -216,7 +216,7 @@ const runCases = (cases: EvalCase[]) =>
         smallAsks: { ...s.smallAsks, projectKey: c.home ? EVAL_HOME : "" },
       }));
       // The requester is a contact id made in this run, so the expectation gets it here.
-      const scored: EvalCase = c.requester
+      const withRequester: EvalCase = c.requester
         ? {
             ...c,
             expect: {
@@ -232,6 +232,27 @@ const runCases = (cases: EvalCase[]) =>
             },
           }
         : c;
+      // A contact target (`contact:tom`) is the contact's id in this run.
+      const scored: EvalCase = {
+        ...withRequester,
+        expect: {
+          ...withRequester.expect,
+          required: withRequester.expect.required.map((r) => {
+            const who = r.target?.startsWith("contact:") ? r.target.slice(8) : null;
+            return who === "ana" || who === "tom" ? { ...r, target: senders[who] } : r;
+          }),
+        },
+      };
+      // A wait exists only while its case runs (D46).
+      const waitId = c.wait
+        ? yield* createDependency({
+            issueKey: c.wait.issueKey,
+            kind: "person",
+            label: c.wait.label,
+            ownerPersonId: senders[c.wait.owner],
+            expectedAt: c.wait.expectedAt ?? null,
+          })
+        : null;
       // A provider error (timeout, rate limit) fails this case, not the whole run.
       const intake = yield* Intake;
       const attempt = yield* Effect.either(
@@ -259,6 +280,10 @@ const runCases = (cases: EvalCase[]) =>
           return first;
         }),
       );
+      if (waitId) {
+        yield* query((d) => d.delete(followups).where(eq(followups.dependencyId, waitId)));
+        yield* query((d) => d.delete(dependencies).where(eq(dependencies.id, waitId)));
+      }
       if (seeded.length)
         yield* query((d) =>
           d.delete(memories).where(

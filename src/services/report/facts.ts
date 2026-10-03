@@ -5,7 +5,7 @@
  * two per ticket; every style is rendered from these facts.
  */
 import { daysBetween } from "@/lib/dates";
-import { timing } from "@/services/dependencies/logic";
+import { type OwnerAway, timing } from "@/services/dependencies/logic";
 import type {
   ReportDependency,
   ReportEpic,
@@ -65,6 +65,8 @@ export type RecapDependency = {
   nextFollowupAt: string | null;
   /** Oldest first. */
   followups: { at: string; channel: string | null; summary: string | null }[];
+  /** The person owner's away date (D47): a sleeping wait is not overdue. */
+  ownerAway?: OwnerAway | null;
 };
 
 /** Who and what a report covers (D37, D40). */
@@ -314,7 +316,7 @@ export function buildRecapFacts(input: RecapInputs): RecapFacts {
   const focusRank = new Map(input.focus.map((k, n) => [k, n]));
 
   const dependencyOf = (d: RecapDependency): ReportDependency => {
-    const t = timing(d, today);
+    const t = timing({ ...d, lastFollowupAt: d.followups.at(-1)?.at ?? null }, today);
     return {
       label: d.label,
       owner: d.owner,

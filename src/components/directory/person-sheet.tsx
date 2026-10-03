@@ -29,6 +29,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { localDate } from "@/lib/dates";
+import { awayLabel } from "@/services/directory/away";
 import { deletePerson, getPerson } from "@/services/directory/queries";
 import type { Profile } from "@/services/directory/schema";
 import { ContextNotes } from "./context-notes";
@@ -90,7 +92,12 @@ export function PersonSheet({
           <SheetDescription>
             {[d?.person.title, d?.team?.name].filter(Boolean).join(" · ") || "Contact"}
           </SheetDescription>
-          <SheetTitle className="text-lg">{d?.person.displayName}</SheetTitle>
+          <SheetTitle className="flex items-center gap-2 text-lg">
+            {d?.person.displayName}
+            {awayLabel(d?.person.awayUntil, localDate()) && (
+              <Badge variant="secondary">{awayLabel(d?.person.awayUntil, localDate())}</Badge>
+            )}
+          </SheetTitle>
           {d && (
             <div className="flex gap-2 pt-2">
               <Button

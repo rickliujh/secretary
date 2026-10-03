@@ -14,6 +14,10 @@ import { run } from "./runtime";
 
 const CHECK_EVERY_MS = 10 * 60 * 1000;
 
+/** "PAY-2: numbers from finance (Bob is back)" (D47). */
+const line = (d: { issueKey: string; label: string; reason: string | null }) =>
+  `${d.issueKey}: ${d.label}${d.reason ? ` (${d.reason})` : ""}`;
+
 async function notifyDue() {
   const today = localDate();
   const due = await run(dueForReminder(today));
@@ -21,12 +25,7 @@ async function notifyDue() {
   const first = due[0];
   const sent = await sendOsNotification(
     due.length === 1 ? "Time to follow up" : `${due.length} follow-ups due`,
-    due.length === 1 && first
-      ? `${first.issueKey}: ${first.label}`
-      : due
-          .slice(0, 3)
-          .map((d) => `${d.issueKey}: ${d.label}`)
-          .join("\n"),
+    due.length === 1 && first ? line(first) : due.slice(0, 3).map(line).join("\n"),
   );
   if (!sent) return;
   await run(

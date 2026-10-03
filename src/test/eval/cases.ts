@@ -33,9 +33,20 @@ export type EvalCase = {
   home?: boolean;
   /** The contact a small ask must name as its requester (checked as `requesterPersonId`). */
   requester?: "ana" | "tom";
+  /**
+   * An open dependency that exists only while this case runs (D46), owned by a
+   * seeded contact. update_dependency expectations name its ticket as target.
+   */
+  wait?: { issueKey: string; label: string; owner: "ana" | "tom"; expectedAt?: string };
   expect: EvalExpectation;
   single: boolean;
 };
+
+/**
+ * An expected target that is a seeded contact (`contact:ana`), whose id is made
+ * in each run; the live eval swaps in the id.
+ */
+export const contactTarget = (who: "ana" | "tom") => `contact:${who}`;
 
 /** The small-asks home the `home` cases run with. */
 export const EVAL_HOME = "OPS";
@@ -382,6 +393,48 @@ export const EVAL_CASES: EvalCase[] = [
     text: "The refund rounding fix (PAY-4) can only ship after the ledger export PAY-2 is done.",
     expect: {
       required: [{ kind: "link_issues", target: "PAY-4", fields: { blocker: "PAY-2" } }],
+      forbiddenKinds: ["create_issue"],
+    },
+    single: true,
+  },
+  {
+    name: "wait: an answer resolves the sender's open wait",
+    source: "teams",
+    sender: "ana",
+    wait: { issueKey: "PAY-2", label: "Sign-off on the ledger field mapping", owner: "ana" },
+    text: "I've signed off the ledger field mapping, you're good to go.",
+    expect: {
+      required: [{ kind: "update_dependency", target: "PAY-2", fields: { action: "resolve" } }],
+      forbiddenKinds: ["link_dependency", "needs_clarification"],
+    },
+    single: true,
+  },
+  {
+    name: "wait: a partial answer logs a reply",
+    source: "teams",
+    sender: "tom",
+    wait: { issueKey: "OPS-7", label: "Firewall rules for the ledger host", owner: "tom" },
+    text: "Half of the firewall rules for the ledger host are in. The rest needs a change window; I'll come back to you once it is booked.",
+    expect: {
+      required: [{ kind: "update_dependency", target: "OPS-7", fields: { action: "log_reply" } }],
+      forbiddenKinds: ["link_dependency"],
+    },
+    single: true,
+  },
+  {
+    name: "away: an out-of-office reply sets the away date",
+    source: "email",
+    sender: "tom",
+    wait: { issueKey: "OPS-7", label: "Firewall rules for the ledger host", owner: "tom" },
+    text: "Automatic reply: I am out of the office until Friday 2 October with limited access to email. For urgent network requests contact the Network team.",
+    expect: {
+      required: [
+        {
+          kind: "update_person",
+          target: contactTarget("tom"),
+          fields: { awayUntil: "2026-10-02" },
+        },
+      ],
       forbiddenKinds: ["create_issue"],
     },
     single: true,
