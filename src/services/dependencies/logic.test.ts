@@ -166,6 +166,61 @@ describe("timing with the owner's away date (D47)", () => {
     });
   });
 
+  test("a later follow-up date puts 'is back' off: the chase was rescheduled", () => {
+    // A reply logged while Bob was away, with the next chase after his return.
+    const replied = {
+      ...wait,
+      lastFollowupAt: "2026-09-30T10:00:00.000Z",
+      nextFollowupAt: "2026-10-07",
+    };
+    expect(timing(replied, "2026-10-02")).toMatchObject({
+      followupDue: false,
+      backSince: null,
+      reason: null,
+      followupOn: "2026-10-07",
+    });
+    expect(timing(replied, "2026-10-07")).toMatchObject({ followupDue: true, reason: null });
+    // A follow-up date on the back day itself does not.
+    expect(timing({ ...wait, nextFollowupAt: "2026-10-02" }, "2026-10-02").reason).toBe(
+      "Bob is back",
+    );
+  });
+
+  test("'is back' lapses 14 days after the back day", () => {
+    const never = { ...wait, nextFollowupAt: null, lastFollowupAt: null };
+    expect(timing(never, "2026-10-15")).toMatchObject({
+      followupDue: true,
+      followupLateDays: 13,
+      reason: "Bob is back",
+    });
+    expect(timing(never, "2026-10-16")).toMatchObject({
+      followupDue: false,
+      backSince: null,
+      reason: null,
+      followupOn: null,
+    });
+    // With an old follow-up date the usual rule applies again.
+    expect(timing(wait, "2026-10-16")).toMatchObject({
+      followupDue: true,
+      followupLateDays: 17,
+      reason: null,
+    });
+  });
+
+  test("an away date that is not a real date is ignored and never throws", () => {
+    for (const awayUntil of ["2026-13-01", "2026-02-30", "2026-00-10"]) {
+      const t = timing({ ...wait, ownerAway: { name: "Bob", awayUntil } }, "2026-09-30");
+      expect(t).toMatchObject({ asleep: false, backSince: null, reason: null, followupDue: true });
+    }
+    const owner = { type: "person" as const, id: "p1", name: "Bob" };
+    expect(() =>
+      groupByOwner(
+        [{ ...wait, id: "w", owner, ownerAway: { name: "Bob", awayUntil: "2026-13-01" } }],
+        "2026-09-30",
+      ),
+    ).not.toThrow();
+  });
+
   test("a wait opened after they came back is timed as usual: an old date needs no clearing", () => {
     const later = {
       ...wait,

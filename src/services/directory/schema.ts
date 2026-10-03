@@ -1,5 +1,6 @@
 /** zod schemas for teams, people and context notes (FR-4.1, FR-4.2). */
 import { z } from "zod";
+import { isRealDate } from "@/lib/dates";
 
 const optionalText = (max: number) =>
   z
@@ -59,7 +60,7 @@ export const PersonInputSchema = z.object({
   notesMd: optionalText(20000),
   /** Last day away, YYYY-MM-DD (D47); "" or null when not away. */
   awayUntil: z
-    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")])
+    .union([z.literal(""), z.string().refine(isRealDate, "Use a real date, YYYY-MM-DD")])
     .transform((v) => (v === "" ? null : v))
     .nullable()
     .default(null),

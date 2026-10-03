@@ -982,6 +982,26 @@ Checklist
   wait resolved, a partial reply logged, an out-of-office). The live eval was not
   run.
 
+Review fixes
+- The D51 sanitiser is now a scanner instead of a set of regexes. A run of
+  backslashes escapes only when odd (`\\` is a line break), so `\\!url!` and
+  `\\[~user]` are caught. `{code}` / `{noformat}` blocks count only when lowercase,
+  unescaped and closed; every other marker, in any case, is broken up (`{ code}`),
+  including in the model's part of a small ask, so it cannot pair with the quote's
+  block and turn the quote live. Every link part starting with `~` is a mention
+  (`[Bob|~user|tip]`, `[ ~user]`). Every unescaped `!` whose text up to the next
+  `!` names a URL, in any wrapping (`![https://...]!`), is defused: a plain web
+  embed becomes a link, anything else (`data:`, wrapped URLs) loses its `!`. Its
+  output is idempotent, and a table of adversarial inputs in many wrappings is
+  checked by an independent checker in the test.
+- An away date that is not a real date (`2026-13-01` from an import) no longer
+  breaks every waits view; it is ignored, and the contact form rejects it.
+- "Is back" can be put off: it also ends when the wait's next follow-up is later
+  than the back day, and 14 days after the back day (D47 updated).
+- A new wait on a ticket and owner that already have one is allowed when it is
+  about something else; incident numbers match whole (INC0012 is not INC00123).
+- A retried change to a wait does not log its timeline entry twice.
+
 Known limits
 - Not seen in the running app: the compact rows, the contact's away field and
   badges, the Waiting page badges and the draft warning were checked by

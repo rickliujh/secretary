@@ -307,7 +307,7 @@ describe("pasted text in a small ask's description (D44)", () => {
         "!http://x/p.png!",
         "[link|http://x]",
         "{ noformat}",
-        "{code}x{code}",
+        "{ code}x{ code}",
         "{noformat}",
       ]
         .join("\n")
@@ -424,6 +424,45 @@ describe("proposal text bound for Jira (D51)", () => {
       "[~boss] ![](https://x/p.png) {color:red}x{color} [a](http://evil.example) *b*",
     );
     expect(safe).toMatchObject({ images: [], mentions: [] });
+  });
+
+  describe("a block marker the model leaves open cannot capture the quote", () => {
+    const quote = "![](https://x/p.png) [~jsmith] {color:red}x{color}";
+    const ask = (base: string) =>
+      proposalTextToWiki(
+        withProvenance(base, { requester: "Dana", source: "teams", date: "2026-10-01", quote }),
+        [],
+      ).wiki;
+    const quoteBlock = `{noformat}\n${quote}\n{noformat}`;
+
+    test.each([
+      ["noformat", "Check {noformat} this"],
+      ["code", "Check {code} this"],
+      ["upper-case", "Check {NOFORMAT} this"],
+      ["with params", "Check {noformat:nopanel=true} this"],
+      ["a closer only", "Check this{noformat}"],
+    ])("an unclosed %s marker", (_n, base) => {
+      const wiki = ask(base);
+      // The quote is the one and only noformat block, right after the Asked by line.
+      expect(wiki).toEndWith(`_Asked by Dana via Teams on 2026-10-01:_\n\n${quoteBlock}`);
+      expect(wiki.match(/\{noformat\}/g)).toHaveLength(2);
+      expect(wiki.match(/\{code\}/gi) ?? []).toHaveLength(0);
+    });
+
+    test("the model's balanced fenced code still goes out as a code block", () => {
+      const wiki = ask("Run this:\n\n```js\nconst a = '!https://x/p.png!';\n```");
+      expect(wiki).toBe(
+        [
+          "Run this:",
+          "",
+          "{code:js}\nconst a = '!https://x/p.png!';\n{code}",
+          "",
+          "_Asked by Dana via Teams on 2026-10-01:_",
+          "",
+          quoteBlock,
+        ].join("\n"),
+      );
+    });
   });
 
   test("proposalTextToWiki converts, keeps the quote literal, then makes safe", () => {

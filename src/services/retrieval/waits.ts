@@ -5,7 +5,7 @@
 import { localDateOf } from "@/lib/dates";
 import type { WaitCandidate, WaitReason } from "@/prompts/classify";
 import { isAway } from "@/services/directory/away";
-import { overlap } from "./ranking";
+import { overlap, tokens } from "./ranking";
 
 /** At most this many open waits reach the prompt. */
 export const WAIT_LIMIT = 12;
@@ -43,6 +43,36 @@ export type WaitContext = {
   today: string;
 };
 
+/**
+ * Whether `text` names a reference (an incident number, a request id) as a whole:
+ * INC0012 is not in INC00123. Case is ignored.
+ */
+export function mentionsRef(text: string, ref: string): boolean {
+  const r = ref.trim();
+  if (!r) return false;
+  const escaped = r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "iu").test(text);
+}
+
+type WaitSubject = { label: string | null; externalRef: string | null };
+
+/**
+ * Whether two waits are about the same thing (D46), by the wording match used
+ * to offer waits: the same external reference (when both have one, it decides),
+ * one's reference named in the other's label, or labels sharing a meaningful
+ * word other than the owner's name.
+ */
+export function sameWaitSubject(a: WaitSubject, b: WaitSubject, owner?: string | null): boolean {
+  const ra = a.externalRef?.trim() || null;
+  const rb = b.externalRef?.trim() || null;
+  if (ra && rb) return ra.toLowerCase() === rb.toLowerCase();
+  if (ra && b.label && mentionsRef(b.label, ra)) return true;
+  if (rb && a.label && mentionsRef(a.label, rb)) return true;
+  const ignore = new Set(tokens(owner ?? ""));
+  const words = (label: string | null) => tokens(label ?? "").filter((t) => !ignore.has(t));
+  return overlap(words(a.label).join(" "), words(b.label).join(" ")) > 0;
+}
+
 const POINTS: Record<WaitReason, number> = {
   sender: 8,
   named: 6,
@@ -65,7 +95,6 @@ export function pickWaits(
   const candidates = new Set(ctx.candidateKeys);
   const mentioned = new Set(ctx.mentionedKeys);
   const named = new Set(ctx.namedPersonIds);
-  const quote = ctx.quote.toLowerCase();
   return rows
     .filter((r) => r.status !== "resolved")
     .map((r) => {
@@ -88,7 +117,7 @@ export function pickWaits(
         [r.label, r.externalRef, r.issueSummary, r.owner].filter(Boolean).join(" "),
         ctx.quote,
       );
-      if (r.externalRef && quote.includes(r.externalRef.toLowerCase())) add("wording", 6);
+      if (r.externalRef && mentionsRef(ctx.quote, r.externalRef)) add("wording", 6);
       else if (words > 0) add("wording", words * 10);
       return { r, reasons, score };
     })

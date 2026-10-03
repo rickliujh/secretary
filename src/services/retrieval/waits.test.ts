@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { pickWaits, WAIT_LIMIT, type WaitRow } from "./waits";
+import { mentionsRef, pickWaits, sameWaitSubject, WAIT_LIMIT, type WaitRow } from "./waits";
 
 const row = (id: string, p: Partial<WaitRow> = {}): WaitRow => ({
   id,
@@ -69,6 +69,39 @@ describe("pickWaits (D46)", () => {
       ["ana", ["named"]],
       ["inc", ["wording"]],
     ]);
+  });
+
+  test("an incident number matches only as a whole reference", () => {
+    const pick = (quote: string) =>
+      pickWaits(
+        [row("inc", { externalRef: "INC0012", ownerTeamId: "t-plat", owner: "Platform" })],
+        { ...ctx, senderPersonId: null, senderTeamId: null, quote },
+      ).map((w) => w.id);
+    expect(pick("INC00123 is fixed")).toEqual([]);
+    expect(pick("XINC0012 is fixed")).toEqual([]);
+    expect(pick("inc0012 is fixed")).toEqual(["inc"]);
+    expect(pick("Fixed (INC0012).")).toEqual(["inc"]);
+    expect(mentionsRef("see REQ-1.2", "REQ-1.2")).toBe(true);
+    expect(mentionsRef("see REQ-1x2", "REQ-1.2")).toBe(false);
+  });
+
+  test("two waits are about the same thing by reference or shared words", () => {
+    const a = { label: "Q3 numbers from finance", externalRef: null };
+    expect(sameWaitSubject(a, { label: "Finance numbers", externalRef: null })).toBe(true);
+    expect(sameWaitSubject(a, { label: "Contract sign-off", externalRef: null })).toBe(false);
+    // The owner's name alone is not a subject.
+    expect(
+      sameWaitSubject(
+        { label: "Answer from Ana", externalRef: null },
+        { label: "Access for Ana", externalRef: null },
+        "Ana Bell",
+      ),
+    ).toBe(false);
+    // When both have a reference, it decides.
+    const inc = { label: "Platform fix", externalRef: "INC0012345" };
+    expect(sameWaitSubject(inc, { label: "Platform fix", externalRef: "inc0012345" })).toBe(true);
+    expect(sameWaitSubject(inc, { label: "Platform fix", externalRef: "INC0099999" })).toBe(false);
+    expect(sameWaitSubject(inc, { label: "Chase INC0012345", externalRef: null })).toBe(true);
   });
 
   test("capped, and the owner's away date only while away", () => {

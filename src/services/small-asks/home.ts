@@ -2,7 +2,7 @@
  * The small-asks home (FR-10, D44): pure rules code applies to a small ask, so
  * the model never chooses its project, label, assignee or sprint.
  */
-import { escapeWikiText } from "@/lib/wiki-safe";
+import { escapeWikiText, neutraliseBlockMarkers } from "@/lib/wiki-safe";
 
 /**
  * Whether a type is a sub-task type. `subtaskTypes` are the names Jira flags as
@@ -207,9 +207,10 @@ export function withProvenance(descriptionMd: string | null, p: Provenance): str
 
 /**
  * Text shown literally in Jira wiki markup: a `{noformat}` block renders no
- * images, mentions, links or macros. A `{noformat}` inside the text would end
- * the block early, so it is broken up.
+ * images, mentions, links or macros. A `{noformat}` or `{code}` marker inside the
+ * text (any case) could end the block early or pair with another, so it is
+ * broken up the way the sanitiser breaks up stray markers (D51).
  */
 export function literalWiki(text: string): string {
-  return `{noformat}\n${text.replace(/\{(\s*noformat)/gi, "{ $1")}\n{noformat}`;
+  return `{noformat}\n${neutraliseBlockMarkers(text)}\n{noformat}`;
 }

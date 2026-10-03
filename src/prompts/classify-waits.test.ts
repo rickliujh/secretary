@@ -191,6 +191,35 @@ describe("validating and mapping update_dependency", () => {
       errorsOf(withWaits, { ...dup, ownerTeamId: null, externalRef: "INC0099999", label: "DNS" }),
     ).toEqual([]);
   });
+
+  test("the same owner and ticket with a different ask is a new wait", () => {
+    const ask = {
+      kind: "link_dependency",
+      target: "PAY-2",
+      dependencyKind: "person",
+      ownerPersonId: "p-ana",
+      externalRef: null,
+      ...e,
+    };
+    // Ana already owes the Q3 numbers; a sign-off from her is something else.
+    expect(errorsOf(withWaits, { ...ask, label: "Sign-off on the vendor contract" })).toEqual([]);
+    // Her name in the label is not a shared subject.
+    expect(errorsOf(withWaits, { ...ask, label: "Ana Bell to approve access" })).toEqual([]);
+    // The same thing again is still turned away.
+    expect(errorsOf(withWaits, { ...ask, label: "Finance numbers for Q3" })).toContain(
+      `Proposal 1 (link_dependency): open wait ${bobWait.id} already tracks Q3 numbers from finance on PAY-2; use update_dependency for it, or leave this out.`,
+    );
+    // The team's wait: another incident number is another wait, the same one is not.
+    const inc = { ...ask, dependencyKind: "incident", ownerPersonId: null, ownerTeamId: "t-plat" };
+    expect(
+      errorsOf(withWaits, { ...inc, label: "Platform fix", externalRef: "INC0099999" }),
+    ).toEqual([]);
+    expect(
+      errorsOf(withWaits, { ...inc, label: "Fix for INC0012345", externalRef: "INC0012345" }),
+    ).toContain(
+      `Proposal 1 (link_dependency): open wait ${platWait.id} already tracks Platform fix on PAY-2; use update_dependency for it, or leave this out.`,
+    );
+  });
 });
 
 describe("awayUntil on update_person (D47)", () => {

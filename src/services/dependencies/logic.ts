@@ -2,12 +2,10 @@
  * Pure dependency logic (FR-3): overdue days, follow-up dates, grouping and
  * ordering for the Waiting page. Dates are local calendar dates (YYYY-MM-DD).
  */
-import { addBusinessDays, daysBetween, localDateOf } from "@/lib/dates";
+import { addBusinessDays, daysBetween, isRealDate, localDateOf } from "@/lib/dates";
 
 /** Kept here for the components that schedule follow-ups. */
 export { addBusinessDays } from "@/lib/dates";
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type DependencyStatus = "open" | "waiting" | "blocked" | "resolved";
 
@@ -26,8 +24,9 @@ export type DependencyTiming = {
   /** The owner's last day away while the wait sleeps; else null. */
   awayUntil: string | null;
   /**
-   * The first working day the owner is back, while no follow-up has been logged
-   * since; else null. The follow-up is due from that day ("<name> is back").
+   * The first working day the owner is back, while "is back" applies (D47: no
+   * follow-up logged since, no later follow-up date set, under 14 days); else
+   * null. The follow-up is due from that day ("<name> is back").
    */
   backSince: string | null;
   /** When the next follow-up falls due: the day the owner is back while asleep or back, else `nextFollowupAt`. */
@@ -62,12 +61,16 @@ const dayMonth = (date: string) =>
 /** The first working day after an away date: when the owner is back (D47). */
 export const backOn = (awayUntil: string) => addBusinessDays(awayUntil, 1);
 
+/** Days after the back day when "is back" stops on its own (D47). */
+export const BACK_DAYS = 14;
+
 /**
  * Overdue and follow-up state of a wait on `today`, with the owner's away date
  * (D47): while the owner is away the wait sleeps; from the first working day
- * after, its follow-up is due with the reason "<name> is back" until a follow-up
- * is logged. A wait opened after the owner came back, or a past date with a
- * follow-up since, is timed as usual, so an old date never needs clearing.
+ * after (the back day), a wait opened before that day is due with the reason
+ * "<name> is back". That ends once a follow-up is logged on or after the back
+ * day, the next follow-up is moved past the back day, or `BACK_DAYS` days have
+ * passed; then the usual rules apply, so an old date never needs clearing.
  */
 export function timing(dep: TimingInput, today: string): DependencyTiming {
   const none = { asleep: false, awayUntil: null, backSince: null, reason: null };
@@ -80,7 +83,8 @@ export function timing(dep: TimingInput, today: string): DependencyTiming {
       ...none,
     };
   const away = dep.ownerAway;
-  if (away && ISO_DATE.test(away.awayUntil)) {
+  // A stored value that is not a real date (an import, an old row) is ignored.
+  if (away && isRealDate(away.awayUntil)) {
     const back = backOn(away.awayUntil);
     if (today < back)
       return {
@@ -95,7 +99,9 @@ export function timing(dep: TimingInput, today: string): DependencyTiming {
       };
     const openedBefore = !dep.requestedAt || localDateOf(dep.requestedAt) < back;
     const chasedSince = !!dep.lastFollowupAt && localDateOf(dep.lastFollowupAt) >= back;
-    if (openedBefore && !chasedSince) {
+    const rescheduled = !!dep.nextFollowupAt && dep.nextFollowupAt > back;
+    const lapsed = daysBetween(back, today) >= BACK_DAYS;
+    if (openedBefore && !chasedSince && !rescheduled && !lapsed) {
       const overdue = dep.expectedAt ? daysBetween(dep.expectedAt, today) : 0;
       return {
         overdueDays: Math.max(0, overdue),

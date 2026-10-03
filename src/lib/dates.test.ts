@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { addBusinessDays, daysBetween, localDate, localDateOf } from "./dates";
+import { addBusinessDays, daysBetween, isRealDate, localDate, localDateOf } from "./dates";
 
 describe("dates", () => {
   test("business days skip weekends", () => {
@@ -21,5 +21,14 @@ describe("dates", () => {
     const at = new Date(2026, 8, 10, 23, 30);
     expect(localDateOf(at.toISOString())).toBe(localDate(at));
     expect(localDate(at)).toBe("2026-09-10");
+  });
+
+  test("isRealDate rejects impossible and rolled-over dates without throwing", () => {
+    expect(isRealDate("2028-02-29")).toBe(true);
+    expect(isRealDate("2026-02-29")).toBe(false);
+    expect(isRealDate("2026-02-30")).toBe(false);
+    expect(isRealDate("2026-13-01")).toBe(false);
+    expect(isRealDate("2026-1-01")).toBe(false);
+    expect(isRealDate("soon")).toBe(false);
   });
 });

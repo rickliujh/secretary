@@ -104,7 +104,8 @@ export const mixedInputs = (patch: Partial<TodayInputs> = {}): TodayInputs => ({
     wait("d-over", "SPR-1", { expectedAt: "2026-10-01" }),
     wait("d-follow", "SPR-2", { nextFollowupAt: "2026-10-06" }),
     wait("d-back", "SPR-2", {
-      nextFollowupAt: "2026-10-20",
+      // Set before the leave; a chase date after the back day would end "is back" (D47).
+      nextFollowupAt: "2026-10-02",
       ownerName: "Bob",
       // Monday 5 October; back on Tuesday the 6th.
       ownerAway: { name: "Bob", awayUntil: "2026-10-05" },

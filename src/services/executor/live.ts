@@ -1,16 +1,18 @@
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull } from "drizzle-orm";
 import { Cause, Effect, Layer } from "effect";
 import {
   actionsLog,
   communications,
   dependencies,
+  followups,
   issueMeta,
   jiraIssues,
   memories,
   people,
+  proposals,
   teams,
 } from "@/db/schema";
-import { localDate } from "@/lib/dates";
+import { addBusinessDays, localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redactValue } from "@/lib/redact";
@@ -28,7 +30,7 @@ import {
   type PayloadOf,
   type ProposalPayload,
 } from "@/services/proposals/schema";
-import { Settings } from "@/services/settings";
+import { Settings, settingsOrDefault } from "@/services/settings";
 import { userActiveSprints } from "@/services/sprints/active";
 import { Sync } from "@/services/sync";
 import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
@@ -534,14 +536,54 @@ const make = Effect.gen(function* () {
         );
       if (p.action !== "resolve" && p.expectedAt && p.expectedAt !== dep.expectedAt)
         yield* local(setDates(dep.id, { expectedAt: p.expectedAt }, { mirror: false }));
-      const followupId = yield* local(
-        logFollowup(dep.id, {
-          channel: p.channel,
-          summary:
-            p.summary ?? describeWaitUpdate({ ...p, issueKey: dep.issueKey, label: dep.label }),
-          nextFollowupAt: p.action === "resolve" ? null : nextFollowupAfter(p),
-        }),
-      );
+      const summary = (
+        p.summary ?? describeWaitUpdate({ ...p, issueKey: dep.issueKey, label: dep.label })
+      ).trim();
+      const nextFollowupAt = p.action === "resolve" ? null : nextFollowupAfter(p);
+      // These steps share no transaction, so a retry after a later step failed
+      // finds the entry this proposal already wrote (same text, written since the
+      // proposal was made) and only sets the dates again, not a second entry.
+      const since = (yield* q((d) =>
+        d
+          .select({ at: proposals.createdAt })
+          .from(proposals)
+          .where(eq(proposals.id, proposalId))
+          .get(),
+      ))?.at;
+      const written = since
+        ? yield* q((d) =>
+            d
+              .select({ id: followups.id })
+              .from(followups)
+              .where(
+                and(
+                  eq(followups.dependencyId, dep.id),
+                  eq(followups.summary, summary),
+                  p.channel ? eq(followups.channel, p.channel) : isNull(followups.channel),
+                  gte(followups.at, since),
+                ),
+              )
+              .get(),
+          )
+        : undefined;
+      let followupId: string;
+      if (written) {
+        followupId = written.id;
+        const days = (yield* settingsOrDefault(settings)).dependencies.followupDays;
+        yield* local(
+          setDates(
+            dep.id,
+            {
+              nextFollowupAt:
+                nextFollowupAt === undefined ? addBusinessDays(localDate(), days) : nextFollowupAt,
+            },
+            { mirror: false },
+          ),
+        );
+      } else
+        followupId = yield* local(
+          logFollowup(dep.id, { channel: p.channel, summary, nextFollowupAt }),
+        );
       if (p.action === "resolve") yield* local(setStatus(dep.id, "resolved", { mirror: false }));
       const warning = yield* local(mirror(dep.id, "refresh")).pipe(
         Effect.as(null),

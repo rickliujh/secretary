@@ -23,6 +23,16 @@ const DAY_MS = 86_400_000;
 const toUtc = (date: string) => Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
 const fromUtc = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
+/**
+ * Whether a value is a real YYYY-MM-DD calendar date: rejects `2026-13-01` and
+ * `2026-02-30` (which would roll over) without throwing.
+ */
+export function isRealDate(v: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const ms = Date.parse(`${v}T00:00:00Z`);
+  return !Number.isNaN(ms) && fromUtc(ms) === v;
+}
+
 /** Today (or `d`) as YYYY-MM-DD in local time. */
 export const localDate = (d = new Date()) => d.toLocaleDateString("en-CA");
 

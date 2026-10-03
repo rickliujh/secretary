@@ -21,6 +21,7 @@ import {
   WAIT_ACTIONS,
 } from "@/services/proposals/schema";
 import type { Reason } from "@/services/retrieval/ranking";
+import { sameWaitSubject } from "@/services/retrieval/waits";
 import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small-asks/home";
 import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
@@ -714,16 +715,21 @@ function validateWaitUpdate(
 }
 
 /**
- * A new dependency the listed waits already cover (D46): the same ticket and the
- * same owner or reference. It should be an update_dependency, or nothing.
+ * A new dependency the listed waits already cover (D46): the same ticket, the
+ * same owner or reference, and about the same thing (the same reference, or
+ * labels sharing a meaningful word). It should be an update_dependency, or
+ * nothing. A different ask of the same owner on the same ticket is a new wait.
  */
 function coveringWait(p: ItemOutput["proposals"][number], s: ItemSnapshot) {
+  const ref = str(p.externalRef);
+  const proposed = { label: str(p.label), externalRef: ref };
   return s.waits?.find(
     (w) =>
       w.issueKey === p.target &&
       ((!!w.ownerPersonId && w.ownerPersonId === p.ownerPersonId) ||
         (!!w.ownerTeamId && w.ownerTeamId === p.ownerTeamId) ||
-        (!!w.externalRef && w.externalRef === str(p.externalRef))),
+        (!!w.externalRef && !!ref && w.externalRef.toLowerCase() === ref.toLowerCase())) &&
+      sameWaitSubject(w, proposed, w.owner),
   );
 }
 

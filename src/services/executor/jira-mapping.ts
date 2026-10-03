@@ -3,7 +3,7 @@
  * (design.md 7.3).
  */
 import { markdownToWiki } from "@/lib/wiki";
-import { sanitiseProposalWiki, type WikiSafety } from "@/lib/wiki-safe";
+import { balanceBlockMarkers, sanitiseProposalWiki, type WikiSafety } from "@/lib/wiki-safe";
 import type { Deployment } from "@/services/atlassian/deployment";
 import type { EditMeta, JiraWrite } from "@/services/jira";
 import type { FieldIds } from "@/services/jira/fields";
@@ -229,13 +229,16 @@ export function droppedFieldsWarning(
  * A create's Markdown description as wiki markup. The provenance block's quote
  * is pasted text (untrusted), so it goes to Jira as a literal `{noformat}` block:
  * it cannot embed remote images, mention users or run macros (D44). The "Asked
- * by" line is escaped, since the requester's name may come from a sender.
+ * by" line is escaped, since the requester's name may come from a sender. The
+ * model's part before it keeps only balanced `{code}` / `{noformat}` blocks, so
+ * a marker it leaves open cannot pair with the quote's opener and turn the line
+ * literal and the quote live (D51).
  */
 export function descriptionToWiki(descriptionMd: string): string {
   const block = splitProvenance(descriptionMd);
   if (!block) return markdownToWiki(descriptionMd);
   return [
-    block.base && markdownToWiki(block.base),
+    block.base && balanceBlockMarkers(markdownToWiki(block.base)),
     provenanceLineWiki(block.line),
     block.quote && literalWiki(block.quote),
   ]
