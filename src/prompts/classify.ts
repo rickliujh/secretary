@@ -27,7 +27,7 @@ import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small
 import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 9;
+export const CLASSIFY_PROMPT_VERSION = 10;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -370,7 +370,7 @@ export function buildItemSchema(s: ItemSnapshot) {
     preferredChannel: nullableEnum(CHANNELS).describe(uses("update_person")),
     tone: nullableText(uses("update_person")),
     awayUntil: nullableText(
-      `YYYY-MM-DD: the person's last day away, from an out-of-office or leave notice. ${uses("update_person")}`,
+      `YYYY-MM-DD: the person's last day away, from an out-of-office or leave notice: the day itself for "until" a day, the day before for "back on" a day. ${uses("update_person")}`,
     ),
     // update_team
     teamId: nullableEnum(teamIds).describe(uses("update_team")),
@@ -1001,7 +1001,7 @@ ${
     : ""
 }${
   s.people.length
-    ? `- When the input is an out-of-office or leave notice ("I'm out until the 14th", "on leave until 14 Oct", "back on Monday"), propose update_person for that person with awayUntil: their last day away as YYYY-MM-DD, worked out from today's date${s.sprints?.length ? " (and the Sprints list when it names a sprint)" : ""}. When it gives the day they return, awayUntil is the working day before it. The person is the sender of the input, or the contact from the People list it is about. Their waits pause until they are back, so do not resolve or reschedule a wait only because they are away.
+    ? `- When the input is an out-of-office or leave notice, propose update_person for that person with awayUntil: their last day away as YYYY-MM-DD, worked out from today's date${s.sprints?.length ? " (and the Sprints list when it names a sprint)" : ""}. "Until", "through" or "out until" a day means they are away that whole day, so awayUntil is that day ("out of office until 14 Oct" gives 14 Oct). "Back on", "returning" or "back in the office" a day means that is their first day back, so awayUntil is the day before it ("back on 14 Oct" gives 13 Oct). The person is the sender of the input, or the contact from the People list it is about. Their waits pause until they are back, so do not resolve or reschedule a wait only because they are away.
 `
     : ""
 }${

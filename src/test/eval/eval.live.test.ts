@@ -9,7 +9,7 @@
  *   SECRETARY_EVAL_CASE="status change"         # optional: run only cases whose name contains this
  *   SECRETARY_EVAL_CONCURRENCY=6                # optional: cases at once (1 runs them in turn)
  *   SECRETARY_EVAL_EFFORT=low                   # optional: the provider's effort setting (D52)
- *   SECRETARY_EVAL_PROVIDER=deepinfra/fp4       # optional, OpenRouter: pin the upstream provider
+ *   SECRETARY_EVAL_PROVIDER=deepinfra/fp4,novita/fp8  # optional, OpenRouter: upstream providers in order
  *   bun test src/test/eval
  *
  * Every intake case runs in its own database and layer, several at once, and
@@ -70,12 +70,14 @@ import { json, type StubRoute, stubFetch } from "@/test/stub-fetch";
 import { EVAL_CASES, EVAL_HOME, EVAL_OUTSIDE_ISSUES, type EvalCase } from "./cases";
 import {
   addStats,
+  afterRateLimit,
   backoffMs,
   type CallStats,
   callStats,
   describeStats,
   noCalls,
   parseConcurrency,
+  parseProviders,
   pinProvider,
   RATE_LIMIT_RETRIES,
   stopMessage,
@@ -101,7 +103,7 @@ const effort = (() => {
     );
   return r.data;
 })();
-const pinned = env.SECRETARY_EVAL_PROVIDER?.trim() || null;
+const pinned = parseProviders(env.SECRETARY_EVAL_PROVIDER);
 
 const selected = env.SECRETARY_EVAL_CASE
   ? EVAL_CASES.filter((c) => c.name.includes(env.SECRETARY_EVAL_CASE ?? ""))
@@ -121,6 +123,19 @@ const upstream = new Map<string, number>();
 /** 429s the eval's model fetch waited out (see RATE_LIMIT_RETRIES). */
 let rateLimitRetries = 0;
 
+/** 429s after which the eval asked the rest of the provider list at once (`afterRateLimit`). */
+let movedOn = 0;
+
+/** The provider each 429 named (OpenRouter's `error.metadata.provider_name`). */
+const turnedAwayBy = new Map<string, number>();
+
+/** Counts each name, so a run served by more than one provider shows it. */
+const bump = (counts: Map<string, number>, name: string) =>
+  counts.set(name, (counts.get(name) ?? 0) + 1);
+
+const countsLine = (counts: Map<string, number>) =>
+  [...counts].map(([p, n]) => `${p} ${n}`).join(", ");
+
 const pause = (ms: number, signal?: AbortSignal | null) =>
   new Promise<void>((resolve) => {
     const t = setTimeout(resolve, ms);
@@ -136,27 +151,48 @@ const pause = (ms: number, signal?: AbortSignal | null) =>
 
 /**
  * The model endpoint over the real network. With SECRETARY_EVAL_PROVIDER set,
- * chat-completions requests carry OpenRouter's provider pin. A 429 is retried
- * with backoff a few times before the app sees it.
+ * chat-completions requests carry OpenRouter's provider list. After a 429 the
+ * rest of the list is asked at once; when the last provider turns the request
+ * away too, the fetch waits with backoff and starts from the first again, a few
+ * times before the app sees the 429.
  */
 async function modelFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = input instanceof Request ? input.url : String(input);
-  const pin = pinned && url.endsWith("/chat/completions") && typeof init?.body === "string";
-  const req = pin ? { ...init, body: pinProvider(String(init?.body), pinned) } : init;
-  let res = await fetch(input, req);
-  for (let attempt = 0; res.status === 429 && attempt < RATE_LIMIT_RETRIES; attempt++) {
-    if (init?.signal?.aborted) break;
-    rateLimitRetries++;
-    await pause(backoffMs(attempt), init?.signal);
-    res = await fetch(input, req);
+  const body =
+    url.endsWith("/chat/completions") && typeof init?.body === "string" ? init.body : null;
+  let asked = pinned;
+  const send = () =>
+    fetch(input, body !== null && asked ? { ...init, body: pinProvider(body, asked) } : init);
+  let res = await send();
+  let waits = 0;
+  while (res.status === 429 && !init?.signal?.aborted) {
+    const name = await res
+      .clone()
+      .json()
+      .then(
+        (j: { error?: { metadata?: { provider_name?: unknown } } }) =>
+          j?.error?.metadata?.provider_name,
+      )
+      .catch(() => undefined);
+    bump(turnedAwayBy, typeof name === "string" ? name : "unnamed");
+    const rest = body !== null && asked ? afterRateLimit(asked) : null;
+    if (rest) {
+      movedOn++;
+      asked = rest;
+    } else {
+      if (waits >= RATE_LIMIT_RETRIES) break;
+      rateLimitRetries++;
+      await pause(backoffMs(waits++), init?.signal);
+      asked = pinned;
+    }
+    res = await send();
   }
   if (res.ok && res.headers.get("content-type")?.includes("application/json"))
     void res
       .clone()
       .json()
       .then((j: { provider?: unknown }) => {
-        if (typeof j?.provider === "string")
-          upstream.set(j.provider, (upstream.get(j.provider) ?? 0) + 1);
+        if (typeof j?.provider === "string") bump(upstream, j.provider);
       })
       .catch(() => undefined);
   return res;
@@ -482,10 +518,16 @@ async function runIntake(cases: EvalCase[], model: string, label = "") {
   throw new Error(message);
 }
 
-/** Who answered (OpenRouter's `provider` field) and how many 429s the fetch waited out. */
+/**
+ * Who answered, per provider (OpenRouter's `provider` field), and the 429s:
+ * which provider each named, how many moved on down the list at once and how
+ * many the fetch waited out.
+ */
 const providerLine = () => {
-  const served = [...upstream].map(([p, n]) => `${p} ${n}`).join(", ");
-  return `responses served by: ${served || "(not reported)"}; 429s waited out: ${rateLimitRetries}`;
+  const turned = turnedAwayBy.size
+    ? `429s: ${countsLine(turnedAwayBy)}; moved on to the next provider ${movedOn}, waited out ${rateLimitRetries}`
+    : "429s: none";
+  return `responses served by: ${countsLine(upstream) || "(not reported)"}; ${turned}`;
 };
 
 const report = (label: string, results: Outcome[]) => {
@@ -514,7 +556,7 @@ const summary = (label: string, results: Outcome[], wallMs: number) => {
     .map((r) => `${r.c.name} (${seconds(r.ms)})`);
   console.log(
     [
-      `\n${label}: ${passed}/${results.length} passed, ${seconds(wallMs)} wall, concurrency ${concurrency}, effort ${effort}${pinned ? `, provider pinned to ${pinned}` : ""}`,
+      `\n${label}: ${passed}/${results.length} passed, ${seconds(wallMs)} wall, concurrency ${concurrency}, effort ${effort}${pinned ? `, providers ${pinned.join(" > ")}` : ""}`,
       `  model calls: ${describeStats(total)}; tokens: ${total.inputTokens} input, ${total.outputTokens} output`,
       `  slowest: ${slowest.join("; ")}`,
       `  ${providerLine()}`,
@@ -526,7 +568,7 @@ describe.skipIf(!configured)("live intake eval", () => {
   test.concurrent("standard tier meets the pass rate", async () => {
     const model = env.SECRETARY_EVAL_STANDARD_MODEL ?? "";
     console.log(
-      `intake: ${selected.length} cases on ${model}, ${concurrency} at a time, effort ${effort}${pinned ? `, provider ${pinned}` : ""}`,
+      `intake: ${selected.length} cases on ${model}, ${concurrency} at a time, effort ${effort}${pinned ? `, providers ${pinned.join(" > ")}` : ""}`,
     );
     const started = Date.now();
     const results = await runIntake(selected, model);

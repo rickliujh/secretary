@@ -184,7 +184,7 @@ SECRETARY_EVAL_KIND=openai-compatible \
 SECRETARY_EVAL_BASE_URL=https://openrouter.ai/api/v1 \
 SECRETARY_EVAL_API_KEY=... \
 SECRETARY_EVAL_STANDARD_MODEL=z-ai/glm-5.3-flash \
-SECRETARY_EVAL_PROVIDER=deepinfra/fp4 \
+SECRETARY_EVAL_PROVIDER=deepinfra/fp4,streamlake/fp8,novita/fp8 \
 bun test src/test/eval
 ```
 
@@ -196,12 +196,12 @@ Optional variables:
 | `SECRETARY_EVAL_CASE` | Runs only intake cases whose name contains this text (and skips the other live tests) |
 | `SECRETARY_EVAL_CONCURRENCY` | Intake cases run at once, default 6; 1 runs them one after another |
 | `SECRETARY_EVAL_EFFORT` | The provider's effort setting (`low` to `max`); unset is "Provider default", which sends nothing. OpenAI-compatible providers get it as `reasoning_effort` |
-| `SECRETARY_EVAL_PROVIDER` | OpenRouter only: pins the upstream provider (`provider.only`, no fallbacks), for example `deepinfra/fp4`. Unset lets OpenRouter route |
+| `SECRETARY_EVAL_PROVIDER` | OpenRouter only: upstream providers in order, comma-separated, for example `deepinfra/fp4,streamlake/fp8,novita/fp8`. Requests go to the first and fall back down the list, never outside it (`provider.order` and `provider.only`); one slug pins that provider. Unset lets OpenRouter route |
 
 Every intake case runs in its own in-memory database and prints a line when it
 finishes (pass or fail, seconds, model calls). The run ends with each case's
-result, then wall time, model calls, tokens, the five slowest cases and the
-upstream provider that answered. The drafting, chat, planning, report and vault
+result, then wall time, model calls, tokens, the five slowest cases and how many
+responses each upstream provider served, so a fallback shows. The drafting, chat, planning, report and vault
 tests run at the same time. If the first three cases all fail with the same
 provider error (timeout, rate limit, server error), or any case gets 401/403, the
 run stops and says what to check.
@@ -211,8 +211,13 @@ spends over a minute per call and hits the app's 120 s timeout. Pin a fast provi
 with `SECRETARY_EVAL_PROVIDER`, or add the `:nitro` suffix to the model
 (`z-ai/glm-5.3-flash:nitro`, OpenRouter's fastest-provider routing), or lower the
 effort with `SECRETARY_EVAL_EFFORT=low`. A pinned provider can also turn requests
-away (429, "temporarily rate-limited upstream"); the eval waits those out with
-backoff inside the app's timeout and reports how many it saw. On a provider with
+away (429, "temporarily rate-limited upstream"). OpenRouter sends the app's
+schema-bound requests only to listed providers that support structured outputs,
+so it does not move down the list by itself; the eval does: after a 429 it asks
+the rest of the list at once, and only when the last provider is busy too does it
+wait with backoff (inside the app's timeout) and start again from the first. The
+summary counts the 429s per provider, how many moved on and how many were waited
+out. On a provider with
 capacity a classify call answers in 10 to 20 s, so a full run should take a few
 minutes, and it costs a few cents on GLM 5.3 Flash.
 

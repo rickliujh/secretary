@@ -51,9 +51,11 @@ describe("eval cases", () => {
     const away = EVAL_CASES.filter((c) =>
       c.expect.required.some((r) => r.kind === "update_person" && "awayUntil" in (r.fields ?? {})),
     );
-    expect(away).toHaveLength(1);
+    // One "until" notice and one "back on" notice.
+    expect(away).toHaveLength(2);
     // The person is the sender, named by the run's contact id.
-    expect(away[0]?.expect.required[0]?.target).toBe(contactTarget(away[0]?.sender ?? "ana"));
+    for (const c of away)
+      expect(c.expect.required[0]?.target).toBe(contactTarget(c.sender ?? "ana"));
     for (const c of EVAL_CASES.filter((x) => x.wait))
       expect(fixtureIssues.some((i) => i.key === c.wait?.issueKey)).toBe(true);
   });

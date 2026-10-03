@@ -18,12 +18,32 @@ export function parseConcurrency(value: string | undefined): number {
 }
 
 /**
- * Pins OpenRouter to one upstream provider: adds
- * `provider: { only: [slug], allow_fallbacks: false }` to a chat-completions
- * JSON body. Eval only; the app has no such setting. Anything that is not a JSON
+ * The OpenRouter providers SECRETARY_EVAL_PROVIDER names, in order: a
+ * comma-separated list such as `deepinfra/fp4,streamlake/fp8,novita/fp8`, or one
+ * slug. Null when unset or empty.
+ */
+export function parseProviders(value: string | undefined): string[] | null {
+  const slugs = [
+    ...new Set(
+      (value ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  ];
+  return slugs.length ? slugs : null;
+}
+
+/**
+ * Routes an OpenRouter chat-completions JSON body to the listed upstream
+ * providers: adds `provider: { order, only, allow_fallbacks: true }` with the
+ * list in both. `order` sends the request to the first provider and on to the
+ * next when one fails; `only` keeps every attempt inside the list. One slug pins
+ * that provider. OpenRouter skips listed providers that lack a parameter the
+ * request uses, so the eval also walks the list on 429s (`afterRateLimit`). Eval only; the app has no such setting. Anything that is not a JSON
  * object is returned unchanged.
  */
-export function pinProvider(body: string, slug: string): string {
+export function pinProvider(body: string, slugs: readonly string[]): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
@@ -31,15 +51,33 @@ export function pinProvider(body: string, slug: string): string {
     return body;
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return body;
-  return JSON.stringify({ ...parsed, provider: { only: [slug], allow_fallbacks: false } });
+  return JSON.stringify({
+    ...parsed,
+    provider: { order: [...slugs], only: [...slugs], allow_fallbacks: true },
+  });
 }
 
 /**
- * How often the eval's model fetch retries a 429 before handing it to the app.
+ * The providers the eval asks next after a 429 from `asked` (a tail of the
+ * SECRETARY_EVAL_PROVIDER list): the rest of it, at once, or null when the last
+ * one turned the request away, and the eval waits (`backoffMs`) and starts again
+ * from the top. OpenRouter does not move down the list by itself here: a
+ * schema-bound request (`response_format` json_schema) goes only to the listed
+ * providers that support structured outputs, so with DeepInfra first a busy
+ * DeepInfra answers 429 although StreamLake and Novita are free.
+ */
+export function afterRateLimit(asked: readonly string[]): string[] | null {
+  return asked.length > 1 ? asked.slice(1) : null;
+}
+
+/**
+ * How often the eval's model fetch waits out a 429 before handing it to the app.
  * A pinned OpenRouter provider answers from a shared pool that turns requests
  * away for seconds at a time ("temporarily rate-limited upstream"); a 429 costs
- * nothing, and the eval measures the model, not that pool. The app's own single
- * retry is unchanged, and its timeout still bounds the whole call.
+ * nothing, and the eval measures the model, not that pool. With a provider list
+ * the eval first tries the rest of the list without waiting (`afterRateLimit`),
+ * so it waits only when every listed provider turned the request away. The app's
+ * own single retry is unchanged, and its timeout still bounds the whole call.
  */
 export const RATE_LIMIT_RETRIES = 6;
 

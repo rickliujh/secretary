@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+  afterRateLimit,
   backoffMs,
   callStats,
   DEFAULT_CONCURRENCY,
   describeStats,
   FAIL_FAST_AFTER,
   parseConcurrency,
+  parseProviders,
   pinProvider,
   stopReason,
 } from "./harness";
@@ -21,15 +23,41 @@ describe("live eval harness", () => {
     expect(() => parseConcurrency("1.5")).toThrow();
   });
 
-  test("pins the OpenRouter provider in a JSON body and leaves the rest", () => {
+  test("reads the provider list in order and drops blanks and repeats", () => {
+    expect(parseProviders(undefined)).toBeNull();
+    expect(parseProviders(" , ")).toBeNull();
+    expect(parseProviders("deepinfra/fp4")).toEqual(["deepinfra/fp4"]);
+    expect(parseProviders(" deepinfra/fp4, streamlake/fp8 ,novita/fp8,deepinfra/fp4,")).toEqual([
+      "deepinfra/fp4",
+      "streamlake/fp8",
+      "novita/fp8",
+    ]);
+  });
+
+  test("routes OpenRouter to the listed providers in order and leaves the rest", () => {
     const body = JSON.stringify({ model: "m", messages: [{ role: "user", content: "hi" }] });
-    expect(JSON.parse(pinProvider(body, "deepinfra/fp4"))).toEqual({
+    const list = ["deepinfra/fp4", "streamlake/fp8", "novita/fp8"];
+    expect(JSON.parse(pinProvider(body, list))).toEqual({
       model: "m",
       messages: [{ role: "user", content: "hi" }],
-      provider: { only: ["deepinfra/fp4"], allow_fallbacks: false },
+      // Falls back down the list, never outside it.
+      provider: { order: list, only: list, allow_fallbacks: true },
     });
-    expect(pinProvider("not json", "x")).toBe("not json");
-    expect(pinProvider("[1]", "x")).toBe("[1]");
+    // One slug pins that provider: nothing else is allowed.
+    expect(JSON.parse(pinProvider(body, ["deepinfra/fp4"])).provider).toEqual({
+      order: ["deepinfra/fp4"],
+      only: ["deepinfra/fp4"],
+      allow_fallbacks: true,
+    });
+    expect(pinProvider("not json", ["x"])).toBe("not json");
+    expect(pinProvider("[1]", ["x"])).toBe("[1]");
+  });
+
+  test("a 429 moves on down the provider list, then waits from the top", () => {
+    const list = ["deepinfra/fp4", "streamlake/fp8", "novita/fp8"];
+    expect(afterRateLimit(list)).toEqual(["streamlake/fp8", "novita/fp8"]);
+    expect(afterRateLimit(["streamlake/fp8", "novita/fp8"])).toEqual(["novita/fp8"]);
+    expect(afterRateLimit(["novita/fp8"])).toBeNull();
   });
 
   test("counts calls, repairs, escalations, failures and tokens", () => {

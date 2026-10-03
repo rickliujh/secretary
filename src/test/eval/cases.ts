@@ -439,4 +439,23 @@ export const EVAL_CASES: EvalCase[] = [
     },
     single: true,
   },
+  {
+    // "Back on" names the first day back, so the last day away is the day before (D47).
+    name: "away: a back-on date makes the day before the away date",
+    source: "email",
+    sender: "ana",
+    wait: { issueKey: "PAY-2", label: "Sign-off on the ledger field mapping", owner: "ana" },
+    text: "Automatic reply: I am on annual leave and back on Wednesday 7 October. For anything urgent on invoicing, contact the Payments team.",
+    expect: {
+      required: [
+        {
+          kind: "update_person",
+          target: contactTarget("ana"),
+          fields: { awayUntil: "2026-10-06" },
+        },
+      ],
+      forbiddenKinds: ["create_issue"],
+    },
+    single: true,
+  },
 ];

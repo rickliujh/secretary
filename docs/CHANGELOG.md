@@ -1147,3 +1147,16 @@ Review fixes
   cases timed out and the run stopped after 4 minutes instead of grinding on. When
   it does answer, DeepInfra returned the classify call in 15 s (700 output tokens,
   55 of them reasoning) with valid JSON. No intake result yet.
+- Eval only: `SECRETARY_EVAL_PROVIDER` takes an ordered, comma-separated list
+  (`deepinfra/fp4,streamlake/fp8,novita/fp8`), sent as `provider.order` and
+  `provider.only` with fallbacks allowed, so nothing outside the list serves a
+  request; one slug still pins that provider. OpenRouter sends a schema-bound
+  request only to listed providers with structured outputs, so it did not move on
+  from a busy DeepInfra by itself; after a 429 the eval now asks the rest of the
+  list at once and backs off only when the last one is busy. The summary counts
+  responses and 429s per provider.
+- D47, classify prompt version 10: "until D" keeps the person away through D;
+  "back on D" makes D the first day back, so `awayUntil` is the day before. The
+  first full run had read "until Friday 2 October" as 1 October. A new eval case
+  covers the back-on form. Full run on GLM 5.3 Flash: 27 of 27 passed in 4
+  minutes, served by StreamLake 34 and DeepInfra 13 after 34 DeepInfra 429s.

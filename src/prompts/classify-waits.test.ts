@@ -67,8 +67,8 @@ const errorsOf = (s: ItemSnapshot, ...p: Record<string, unknown>[]) =>
   validateItemOutput(answer(...p), s);
 
 describe("update_dependency in the schema and prompt", () => {
-  test("prompt version 9", () => {
-    expect(CLASSIFY_PROMPT_VERSION).toBe(9);
+  test("prompt version 9 or later", () => {
+    expect(CLASSIFY_PROMPT_VERSION).toBeGreaterThanOrEqual(9);
   });
 
   test("without open waits the kind, its fields, its rule and the list are absent", () => {
@@ -239,7 +239,15 @@ describe("awayUntil on update_person (D47)", () => {
       ),
     });
     expect(system).toContain("When the input is an out-of-office or leave notice");
-    expect(system).toContain("awayUntil is the working day before it");
+    // Prompt version 10: "until" a day is still away; "back on" a day is not (D47).
+    expect(CLASSIFY_PROMPT_VERSION).toBe(10);
+    expect(system).toContain(
+      'so awayUntil is that day ("out of office until 14 Oct" gives 14 Oct)',
+    );
+    expect(system).toContain('so awayUntil is the day before it ("back on 14 Oct" gives 13 Oct)');
+    expect(fields(snapshot).awayUntil?.description).toContain(
+      'the day itself for "until" a day, the day before for "back on" a day',
+    );
     expect(prompt).toContain("- p-tom: Tom Kay | Network | jira tom.k | away until 2026-10-01");
   });
 
