@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Transition } from "@/services/jira/schemas";
 import {
+  alreadyCommented,
   doneTransitions,
   dropComment,
   dropTransition,
@@ -36,6 +37,43 @@ describe("which transition finishes or drops a ticket", () => {
     expect(dropTransition(workflow)?.to.name).toBe("Won't Do");
     expect(dropTransition(workflow.slice(0, 3))?.to.name).toBe("Done");
     expect(dropTransition([t("11", "In Progress", "indeterminate")])).toBeNull();
+  });
+
+  test("a cancel-like transition that does not close the ticket is never the drop", () => {
+    const reopen = [t("5", "In Progress", "indeterminate", "Reject"), t("21", "Done", "done")];
+    expect(dropTransition(reopen)?.to.name).toBe("Done");
+    expect(dropTransition([t("6", "Rejected", "indeterminate")])).toBeNull();
+    // Without a category Jira does not say, so the cancel-like name is trusted.
+    expect(dropTransition([t("7", "Cancelled"), t("21", "Done", "done")])?.to.name).toBe(
+      "Cancelled",
+    );
+    expect(dropTransition([t("8", "Closed", "done", "Reject"), t("21", "Done", "done")])?.id).toBe(
+      "8",
+    );
+  });
+
+  test("a retried drop skips the comment only when the user's newest one is the same", () => {
+    const c = (who: string, body: string, created: string) => ({
+      author: { id: who },
+      body,
+      created,
+    });
+    const body = "Closed without being done: not needed";
+    const mine = [
+      c("me", "earlier", "2026-10-01T09:00:00.000+0000"),
+      c("me", body, "2026-10-07T09:00:00.000+0000"),
+    ];
+    expect(alreadyCommented(mine, "me", body)).toBe(true);
+    expect(
+      alreadyCommented([...mine, c("ana", "ok", "2026-10-07T10:00:00.000+0000")], "me", body),
+    ).toBe(true);
+    expect(
+      alreadyCommented([...mine, c("me", "later", "2026-10-07T10:00:00.000+0000")], "me", body),
+    ).toBe(false);
+    expect(alreadyCommented([c("ana", body, "2026-10-07T09:00:00.000+0000")], "me", body)).toBe(
+      false,
+    );
+    expect(alreadyCommented(mine, null, body)).toBe(false);
   });
 
   test("the comment says why, and that the work was not done when closed as done", () => {

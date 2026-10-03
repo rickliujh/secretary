@@ -25,13 +25,14 @@ import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { resolveWait, snoozeTicket, snoozeWait } from "@/services/dashboard/actions";
 import type { DashIssue } from "@/services/dashboard/sections";
-import type {
-  BlockedRow,
-  SprintRow,
-  ThreadRow,
-  TicketRow,
-  Today,
-  WaitRow,
+import {
+  type BlockedRow,
+  type SprintRow,
+  type ThreadRow,
+  type TicketRow,
+  type Today,
+  type WaitRow,
+  waitSnoozeAfter,
 } from "@/services/dashboard/today";
 import {
   DoneButton,
@@ -314,6 +315,7 @@ function WaitItem({ row, sprintEnd }: { row: WaitRow; sprintEnd: string | null }
   const resolve = useRowAction(() => resolveWait(d.id, d.label));
   const snooze = useRowAction((day: string) => snoozeWait(d.id, d.label, day));
   const busy = resolve.isPending || snooze.isPending;
+  const after = waitSnoozeAfter(row.timing);
   return (
     <>
       <Row
@@ -350,6 +352,7 @@ function WaitItem({ row, sprintEnd }: { row: WaitRow; sprintEnd: string | null }
               </DropdownMenuItem>
               <SnoozeItems
                 label="Chase later"
+                after={after}
                 sprintEnd={sprintEnd}
                 onPick={(day) => snooze.mutate(day)}
                 onPickDate={() => setPicking(true)}
@@ -360,8 +363,12 @@ function WaitItem({ row, sprintEnd }: { row: WaitRow; sprintEnd: string | null }
         why={
           <>
             {WAIT_TONE[row.state] ? (
-              <Badge variant="secondary" className={cn("border-transparent", WAIT_TONE[row.state])}>
-                {row.reason}
+              <Badge
+                variant="secondary"
+                title={row.reason}
+                className={cn("max-w-full border-transparent", WAIT_TONE[row.state])}
+              >
+                <span className="truncate">{row.reason}</span>
               </Badge>
             ) : (
               <Why>{row.reason}</Why>
@@ -387,6 +394,7 @@ function WaitItem({ row, sprintEnd }: { row: WaitRow; sprintEnd: string | null }
         open={picking}
         onOpenChange={setPicking}
         title={`Chase ${d.label} later`}
+        after={after}
         onPick={(day) => snooze.mutate(day)}
       />
     </>
@@ -400,7 +408,7 @@ function BlockedItem({ row, sprintEnd }: { row: BlockedRow; sprintEnd: string | 
       actions={<TicketActions issue={row.issue} sprintEnd={sprintEnd} done={false} reply={false} />}
       why={
         <>
-          {row.asleep && <Clock className="size-3" aria-label="snoozed" />}
+          {row.asleep && <Clock className="size-3" role="img" aria-label="snoozed" />}
           <span>blocked by</span>
           {row.blockedBy.slice(0, 3).map((k) => (
             <TicketLink key={k} ticketKey={k} className="text-xs">
@@ -462,7 +470,7 @@ function SprintItem({ row, sprintEnd }: { row: SprintRow; sprintEnd: string | nu
       }
       why={
         <>
-          {i.pinned && <Pin className="size-3" aria-label="pinned" />}
+          {i.pinned && <Pin className="size-3" role="img" aria-label="pinned" />}
           {row.daysLeft !== null && (
             <Badge
               variant="secondary"

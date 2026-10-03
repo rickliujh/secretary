@@ -39,11 +39,16 @@ export function useMetaMutation<I>(
  */
 export function useRowAction<I>(
   program: (input: I) => Effect.Effect<ActionResult, unknown, AppServices>,
-  opts: { onSuccess?: (r: ActionResult, input: I) => void } = {},
+  opts: {
+    onSuccess?: (r: ActionResult, input: I) => void;
+    /** False when the caller toasts the error itself (the sweep, with a Retry). */
+    toastError?: boolean;
+  } = {},
 ) {
   return useAppMutation(program, {
     invalidate: TODAY_KEYS,
     invalidateOnError: true,
+    toastError: opts.toastError ?? true,
     onSuccess: (r, input) => {
       if (r.warning) toast.warning(r.message, { description: r.warning });
       else toast.success(r.message);

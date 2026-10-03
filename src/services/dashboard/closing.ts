@@ -2,18 +2,9 @@
  * Pure rules for Today's row actions (D49): which Jira transition finishes a
  * ticket, which one drops it (D43), and the snooze presets.
  */
-import { addBusinessDays, daysBetween } from "@/lib/dates";
+import { addBusinessDays, daysBetween, isRealDate } from "@/lib/dates";
+import { isCancelStatus } from "@/services/jira/cancel";
 import type { Transition } from "@/services/jira/schemas";
-
-/**
- * Statuses that end a ticket without doing it (D43). The same words as the
- * classify validation's check (`prompts/classify.ts`), which should import
- * this one.
- */
-export const CANCEL_STATUS =
-  /cancel|won'?t\s*(do|fix)|wontfix|abandon|reject|declin|obsolete|duplicate|invalid|not\s*needed|descoped/i;
-
-export const isCancelStatus = (status: string) => CANCEL_STATUS.test(status);
 
 /** A status name that means finished, for transitions Jira returns without a category. */
 const DONE_NAME = /^(done|closed|resolved|complete(d)?|finished)$/i;
@@ -33,12 +24,18 @@ export function doneTransitions(transitions: readonly Transition[]): Transition[
 
 /**
  * The transition that drops a ticket (D43): into a cancel-like status when the
- * workflow has one, else the first done one. Null when neither is offered.
+ * workflow has one that closes the ticket, else the first done one. Null when
+ * neither is offered. A cancel-like transition into a status that is not
+ * done-category ("Reject" back to In Progress) does not close it, so it is
+ * never taken; one Jira returns without a category is.
  */
 export function dropTransition(transitions: readonly Transition[]): Transition | null {
+  const closes = transitions.filter(
+    (t) => !t.to.statusCategory || t.to.statusCategory.key === "done",
+  );
   return (
-    transitions.find((t) => isCancelStatus(t.to.name)) ??
-    transitions.find((t) => isCancelStatus(t.name)) ??
+    closes.find((t) => isCancelStatus(t.to.name)) ??
+    closes.find((t) => isCancelStatus(t.name)) ??
     doneTransitions(transitions)[0] ??
     null
   );
@@ -48,6 +45,23 @@ export function dropTransition(transitions: readonly Transition[]): Transition |
 export function dropComment(reason: string, cancelled: boolean): string {
   const why = reason.trim();
   return cancelled ? `Dropped: ${why}` : `Closed without being done: ${why}`;
+}
+
+/**
+ * Whether the user's newest comment on a ticket is already `body` (wiki, as
+ * sent): a drop whose move failed after its comment posted is retried without
+ * commenting again (D43, D49).
+ */
+export function alreadyCommented(
+  comments: readonly { author?: { id: string } | undefined; body: string; created: string }[],
+  me: string | null,
+  body: string,
+): boolean {
+  if (!me) return false;
+  const mine = comments
+    .filter((c) => c.author?.id === me)
+    .sort((a, b) => Date.parse(b.created) - Date.parse(a.created))[0];
+  return !!mine && mine.body.replace(/\r\n/g, "\n").trim() === body.trim();
 }
 
 export const SNOOZE_PRESETS = ["tomorrow", "monday", "sprint"] as const;
@@ -78,9 +92,12 @@ export function snoozeDay(
   }
 }
 
-/** A day the user picked: valid only after today. */
-export const validSnoozeDay = (day: string, today: string) =>
-  /^\d{4}-\d{2}-\d{2}$/.test(day) && !Number.isNaN(Date.parse(day)) && daysBetween(today, day) > 0;
+/**
+ * A snooze day: valid only after today and, when given, after `after` (a
+ * wait's back day, `waitSnoozeAfter`), since an earlier one changes nothing.
+ */
+export const validSnoozeDay = (day: string, today: string, after: string | null = null) =>
+  isRealDate(day) && daysBetween(today, day) > 0 && (!after || day > after);
 
 /** `issue_meta.snoozed_until` for a day: local midnight as an ISO time. */
 export const snoozeUntil = (day: string) => new Date(`${day}T00:00:00`).toISOString();

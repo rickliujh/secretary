@@ -367,10 +367,3 @@ export function rankWork(
     focus,
   };
 }
-
-/**
- * @deprecated Today (D49) replaced the dashboard; use `buildToday` for the
- * page and `rankWork` for the ranking. Kept under the old name only for the
- * sync and blocker tests, which read Top focus and At risk from it.
- */
-export const buildDashboard = rankWork;

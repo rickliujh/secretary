@@ -8,6 +8,7 @@
 import { z } from "zod";
 import { awayDateProblem } from "@/services/directory/away";
 import { CHANNELS, DETAIL, FORMALITY, RESPONSIVENESS } from "@/services/directory/schema";
+import { isCancelStatus } from "@/services/jira/cancel";
 import { NONE } from "@/services/llm/portable";
 import {
   DEPENDENCY_KINDS,
@@ -613,14 +614,6 @@ const validDate = (v: unknown) =>
   v === undefined ||
   (typeof v === "string" && ISO_DATE_RE.test(v) && !Number.isNaN(Date.parse(v)));
 
-/**
- * Business-rule checks the schema cannot express (design.md 7.0 rule 4).
- * Returns error strings for the repair prompt; empty means valid.
- */
-/** Statuses that end a ticket without doing it; moving there needs a comment saying why. */
-const CANCEL_STATUS =
-  /cancel|won'?t\s*(do|fix)|wontfix|abandon|reject|declin|obsolete|duplicate|invalid|not\s*needed|descoped/i;
-
 /** The checks for a small ask (D44): its type and, for a sub-task, its parent. */
 function validateSmallAsk(
   p: ItemOutput["proposals"][number],
@@ -733,6 +726,10 @@ function coveringWait(p: ItemOutput["proposals"][number], s: ItemSnapshot) {
   );
 }
 
+/**
+ * Business-rule checks the schema cannot express (design.md 7.0 rule 4).
+ * Returns error strings for the repair prompt; empty means valid.
+ */
 export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   const errors: string[] = [];
   const candidates = new Map(s.candidates.map((c) => [c.key, c]));
@@ -813,7 +810,7 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       if (c && c.status === p.toStatus) errors.push(`${at}: ${c.key} is already ${c.status}.`);
       // A cancelled ticket without a word about why leaves its watchers guessing.
       if (
-        CANCEL_STATUS.test(String(p.toStatus)) &&
+        isCancelStatus(String(p.toStatus)) &&
         !out.proposals.some((o) => o.kind === "add_comment" && o.target === p.target && str(o.body))
       )
         errors.push(

@@ -24,7 +24,9 @@ afterAll(() => {
 
 const ME = { name: "me", displayName: "Me Myself", emailAddress: "me@example.com" };
 
-function setup(count: number, asks: number) {
+type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+function setup(count: number, asks: number, wrap: (f: FetchFn) => FetchFn = (f) => f) {
   const issues = generate(count);
   const active = boardSprints(1).find((s) => s.state === "active");
   const open = [...issues.values()].filter(
@@ -45,15 +47,18 @@ function setup(count: number, asks: number) {
     ExecutorLive,
     Layer.provideMerge(
       SyncLive,
-      jiraTestLayer((input, init) => fetch(input, init), {
-        ...jiraSettings({ baseUrl: `http://localhost:${server.port}`, trackedEpics: [] }),
-        smallAsks: {
-          projectKey: "PAY",
-          label: "small-ask",
-          joinActiveSprint: true,
-          hintDismissed: false,
+      jiraTestLayer(
+        wrap((input, init) => fetch(input, init)),
+        {
+          ...jiraSettings({ baseUrl: `http://localhost:${server.port}`, trackedEpics: [] }),
+          smallAsks: {
+            projectKey: "PAY",
+            label: "small-ask",
+            joinActiveSprint: true,
+            hintDismissed: false,
+          },
         },
-      }),
+      ),
     ),
   );
   return { issues, asks: open.slice(0, asks).map((i) => i.key), layer };
@@ -100,6 +105,47 @@ describe("Today against the mock Jira", () => {
     // The Executor refreshed both tickets, so the rows are gone at once.
     expect(yourMoveAsks(r.after)).toEqual([]);
     expect(r.after.smallAsks.open).toEqual([]);
+  }, 30_000);
+
+  test("Drop comments first; a failed move says the ticket is still open, and the retry does not comment twice", async () => {
+    let failMoves = 1;
+    const { issues, asks, layer } = setup(80, 1, (f) => async (input, init) => {
+      const req = input instanceof Request ? input : null;
+      const url = req ? req.url : String(input);
+      const method = init?.method ?? req?.method;
+      if (method === "POST" && url.endsWith("/transitions") && failMoves-- > 0)
+        return Response.json(
+          { errorMessages: ["Resolution is required."], errors: {} },
+          { status: 400 },
+        );
+      return f(input, init);
+    });
+    const [key] = asks as [string];
+    const before = issues.get(key)?.comments.length ?? 0;
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const first = yield* Effect.either(dropTicket(key, "no longer needed"));
+          const status = issues.get(key)?.status;
+          const retry = yield* dropTicket(key, "no longer needed");
+          return { first, status, retry };
+        }),
+        layer,
+      ),
+    );
+    expect(r.first._tag).toBe("Left");
+    if (r.first._tag === "Left") {
+      expect(r.first.left.message).toContain(`${key} is still open; Retry closes it`);
+      expect(r.first.left.message).toContain("Resolution is required.");
+    }
+    // The comment went first and stayed; the ticket did not move.
+    expect(r.status).toBe("To Do");
+    expect(r.retry.message).toBe(`${key} moved to Done with the reason`);
+    expect(issues.get(key)?.status).toBe("Done");
+    const comments = issues.get(key)?.comments ?? [];
+    expect(comments.length).toBe(before + 1);
+    expect(comments.at(-1)?.body).toContain("Closed without being done: no longer needed");
   }, 30_000);
 
   test("Today over 2,000 synced issues loads and builds within the 1 second budget (FR-12 AC)", async () => {

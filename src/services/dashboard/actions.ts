@@ -4,15 +4,17 @@
  * the sweep's weekly mark) is written directly.
  */
 import { Effect } from "effect";
+import { markdownToWiki } from "@/lib/wiki";
 import { logFollowup, setDates, setStatus } from "@/services/dependencies/queries";
 import { Executor, ExecutorError } from "@/services/executor";
 import { JiraClient } from "@/services/jira";
-import { getState, setState } from "@/services/sync/state";
+import { isCancelStatus } from "@/services/jira/cancel";
+import { getState, SYNC_KEYS, setState } from "@/services/sync/state";
 import {
+  alreadyCommented,
   doneTransitions,
   dropComment,
   dropTransition,
-  isCancelStatus,
   snoozeUntil,
 } from "./closing";
 import { snooze } from "./data";
@@ -49,11 +51,22 @@ export const finishTicket = (issueKey: string, transition: { id: string; to: { n
     } satisfies ActionResult;
   });
 
+/** The user's newest comments on a ticket: the last page Jira has. */
+const lastComments = (issueKey: string) =>
+  Effect.gen(function* () {
+    const jira = yield* JiraClient;
+    const first = yield* jira.getComments(issueKey, 0);
+    if (first.total <= first.startAt + first.comments.length) return first.comments;
+    const last = yield* jira.getComments(issueKey, Math.max(0, first.total - first.maxResults));
+    return last.comments;
+  });
+
 /**
  * Drops a ticket with a reason, as D43 requires: the cancel-like transition
- * when the workflow has one, else a done one, then a comment saying why. A
- * failed comment after the move is a warning, not a failure, so a retry does
- * not move it twice.
+ * when the workflow has one that closes it, else a done one. The comment saying
+ * why goes first, so a workflow that refuses comments on closed tickets still
+ * gets it; a retry after a failed move skips the comment when the user's newest
+ * one is already it, so it is never posted twice.
  */
 export const dropTicket = (issueKey: string, reason: string) =>
   Effect.gen(function* () {
@@ -68,26 +81,27 @@ export const dropTicket = (issueKey: string, reason: string) =>
         message: `${issueKey} cannot be closed from its current status (available: ${transitions.map((x) => x.to.name).join(", ") || "none"}).`,
       });
     const executor = yield* Executor;
-    const moved = yield* executor.run({
-      kind: "transition",
-      issueKey,
-      transitionId: t.id,
-      transitionName: t.to.name,
-    });
     const cancelled = isCancelStatus(t.to.name) || isCancelStatus(t.name);
-    const commented = yield* executor
-      .run({ kind: "add_comment", issueKey, bodyMarkdown: dropComment(why, cancelled) })
+    const markdown = dropComment(why, cancelled);
+    const me = (yield* getState(SYNC_KEYS.username)) ?? null;
+    // A failed read only means the duplicate check is skipped.
+    const recent = yield* Effect.orElseSucceed(lastComments(issueKey), () => []);
+    if (!alreadyCommented(recent, me, markdownToWiki(markdown)))
+      yield* executor.run({ kind: "add_comment", issueKey, bodyMarkdown: markdown });
+    const moved = yield* executor
+      .run({ kind: "transition", issueKey, transitionId: t.id, transitionName: t.to.name })
       .pipe(
-        Effect.map(() => null),
-        Effect.catchAll((e) =>
-          Effect.succeed(
-            `Moved to ${t.to.name}, but the comment saying why failed (${e.message}); add it in the ticket.`,
-          ),
+        Effect.mapError(
+          (e) =>
+            new ExecutorError({
+              kind: "unsupported",
+              message: `The reason is on ${issueKey}, but moving it to ${t.to.name} failed: ${e.message} ${issueKey} is still open; Retry closes it without commenting again.`,
+            }),
         ),
       );
     return {
       message: `${issueKey} moved to ${t.to.name} with the reason`,
-      warning: commented ?? refreshWarning(moved.refreshed),
+      warning: refreshWarning(moved.refreshed),
     } satisfies ActionResult;
   });
 

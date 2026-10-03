@@ -12,7 +12,7 @@ import { Effect, Layer } from "effect";
 import { inboxItems, intakeItems, issueMeta, jiraIssues, proposals } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
 import { loadDashboardInputs } from "@/services/dashboard/data";
-import { buildDashboard } from "@/services/dashboard/sections";
+import { rankWork } from "@/services/dashboard/sections";
 import { query } from "@/services/db";
 import { ExecutorLive } from "@/services/executor/live";
 import { Proposals } from "@/services/proposals";
@@ -145,7 +145,7 @@ describe("blocked-by links and wake-up against the mock Jira (FR-3.8 AC)", () =>
           const woken = yield* meta(target.key);
           const due = yield* dueUnblockNotifications();
           const map = parseBlockers(yield* getState(SYNC_KEYS.blockers));
-          const dashboard = buildDashboard(
+          const dashboard = rankWork(
             yield* loadDashboardInputs(),
             DEFAULT_WEIGHTS,
             "2026-10-03",

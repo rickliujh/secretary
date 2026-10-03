@@ -19,7 +19,7 @@ import { localDate } from "@/lib/dates";
 import { ConfluenceClient } from "@/services/confluence";
 import { textToCql, webUrl } from "@/services/confluence/cql";
 import { loadToday } from "@/services/dashboard/data";
-import type { BlockedRow, WaitRow } from "@/services/dashboard/today";
+import { dueWaits } from "@/services/dashboard/today";
 import { type Db, query } from "@/services/db";
 import { timing } from "@/services/dependencies/logic";
 import { listDependencies } from "@/services/dependencies/queries";
@@ -223,12 +223,11 @@ export function chatTools(
             });
             const today = localDate();
             const key = issueKey?.trim().toUpperCase() || undefined;
-            // Tickets blocked by other tickets have no owner, so an owner filter leaves them out.
+            // Tickets blocked by other tickets have no owner, so an owner filter leaves
+            // them out. All of them, also those Today lists in Your move for a new comment.
             const blocked = owner
               ? []
-              : (yield* loadToday()).theirMove.filter(
-                  (r): r is BlockedRow => r.kind === "blocked" && (!key || r.issue.key === key),
-                );
+              : (yield* loadToday()).blocked.filter((r) => !key || r.issue.key === key);
             return {
               blockedTickets: blockedFacts(blocked),
               waiting: rows
@@ -556,14 +555,13 @@ export function chatTools(
                 summary: w.issue.summary,
                 why: w.reasons,
               })),
-              followupsDue: t.theirMove
-                .filter((r): r is WaitRow => r.kind === "wait" && r.timing.followupDue)
-                .map(({ dependency: d, timing: w }) => ({
-                  issueKey: d.issueKey,
-                  label: d.label,
-                  owner: d.ownerName,
-                  ...(w.reason ? { why: w.reason } : {}),
-                })),
+              // Sleeping waits (owner away, ticket snoozed) are left out, as in the brief.
+              followupsDue: dueWaits(t).map(({ dependency: d, timing: w }) => ({
+                issueKey: d.issueKey,
+                label: d.label,
+                owner: d.ownerName,
+                ...(w.reason ? { why: w.reason } : {}),
+              })),
             };
           }),
         ),

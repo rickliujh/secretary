@@ -1091,3 +1091,31 @@ Known limits
   a drop into a cancelled status are covered by unit tests, not end to end.
 - The cancel-like words are repeated in `dashboard/closing.ts`; the classify
   check in `prompts/classify.ts` should import them from there.
+
+Review fixes
+- The sweep runs one action at a time through one guard (`dashboard/sweep.ts`,
+  pure and tested): a second Enter, a held key or a double-click no longer
+  writes twice or acts on the next item. Outcomes are kept by item id and only
+  the item an action ran on advances; for 400 ms after the item changes actions
+  are ignored. Keys act only with focus on the item, never on auto-repeat, so
+  Space on a focused button presses it. Errors offer a Retry for that item.
+- Drop takes a cancel-like transition only when it leads to a done-category
+  status, so "Reject" back to In Progress is never used. It comments first and
+  moves second; a retry does not post the comment again, and a failed move says
+  the ticket is still open and Retry closes it (checked against the mock Jira).
+- "Chase later" on a wait whose owner is away or just back offers only days
+  after the back day; a later chase ends "is back" on Today and in the sweep.
+- An overdue wait chased later keeps its badge but sits with the rest of Their
+  move, its reason naming the next chase.
+- `waiting_on` lists every blocked ticket of yours (new `Today.blocked`), also
+  one Your move holds for a new comment. `pending_decisions` leaves sleeping
+  waits out of follow-ups due, as the brief does. Chat ages count local days.
+- Opening a ticket refreshes Today, so its woken or comment row goes at once.
+- One cancel-like word list (`services/jira/cancel.ts`) for classify and Drop;
+  the `buildDashboard` alias is removed.
+- Read-through of the page: row menus are no longer modal (their items open
+  dialogs, which could leave the page unclickable); a Today that fails to load
+  keeps the header and the capture box and says why; long wait reasons truncate
+  in their badge; the snoozed and pinned icons have names.
+- Still not seen in the running app; checked by typecheck, tests, lint and the
+  build.

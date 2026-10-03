@@ -170,20 +170,35 @@ export function DoneButton({ issueKey }: { issueKey: string }) {
   );
 }
 
-/** Snooze presets for a row's menu; "Pick a date" opens `SnoozeDateDialog`. */
+/**
+ * Snooze presets for a row's menu; "Pick a date" opens `SnoozeDateDialog`. A
+ * day not after `after` (a wait's back day) is offered disabled: it would
+ * change nothing.
+ */
 export function SnoozeItems({
   sprintEnd,
   onPick,
   onPickDate,
   label = "Snooze",
+  after = null,
 }: {
   sprintEnd: string | null;
   onPick: (day: string) => void;
   onPickDate: () => void;
   label?: string;
+  after?: string | null;
 }) {
   const today = localDate();
-  const preset = (p: SnoozePreset) => snoozeDay(p, today, sprintEnd);
+  const preset = (p: SnoozePreset) => {
+    const day = snoozeDay(p, today, sprintEnd);
+    return day && validSnoozeDay(day, today, after) ? day : null;
+  };
+  const why = (p: SnoozePreset) =>
+    p === "sprint" && !snoozeDay(p, today, sprintEnd)
+      ? "no active sprint"
+      : after
+        ? `back ${weekdayOf(after)}`
+        : "";
   const items: [SnoozePreset, string][] = [
     ["tomorrow", "Tomorrow"],
     ["monday", "Monday"],
@@ -199,7 +214,7 @@ export function SnoozeItems({
             <DropdownMenuItem key={p} disabled={!day} onSelect={() => day && onPick(day)}>
               {name}
               <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                {day ? weekdayOf(day) : "no active sprint"}
+                {day ? weekdayOf(day) : why(p)}
               </span>
             </DropdownMenuItem>
           );
@@ -211,21 +226,25 @@ export function SnoozeItems({
   );
 }
 
-/** A day after today to snooze to. */
+/** A day after today (and after `after`, a wait's back day) to snooze to. */
 export function SnoozeDateDialog({
   open,
   onOpenChange,
   title,
   onPick,
+  after = null,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   onPick: (day: string) => void;
+  after?: string | null;
 }) {
   const today = localDate();
-  const [day, setDay] = useState(addBusinessDays(today, 1));
-  const valid = validSnoozeDay(day, today);
+  const floor = after && after > today ? after : today;
+  const [picked, setDay] = useState<string | null>(null);
+  const day = picked ?? (floor === today ? addBusinessDays(today, 1) : nextDay(floor));
+  const valid = validSnoozeDay(day, today, after);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
@@ -246,11 +265,17 @@ export function SnoozeDateDialog({
             <Input
               id="snooze-day"
               type="date"
-              min={nextDay(today)}
+              min={nextDay(floor)}
               value={day}
               onChange={(e) => setDay(e.target.value)}
             />
-            {!valid && <FieldDescription>Pick a day after today.</FieldDescription>}
+            {!valid && (
+              <FieldDescription>
+                {floor === today
+                  ? "Pick a day after today."
+                  : `Pick a day after ${weekdayOf(floor)}, when they are back: until then, being back brings it up anyway.`}
+              </FieldDescription>
+            )}
           </Field>
           <DialogFooter className="mt-6">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
@@ -293,7 +318,11 @@ export function ReplyButton({ issue }: { issue: Pick<DashIssue, "key" | "request
   );
 }
 
-/** The "more" menu of a row. */
+/**
+ * The "more" menu of a row. Not modal: its items open dialogs (pick a date,
+ * log a reply), and a modal menu closing as a dialog opens can leave the page
+ * with `pointer-events: none` (a Radix pitfall).
+ */
 export function MoreMenu({
   label,
   busy,
@@ -304,7 +333,7 @@ export function MoreMenu({
   children: ReactNode;
 }) {
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"

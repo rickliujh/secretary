@@ -2,7 +2,7 @@
  * Facts for the chat's suggested prompts (D42), computed in code: what waits
  * on a decision from the user, and what the coming week holds.
  */
-import { daysBetween } from "@/lib/dates";
+import { daysBetween, localDateOf } from "@/lib/dates";
 
 export type PendingProposal = {
   inboxItemId: string;
@@ -37,7 +37,7 @@ export function pendingDecisions(
     const entry = byThread.get(p.inboxItemId) ?? {
       thread: p.threadSummary ?? "Inbox item",
       inboxItemId: p.inboxItemId,
-      waitingDays: Math.max(0, daysBetween(p.createdAt.slice(0, 10), today)),
+      waitingDays: Math.max(0, daysBetween(localDateOf(p.createdAt), today)),
       approve: [],
       questions: [],
     };
@@ -50,7 +50,7 @@ export function pendingDecisions(
     unsentDrafts: drafts.map((d) => ({
       to: d.to,
       about: d.issueKeys,
-      days: Math.max(0, daysBetween(d.updatedAt.slice(0, 10), today)),
+      days: Math.max(0, daysBetween(localDateOf(d.updatedAt), today)),
     })),
   };
 }
@@ -139,7 +139,8 @@ export function smallAskFacts(
     key: issue.key,
     summary: issue.summary,
     askedBy: issue.requester?.name ?? null,
-    ageDays: Math.max(0, daysBetween(issue.created.slice(0, 10), today)),
+    // The local date, as Today's "asked 3 days ago" counts it.
+    ageDays: Math.max(0, daysBetween(localDateOf(issue.created), today)),
     due: issue.dueDate,
     state,
   }));

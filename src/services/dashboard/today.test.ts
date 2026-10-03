@@ -10,13 +10,18 @@ import {
   TODAY,
   wait,
 } from "@/test/today-fixture";
+import { validSnoozeDay } from "./closing";
+import { sweepItems } from "./sweep";
 import {
   agoLabel,
   buildToday,
   dueLabel,
+  dueWaits,
   groupThreads,
   type Today,
   type TodayInputs,
+  type WaitRow,
+  waitSnoozeAfter,
 } from "./today";
 
 const build = (p: Partial<TodayInputs> = {}, today = TODAY, now = NOW) =>
@@ -197,6 +202,121 @@ describe("waits", () => {
       ["c", "overdue"],
     ]);
   });
+});
+
+describe("chase later (D47, D49)", () => {
+  const withWait = (
+    id: string,
+    patch: Partial<TodayInputs["dependencies"][number]>,
+    today = TODAY,
+  ) =>
+    build(
+      {
+        dependencies: mixedInputs().dependencies.map((d) => (d.id === id ? { ...d, ...patch } : d)),
+      },
+      today,
+      `${today}T09:00:00.000Z`,
+    );
+  const waitOf = (t: Today, id: string) =>
+    t.theirMove.find((r): r is WaitRow => r.kind === "wait" && r.dependency.id === id);
+  const swept = (t: Today, today = TODAY) =>
+    sweepItems(t, today, { stale: false }).map((i) => i.id);
+
+  test("an overdue wait chased later keeps its badge but is listed with the rest, and leaves the sweep", () => {
+    // Friday the 9th.
+    const t = withWait("d-over", { nextFollowupAt: "2026-10-09" });
+    const w = waitOf(t, "d-over");
+    expect([w?.state, w?.decided, w?.reason]).toEqual([
+      "overdue",
+      true,
+      "6 days overdue, next chase Friday",
+    ]);
+    expect(t.theirMove.map(keyOf).slice(0, 5)).toEqual([
+      "wait:d-follow",
+      "wait:d-back",
+      "wait:d-over",
+      "wait:d-ask",
+      "ASK-4",
+    ]);
+    expect(swept(t)).not.toContain("wait:d-over");
+    // On that day it is pressing again, first in the list and in the sweep.
+    const friday = withWait("d-over", { nextFollowupAt: "2026-10-09" }, "2026-10-09");
+    expect(waitOf(friday, "d-over")?.decided).toBe(false);
+    expect(keyOf(friday.theirMove[0] as Today["theirMove"][number])).toBe("wait:d-over");
+    expect(swept(friday, "2026-10-09")).toContain("wait:d-over");
+  });
+
+  test('chasing a back wait later ends "is back" on Today and in the sweep', () => {
+    // Bob is back on Tuesday the 6th; Thursday the 8th is a later chase.
+    expect(waitOf(build(), "d-back")?.state).toBe("back");
+    const later = withWait("d-back", { nextFollowupAt: "2026-10-08" });
+    expect([waitOf(later, "d-back")?.state, waitOf(later, "d-back")?.reason]).toEqual([
+      "open",
+      "next chase tomorrow",
+    ]);
+    expect(swept(later)).not.toContain("wait:d-back");
+    // A chase set on the back day or before it changes nothing: still back.
+    for (const day of ["2026-10-06", "2026-10-05"])
+      expect(waitOf(withWait("d-back", { nextFollowupAt: day }), "d-back")?.state).toBe("back");
+  });
+
+  test("a wait whose owner is away can only be chased later after the back day", () => {
+    const asleep = waitOf(build(), "d-asleep");
+    if (!asleep) throw new Error("fixture");
+    // Carl is away until Wednesday the 14th, back on the 15th.
+    const after = waitSnoozeAfter(asleep.timing);
+    expect(after).toBe("2026-10-15");
+    expect(validSnoozeDay("2026-10-08", TODAY, after)).toBe(false);
+    expect(validSnoozeDay("2026-10-15", TODAY, after)).toBe(false);
+    expect(validSnoozeDay("2026-10-16", TODAY, after)).toBe(true);
+    // A day before it would change nothing: the wait still sleeps with the same reason.
+    const early = waitOf(withWait("d-asleep", { nextFollowupAt: "2026-10-08" }), "d-asleep");
+    expect([early?.state, early?.reason]).toEqual([asleep.state, asleep.reason]);
+    // An ordinary wait has no floor beyond today.
+    const open = waitOf(build(), "d-ask");
+    expect(open && waitSnoozeAfter(open.timing)).toBeNull();
+  });
+});
+
+describe("what the chat reads", () => {
+  test("every blocked ticket of the user's, also one Your move lists for a new comment", () => {
+    const t = build({
+      issues: [
+        issue("CB-1", { links: blockedBy("OPS-1") }),
+        issue("B-2", { links: blockedBy("OPS-2") }),
+        issue("S-3", { links: blockedBy("OPS-3"), snoozedUntil: "2026-10-09T00:00:00.000Z" }),
+        issue("O-4", { links: blockedBy("OPS-4"), assignee: "ana" }),
+      ],
+      comments: [comment("CB-1", NOW)],
+      dependencies: [],
+      woken: [],
+      threads: [],
+    });
+    expect(t.yourMove.map(keyOf)).toEqual(["CB-1"]);
+    expect(t.theirMove.map(keyOf)).toEqual(["B-2", "S-3"]);
+    expect(t.blocked.map((b) => [b.issue.key, b.asleep])).toEqual([
+      ["B-2", false],
+      ["CB-1", false],
+      ["S-3", true],
+    ]);
+  });
+
+  test("follow-ups due leave out sleeping waits, a snoozed ticket's included", () => {
+    const t = build({
+      dependencies: [
+        ...mixedInputs().dependencies,
+        wait("d-snz-due", "SNZ-1", { nextFollowupAt: "2026-10-05" }),
+      ],
+    });
+    expect(waitOf(t, "d-snz-due")).toMatchObject({
+      state: "asleep",
+      timing: { followupDue: true },
+    });
+    expect(dueWaits(t).map((w) => w.dependency.id)).toEqual(["d-follow", "d-back"]);
+  });
+
+  const waitOf = (t: Today, id: string) =>
+    t.theirMove.find((r): r is WaitRow => r.kind === "wait" && r.dependency.id === id);
 });
 
 describe("without a small-asks home", () => {

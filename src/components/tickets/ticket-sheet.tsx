@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink, Paperclip, Pencil, PenLine, UserPlus } from "lucide-react";
@@ -246,9 +246,15 @@ export function TicketSheet({
     queryFn: ({ signal }) => run(ticketDetail(issueKey ?? ""), signal),
     enabled: !!issueKey,
   });
+  const client = useQueryClient();
+  // Looking at a ticket clears its woken and new-comment rows on Today (D45, D49).
   useEffect(() => {
-    if (issueKey) void run(markViewed(issueKey)).catch(() => undefined);
-  }, [issueKey]);
+    if (!issueKey) return;
+    run(markViewed(issueKey)).then(
+      () => client.invalidateQueries({ queryKey: queryKeys.today }),
+      () => undefined,
+    );
+  }, [issueKey, client]);
 
   const d = detail.data;
   return (

@@ -20,7 +20,7 @@ import { Llm } from "@/services/llm";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, setState } from "@/services/sync/state";
 import { loadToday } from "./data";
-import type { Today, WaitRow } from "./today";
+import { dueWaits, type Today, type WaitRow } from "./today";
 
 const CACHE_KEY = "brief.cache";
 const CHANGE_LIMIT = 15;
@@ -129,9 +129,11 @@ const collectFacts = (t: Today, since: string | null, today: string, outputLangu
           owner: d.ownerName,
           overdueDays: timing.overdueDays,
         })),
-      followupsDue: waits
-        .filter((w) => w.timing.followupDue)
-        .map(({ dependency: d }) => ({ issueKey: d.issueKey, label: d.label, owner: d.ownerName })),
+      followupsDue: dueWaits(t).map(({ dependency: d }) => ({
+        issueKey: d.issueKey,
+        label: d.label,
+        owner: d.ownerName,
+      })),
       waitingOnMe: f.waitingOnMe.map((w) => ({
         key: w.issue.key,
         summary: w.issue.summary,

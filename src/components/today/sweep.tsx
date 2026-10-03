@@ -4,11 +4,21 @@
  * key press (or a click on the same buttons); it ends with a summary.
  *
  * Keys: D done, N nudge, S snooze, X drop (asks why first), Space skip, Esc
- * leave. In the snooze and done choices, 1 to 9 pick; Esc goes back.
+ * leave. In the snooze and done choices, 1 to 9 pick; Esc goes back. The keys
+ * act only with focus on the item (not on a button or field), never on
+ * auto-repeat, and one action runs at a time (`services/dashboard/sweep.ts`).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListChecks, Loader2 } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { useAppMutation, useErrorToast } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
@@ -44,14 +54,26 @@ import {
 } from "@/services/dashboard/actions";
 import { SNOOZE_PRESETS, snoozeDay, validSnoozeDay } from "@/services/dashboard/closing";
 import {
+  beginAction,
+  changeMode,
+  releaseAction,
   SWEEP_WHY,
   type SweepItem,
+  type SweepMode,
   type SweepOutcome,
+  type SweepSession,
+  settleAction,
+  skipShown,
   stalePassDue,
+  startSweep,
+  submitsReason,
+  sweepFinished,
   sweepItems,
+  sweepKey,
+  sweepOutcomes,
   sweepSummary,
 } from "@/services/dashboard/sweep";
-import type { Today } from "@/services/dashboard/today";
+import { type Today, waitSnoozeAfter } from "@/services/dashboard/today";
 import type { Transition } from "@/services/jira/schemas";
 import { useReplyDraft } from "./row-actions";
 import { useRowAction } from "./use-today";
@@ -109,7 +131,22 @@ export function SweepButton({ today }: { today: Today }) {
   );
 }
 
-type Mode = "idle" | "done" | "snooze" | "drop";
+/** The sweep's session in a ref, so a guard sees the last action even before React renders again. */
+function useSweepSession(ids: readonly string[]) {
+  const ref = useRef<SweepSession | null>(null);
+  if (!ref.current) ref.current = startSweep(ids, Date.now());
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const get = () => ref.current as SweepSession;
+  const set = (next: SweepSession) => {
+    if (next === ref.current) return;
+    ref.current = next;
+    rerender();
+  };
+  return { s: get(), get, set };
+}
+
+/** What an action ends with: a decision (the sweep moves on), another mode, or nothing (the item stays). */
+type Step = { outcome: SweepOutcome } | { mode: SweepMode } | null;
 
 function SweepDialog({
   items,
@@ -124,31 +161,32 @@ function SweepDialog({
 }) {
   const client = useQueryClient();
   const onError = useErrorToast();
-  const [index, setIndex] = useState(0);
-  const [outcomes, setOutcomes] = useState<SweepOutcome[]>([]);
-  const [mode, setMode] = useState<Mode>("idle");
+  const ids = useMemo(() => items.map((i) => i.id), [items]);
+  const { s, get, set } = useSweepSession(ids);
   const [choices, setChoices] = useState<Transition[]>([]);
-  const [loading, setLoading] = useState(false);
   const [reason, setReason] = useState("");
   const [day, setDay] = useState("");
-  const body = useRef<HTMLDivElement>(null);
-  const item = items[index];
-  const finished = index >= items.length;
+  const body = useRef<HTMLElement>(null);
+  const item = items[s.index];
+  const finished = sweepFinished(s);
+  const busy = s.busy !== null;
+  const mode = s.mode;
+  const outcomes = sweepOutcomes(s);
   const today = localDate();
 
-  const advance = (outcome: SweepOutcome) => {
-    setOutcomes((o) => [...o, outcome]);
-    setIndex((i) => i + 1);
-    setMode("idle");
+  // A new item starts with an empty reason and day.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the item changes.
+  useEffect(() => {
     setReason("");
     setDay("");
-  };
+  }, [s.index]);
 
-  // Keys go to the dialog body; put focus back there after each step.
+  // Keys go to the dialog body; put focus back there after each step (the
+  // drop reason takes it instead).
   // biome-ignore lint/correctness/useExhaustiveDependencies: refocus when the step or mode changes.
   useEffect(() => {
-    if (mode === "idle") body.current?.focus();
-  }, [index, mode]);
+    if (mode !== "drop") body.current?.focus();
+  }, [s.index, mode]);
 
   // The weekly pass over untouched asks counts as run once a sweep that held it ends.
   const markStale = useAppMutation(() => markStalePass(), {
@@ -163,117 +201,175 @@ function SweepDialog({
     }
   }, [finished, stale, markStale]);
 
-  const ticketDone = useRowAction((i: { key: string; t: Transition }) => finishTicket(i.key, i.t), {
-    onSuccess: () => advance("done"),
-  });
+  // The sweep toasts errors itself, with a Retry for the same item.
+  const quiet = { toastError: false };
+  const ticketDone = useRowAction(
+    (i: { key: string; t: Transition }) => finishTicket(i.key, i.t),
+    quiet,
+  );
   const ticketSnooze = useRowAction(
     (i: { key: string; day: string }) => snoozeTicket(i.key, i.day),
-    { onSuccess: () => advance("snoozed") },
+    quiet,
   );
   const ticketDrop = useRowAction(
     (i: { key: string; reason: string }) => dropTicket(i.key, i.reason),
-    { onSuccess: () => advance("dropped") },
+    quiet,
   );
   const waitResolve = useRowAction(
     (i: { id: string; label: string }) => resolveWait(i.id, i.label),
-    { onSuccess: () => advance("done") },
+    quiet,
   );
   const waitSnooze = useRowAction(
     (i: { id: string; label: string; day: string }) => snoozeWait(i.id, i.label, i.day),
-    { onSuccess: () => advance("snoozed") },
+    quiet,
   );
   const waitDrop = useRowAction(
     (i: { id: string; label: string; reason: string }) => dropWait(i.id, i.label, i.reason),
-    { onSuccess: () => advance("dropped") },
+    quiet,
   );
   const chase = useChaseDraft();
   const reply = useReplyDraft();
-  const busy =
-    loading ||
-    chase.isPending ||
-    [ticketDone, ticketSnooze, ticketDrop, waitResolve, waitSnooze, waitDrop].some(
-      (m) => m.isPending,
-    );
 
-  const done = async () => {
-    if (isWait(item)) {
-      const d = item.row.dependency;
-      return waitResolve.mutate({ id: d.id, label: d.label });
-    }
-    if (!isTicket(item)) return;
-    const key = item.row.issue.key;
-    setLoading(true);
+  /**
+   * The one guard every action goes through: it starts only when `canAct`
+   * allows (nothing running, the item settled), and its result is recorded
+   * for the item it ran on, whatever is shown by then.
+   */
+  const act = async (it: SweepItem, work: () => Promise<Step>, toastFailure = true) => {
+    const begun = beginAction(get(), it.id, Date.now());
+    if (!begun) return;
+    set(begun);
     try {
+      const step = await work();
+      if (step && "outcome" in step) set(settleAction(get(), it.id, step.outcome, Date.now()));
+      else set(releaseAction(get(), it.id, step?.mode));
+    } catch (e) {
+      set(releaseAction(get(), it.id));
+      if (toastFailure) onError(e, () => void act(it, work, toastFailure));
+    }
+  };
+
+  const done = (it: SweepItem | undefined) => {
+    if (isWait(it)) {
+      const d = it.row.dependency;
+      return act(it, async () => {
+        await waitResolve.mutateAsync({ id: d.id, label: d.label });
+        return { outcome: "done" };
+      });
+    }
+    if (!isTicket(it)) return;
+    const key = it.row.issue.key;
+    return act(it, async () => {
       const options = await client.fetchQuery({
         queryKey: queryKeys.doneTransitions(key),
         queryFn: ({ signal }) => run(doneOptions(key), signal),
         staleTime: 0,
       });
       const only = options.length === 1 ? options[0] : undefined;
-      if (only) ticketDone.mutate({ key, t: only });
-      else if (options.length > 1) {
+      if (only) {
+        await ticketDone.mutateAsync({ key, t: only });
+        return { outcome: "done" };
+      }
+      if (options.length > 1) {
         setChoices(options);
-        setMode("done");
-      } else
-        toast.error(`${key} has no transition to a done status from here`, {
-          description: "Skip it and move it from the ticket view.",
-        });
-    } catch (e) {
-      onError(e);
-    } finally {
-      setLoading(false);
+        return { mode: "done" };
+      }
+      toast.error(`${key} has no transition to a done status from here`, {
+        description: "Skip it and move it from the ticket view.",
+      });
+      return null;
+    });
+  };
+
+  const pickDone = (it: SweepItem | undefined, t: Transition | undefined) => {
+    if (!isTicket(it) || !t) return;
+    return act(it, async () => {
+      await ticketDone.mutateAsync({ key: it.row.issue.key, t });
+      return { outcome: "done" };
+    });
+  };
+
+  const nudge = (it: SweepItem | undefined) => {
+    if (isWait(it))
+      // The chase draft toasts its own errors.
+      return act(
+        it,
+        async () => {
+          await chase.mutateAsync(it.row.dependency.id);
+          return { outcome: "nudged" };
+        },
+        false,
+      );
+    if (!isTicket(it)) return;
+    return act(it, async () => {
+      reply(it.row.issue);
+      return { outcome: "nudged" };
+    });
+  };
+
+  /** A wait's chase must also be after its owner's back day (D47); earlier changes nothing. */
+  const snoozeAfter = isWait(item) ? waitSnoozeAfter(item.row.timing) : null;
+  const snooze = (it: SweepItem | undefined, until: string) => {
+    if (!it) return;
+    if (!validSnoozeDay(until, today, isWait(it) ? waitSnoozeAfter(it.row.timing) : null)) return;
+    if (isWait(it)) {
+      const d = it.row.dependency;
+      return act(it, async () => {
+        await waitSnooze.mutateAsync({ id: d.id, label: d.label, day: until });
+        return { outcome: "snoozed" };
+      });
     }
+    if (isTicket(it))
+      return act(it, async () => {
+        await ticketSnooze.mutateAsync({ key: it.row.issue.key, day: until });
+        return { outcome: "snoozed" };
+      });
   };
 
-  const nudge = () => {
-    if (isWait(item))
-      return chase.mutate(item.row.dependency.id, { onSuccess: () => advance("nudged") });
-    if (!isTicket(item)) return;
-    reply(item.row.issue);
-    advance("nudged");
-  };
-
-  const snooze = (until: string) => {
-    if (!validSnoozeDay(until, today)) return;
-    if (isWait(item)) {
-      const d = item.row.dependency;
-      return waitSnooze.mutate({ id: d.id, label: d.label, day: until });
+  const drop = (it: SweepItem | undefined) => {
+    const why = reason.trim();
+    if (!why || !it) return;
+    if (isWait(it)) {
+      const d = it.row.dependency;
+      return act(it, async () => {
+        await waitDrop.mutateAsync({ id: d.id, label: d.label, reason: why });
+        return { outcome: "dropped" };
+      });
     }
-    if (isTicket(item)) ticketSnooze.mutate({ key: item.row.issue.key, day: until });
+    if (isTicket(it))
+      return act(it, async () => {
+        await ticketDrop.mutateAsync({ key: it.row.issue.key, reason: why });
+        return { outcome: "dropped" };
+      });
   };
 
-  const drop = () => {
-    if (!reason.trim()) return;
-    if (isWait(item)) {
-      const d = item.row.dependency;
-      return waitDrop.mutate({ id: d.id, label: d.label, reason });
-    }
-    if (isTicket(item)) ticketDrop.mutate({ key: item.row.issue.key, reason });
-  };
+  const presets = SNOOZE_PRESETS.map((p) => {
+    const d = snoozeDay(p, today, sprintEnd);
+    return { p, day: d && validSnoozeDay(d, today, snoozeAfter) ? d : null, raw: d };
+  });
 
-  const presets = SNOOZE_PRESETS.map((p) => ({ p, day: snoozeDay(p, today, sprintEnd) }));
+  const skip = () => set(skipShown(get(), Date.now()));
+  const toMode = (m: SweepMode) => set(changeMode(get(), m, Date.now()));
 
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (busy || finished || e.ctrlKey || e.metaKey || e.altKey) return;
-    // Typing a reason or a date is not a command.
-    if ((e.target as HTMLElement).closest("input, textarea, select")) return;
-    const digit = /^[1-9]$/.test(e.key) ? Number(e.key) - 1 : null;
-    if (mode === "done" && digit !== null) {
-      const t = choices[digit];
-      if (t && isTicket(item)) ticketDone.mutate({ key: item.row.issue.key, t });
-    } else if (mode === "snooze" && digit !== null) {
-      const d = presets[digit]?.day;
-      if (d) snooze(d);
-    } else if (mode === "idle") {
-      const k = e.key.toLowerCase();
-      if (k === "d") void done();
-      else if (k === "n") nudge();
-      else if (k === "s") setMode("snooze");
-      else if (k === "x") setMode("drop");
-      else if (e.key === " ") advance("skipped");
-      else return;
-    } else return;
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (finished) return;
+    // Only on the sweep's own body (or the dialog itself): a focused button,
+    // link or field keeps Space, Enter and typing.
+    const onBody = e.target === body.current || e.target === e.currentTarget;
+    const cmd = sweepKey(e, mode, onBody);
+    if (!cmd) return;
     e.preventDefault();
+    if (cmd.do === "pick") {
+      if (mode === "done") void pickDone(item, choices[cmd.n]);
+      else {
+        const d = presets[cmd.n]?.day;
+        if (d) void snooze(item, d);
+      }
+    } else if (cmd.do === "done") void done(item);
+    else if (cmd.do === "nudge") void nudge(item);
+    else if (cmd.do === "snooze") toMode("snooze");
+    else if (cmd.do === "drop") toMode("drop");
+    else skip();
   };
 
   const leave = () => {
@@ -282,22 +378,24 @@ function SweepDialog({
   };
 
   const onWait = isWait(item);
+  const acting = busy || mode !== "idle";
 
   return (
-    <Dialog open onOpenChange={(o) => !o && !busy && leave()}>
+    <Dialog open onOpenChange={(o) => !o && !get().busy && leave()}>
       <DialogContent
         className="sm:max-w-lg"
         onKeyDown={onKeyDown}
         onOpenAutoFocus={(e) => {
-          // Start on the item, not on a button, so Space skips instead of pressing it.
+          // Start on the item, not on a button, so the keys work at once.
           e.preventDefault();
           body.current?.focus();
         }}
         onEscapeKeyDown={(e) => {
-          // Esc backs out of a choice first; with nothing open it leaves.
-          if (busy || mode !== "idle") {
+          // A held Esc does not back out and then leave. Esc backs out of a
+          // choice first; with nothing open it leaves.
+          if (e.repeat || get().busy || get().mode !== "idle") {
             e.preventDefault();
-            if (!busy) setMode("idle");
+            if (!e.repeat) toMode("idle");
           }
         }}
       >
@@ -306,29 +404,35 @@ function SweepDialog({
           <DialogDescription>
             {finished
               ? sweepSummary(outcomes, items.length)
-              : `${index + 1} of ${items.length}${item ? ` · ${SWEEP_WHY[item.why]}` : ""}`}
+              : `${s.index + 1} of ${items.length}${item ? ` · ${SWEEP_WHY[item.why]}` : ""}`}
           </DialogDescription>
         </DialogHeader>
         {items.length > 0 && (
           <Progress
-            value={(Math.min(index, items.length) / items.length) * 100}
-            aria-label={`${Math.min(index, items.length)} of ${items.length} decided`}
+            value={(Math.min(s.index, items.length) / items.length) * 100}
+            aria-label={`${Math.min(s.index, items.length)} of ${items.length} decided`}
           />
         )}
-        <div ref={body} tabIndex={-1} className="min-w-0 outline-none">
+        <section
+          ref={body}
+          tabIndex={-1}
+          aria-label="Item to decide"
+          aria-keyshortcuts="D N S X Space"
+          className="min-w-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
           {finished ? (
-            <Summary items={items} outcomes={outcomes} />
+            <Summary items={items} outcomes={s.outcomes} />
           ) : item ? (
             <div className="flex flex-col gap-3">
               <ItemCard item={item} />
               {mode === "done" && (
                 <Choices
                   label="Close as"
+                  disabled={busy}
                   options={choices.map((t) => ({
                     key: t.id,
                     name: t.name === t.to.name ? t.name : `${t.name} → ${t.to.name}`,
-                    onPick: () =>
-                      isTicket(item) && ticketDone.mutate({ key: item.row.issue.key, t }),
+                    onPick: () => void pickDone(item, t),
                   }))}
                 />
               )}
@@ -336,18 +440,25 @@ function SweepDialog({
                 <div className="flex flex-col gap-2">
                   <Choices
                     label={onWait ? "Chase again" : "Snooze until"}
-                    options={presets.map(({ p, day: d }) => ({
+                    disabled={busy}
+                    options={presets.map(({ p, day: d, raw }) => ({
                       key: p,
-                      name: `${SNOOZE_NAMES[p]}${d ? ` (${dayName(d)})` : ""}`,
+                      name: `${SNOOZE_NAMES[p]}${raw ? ` (${dayName(raw)})` : ""}`,
                       disabled: !d,
-                      onPick: () => d && snooze(d),
+                      onPick: () => d && void snooze(item, d),
                     }))}
                   />
+                  {snoozeAfter && (
+                    <p className="text-xs text-muted-foreground">
+                      Only days after {dayName(snoozeAfter)}: until then, the owner being back
+                      brings it up anyway.
+                    </p>
+                  )}
                   <form
                     className="flex items-end gap-2"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      snooze(day);
+                      void snooze(item, day);
                     }}
                   >
                     <Field className="flex-1">
@@ -356,11 +467,16 @@ function SweepDialog({
                         id="sweep-day"
                         type="date"
                         value={day}
+                        disabled={busy}
                         onChange={(e) => setDay(e.target.value)}
                       />
                     </Field>
-                    <Button type="submit" size="sm" disabled={!validSnoozeDay(day, today)}>
-                      Snooze
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={busy || !validSnoozeDay(day, today, snoozeAfter)}
+                    >
+                      {onWait ? "Chase then" : "Snooze"}
                     </Button>
                   </form>
                 </div>
@@ -369,7 +485,7 @@ function SweepDialog({
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    drop();
+                    void drop(item);
                   }}
                 >
                   <Field>
@@ -381,18 +497,20 @@ function SweepDialog({
                       rows={2}
                       autoFocus
                       value={reason}
+                      readOnly={busy}
                       onChange={(e) => setReason(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          drop();
-                        }
+                        if (e.key !== "Enter" || e.shiftKey) return;
+                        // Enter never types a new line here; a held one drops once at most.
+                        e.preventDefault();
+                        if (submitsReason({ ...e, isComposing: e.nativeEvent.isComposing }))
+                          void drop(item);
                       }}
                     />
                     <FieldDescription>
                       {onWait
                         ? "Goes on the wait's timeline; the wait is resolved. Enter drops, Esc goes back."
-                        : "Posted as a comment on the ticket, which is closed (cancelled where the workflow allows). Enter drops, Esc goes back."}
+                        : "Posted as a comment on the ticket, which is then closed (cancelled where the workflow allows). Enter drops, Esc goes back."}
                     </FieldDescription>
                   </Field>
                   <Button
@@ -407,7 +525,7 @@ function SweepDialog({
               )}
             </div>
           ) : null}
-        </div>
+        </section>
         <DialogFooter className="flex-wrap gap-1 sm:justify-start">
           {finished ? (
             <Button size="sm" onClick={leave}>
@@ -415,33 +533,34 @@ function SweepDialog({
             </Button>
           ) : (
             <>
-              <KeyButton k="D" disabled={busy || mode !== "idle"} onClick={() => void done()}>
+              <KeyButton k="D" disabled={acting} onClick={() => void done(item)}>
                 {onWait ? "Resolved" : "Done"}
               </KeyButton>
-              <KeyButton k="N" disabled={busy || mode !== "idle"} onClick={nudge}>
+              <KeyButton k="N" disabled={acting} onClick={() => void nudge(item)}>
                 {onWait ? "Chase" : "Nudge"}
               </KeyButton>
-              <KeyButton k="S" disabled={busy || mode !== "idle"} onClick={() => setMode("snooze")}>
+              <KeyButton k="S" disabled={acting} onClick={() => toMode("snooze")}>
                 {onWait ? "Later" : "Snooze"}
               </KeyButton>
-              <KeyButton k="X" disabled={busy || mode !== "idle"} onClick={() => setMode("drop")}>
+              <KeyButton k="X" disabled={acting} onClick={() => toMode("drop")}>
                 Drop
               </KeyButton>
-              <KeyButton
-                k="Space"
-                disabled={busy || mode !== "idle"}
-                onClick={() => advance("skipped")}
-              >
+              <KeyButton k="Space" disabled={acting} onClick={skip}>
                 Skip
               </KeyButton>
               <KeyButton
                 k="Esc"
                 disabled={busy}
-                onClick={() => (mode === "idle" ? leave() : setMode("idle"))}
+                onClick={() => (mode === "idle" ? leave() : toMode("idle"))}
               >
                 {mode === "idle" ? "Leave" : "Back"}
               </KeyButton>
-              {busy && <Loader2 className="ml-1 size-4 animate-spin text-muted-foreground" />}
+              {busy && (
+                <Loader2
+                  className="ml-1 size-4 animate-spin text-muted-foreground"
+                  aria-label="Working"
+                />
+              )}
             </>
           )}
         </DialogFooter>
@@ -478,20 +597,23 @@ function KeyButton({
 function Choices({
   label,
   options,
+  disabled,
 }: {
   label: string;
   options: { key: string; name: string; disabled?: boolean; onPick: () => void }[];
+  /** Every option, while an action runs. */
+  disabled?: boolean;
 }) {
   return (
-    <fieldset className="flex flex-col gap-1">
+    <fieldset className="flex min-w-0 flex-col gap-1" disabled={disabled}>
       <legend className="mb-1 text-xs text-muted-foreground">{label}</legend>
       {options.map((o, n) => (
         <Button
           key={o.key}
           variant="outline"
           size="sm"
-          className="justify-start"
-          disabled={o.disabled}
+          className="min-w-0 justify-start"
+          disabled={disabled || o.disabled}
           onClick={o.onPick}
         >
           <Kbd>{n + 1}</Kbd>
@@ -545,19 +667,25 @@ const OUTCOME_LABEL: Record<SweepOutcome, string> = {
   skipped: "skipped",
 };
 
-function Summary({ items, outcomes }: { items: SweepItem[]; outcomes: SweepOutcome[] }) {
+function Summary({
+  items,
+  outcomes,
+}: {
+  items: SweepItem[];
+  outcomes: Readonly<Record<string, SweepOutcome>>;
+}) {
   if (items.length === 0)
     return <p className="text-sm text-muted-foreground">Nothing needs a decision now.</p>;
   return (
     <ul className="flex max-h-72 flex-col overflow-y-auto">
-      {items.map((it, n) => (
+      {items.map((it) => (
         <li key={it.id} className="flex min-w-0 items-center gap-2 border-b py-1 last:border-b-0">
           <span className="min-w-0 flex-1 truncate text-sm">
             {isWait(it)
               ? it.row.dependency.label
               : isTicket(it) && `${it.row.issue.key} ${it.row.issue.summary}`}
           </span>
-          <Badge variant="outline">{OUTCOME_LABEL[outcomes[n] ?? "skipped"]}</Badge>
+          <Badge variant="outline">{OUTCOME_LABEL[outcomes[it.id] ?? "skipped"]}</Badge>
         </li>
       ))}
     </ul>

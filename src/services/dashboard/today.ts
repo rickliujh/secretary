@@ -74,6 +74,12 @@ export type WaitRow = {
   dependency: DashDependency;
   timing: DependencyTiming;
   state: WaitState;
+  /**
+   * The next chase is set for a later day ("chase later"): an overdue wait then
+   * keeps its state and badge but is listed with the rest, and the sweep skips
+   * it until that day (D49).
+   */
+  decided: boolean;
   reason: string;
   /** The ticket the wait is on, when cached. */
   issue: DashIssue | null;
@@ -120,6 +126,12 @@ export type Today = {
   focus: FocusScope;
   /** The end (YYYY-MM-DD) of the active sprint holding most of the user's work, for "snooze until after the sprint". */
   sprintEnd: string | null;
+  /**
+   * Every open ticket of the user's blocked by an open ticket, wherever the
+   * lists placed it (a new comment puts one in Your move), with snoozed ones
+   * marked asleep; for the chat's `waiting_on`.
+   */
+  blocked: BlockedRow[];
   /** Open tickets in scope that are snoozed now. */
   snoozed: number;
   inScope: number;
@@ -171,6 +183,27 @@ function askReason(i: DashIssue, today: string): string {
   return i.dueDate ? `${dueLabel(i.dueDate, today)}, ${asked}` : asked;
 }
 
+/**
+ * Whether a wait's next chase is set for a day after `today` with nothing due
+ * now: the user decided to chase later (D49).
+ */
+export const chaseDecided = (t: DependencyTiming, today: string) =>
+  !t.followupDue && !!t.followupOn && t.followupOn > today;
+
+/** The waits whose follow-up is due on Today, leaving out sleeping ones (a snoozed ticket's too). */
+export const dueWaits = (t: Pick<Today, "theirMove">): WaitRow[] =>
+  t.theirMove.filter(
+    (r): r is WaitRow => r.kind === "wait" && r.state !== "asleep" && r.timing.followupDue,
+  );
+
+/**
+ * The day a wait's "chase later" must be after, besides today: the day its
+ * owner is back while they are away or just back (D47). A next chase on or
+ * before that day changes nothing, since "is back" decides then.
+ */
+export const waitSnoozeAfter = (t: DependencyTiming): string | null =>
+  t.asleep || t.backSince ? t.followupOn : null;
+
 /** A wait's state on `today` (D47, D49). A wait on a snoozed ticket sleeps with it. */
 export function waitState(t: DependencyTiming, ticketSnoozed: boolean): WaitState {
   if (t.asleep || ticketSnoozed) return "asleep";
@@ -189,7 +222,9 @@ function waitReason(
 ): string {
   switch (state) {
     case "overdue":
-      return `${plural(t.overdueDays, "day")} overdue`;
+      return chaseDecided(t, today) && t.followupOn
+        ? `${plural(t.overdueDays, "day")} overdue, next chase ${dueLabel(t.followupOn, today).replace(/^due /, "")}`
+        : `${plural(t.overdueDays, "day")} overdue`;
     case "followup":
       return t.followupLateDays > 0
         ? `follow-up ${plural(t.followupLateDays, "day")} late`
@@ -207,12 +242,18 @@ function waitReason(
   }
 }
 
-/** Orders waits within a state: the most pressing first. */
+/** Where a wait is listed: by its state, except that a decided one is with the rest (D49). */
+const waitRank = (r: WaitRow) =>
+  WAIT_ORDER.indexOf(r.decided && r.state !== "asleep" ? "open" : r.state);
+
+/** Orders waits: by rank, then the most pressing first within it. */
 function compareWaits(a: WaitRow, b: WaitRow): number {
-  const s = WAIT_ORDER.indexOf(a.state) - WAIT_ORDER.indexOf(b.state);
+  const s = waitRank(a) - waitRank(b);
   if (s) return s;
-  if (a.state === "overdue") return b.timing.overdueDays - a.timing.overdueDays;
-  if (a.state === "followup") return b.timing.followupLateDays - a.timing.followupLateDays;
+  if (a.state === "overdue" && b.state === "overdue" && !a.decided && !b.decided)
+    return b.timing.overdueDays - a.timing.overdueDays;
+  if (a.state === "followup" && b.state === "followup")
+    return b.timing.followupLateDays - a.timing.followupLateDays;
   // Owner back: longest back first; sleeping: soonest to wake first; the rest: soonest expected.
   const when = (r: WaitRow) =>
     (r.state === "back"
@@ -346,17 +387,14 @@ export function buildToday(
   }
 
   // 4. The user's tickets with an open blocker; snoozed ones sleep last.
-  const blocked: BlockedRow[] = [];
+  const allBlocked: BlockedRow[] = [];
   const epicKeys = new Set(input.issues.map((i) => i.epicKey).filter((k): k is string => !!k));
   for (const i of input.issues) {
     if (!open(i) || !mine(i) || /epic/i.test(i.issueType) || epicKeys.has(i.key)) continue;
-    const asleep = snoozedNow(i);
-    if (placed.has(i.key) && !asleep) continue;
     const { blockedBy } = blockInfo(i.links, input.blockers);
     if (!blockedBy.length) continue;
-    placed.add(i.key);
-    if (!asleep) askState.set(i.key, `blocked by ${blockedBy.join(", ")}`);
-    blocked.push({
+    const asleep = snoozedNow(i);
+    allBlocked.push({
       kind: "blocked",
       issue: i,
       blockedBy,
@@ -366,9 +404,14 @@ export function buildToday(
         : `blocked by ${blockedBy.slice(0, 2).join(", ")}${blockedBy.length > 2 ? ` and ${blockedBy.length - 2} more` : ""}`,
     });
   }
-  blocked.sort(
+  allBlocked.sort(
     (a, b) => Number(a.asleep) - Number(b.asleep) || a.issue.key.localeCompare(b.issue.key),
   );
+  const blocked = allBlocked.filter((b) => b.asleep || !placed.has(b.issue.key));
+  for (const b of blocked) {
+    placed.add(b.issue.key);
+    if (!b.asleep) askState.set(b.issue.key, `blocked by ${b.blockedBy.join(", ")}`);
+  }
 
   // 5. Open small asks with nothing to wait for, by due date, then oldest first.
   const asks: TicketRow[] = [];
@@ -416,6 +459,7 @@ export function buildToday(
         dependency: d,
         timing: t,
         state,
+        decided: chaseDecided(t, today),
         reason: waitReason(d, t, state, issue?.snoozedUntil ?? null, today),
         issue,
       };
@@ -467,6 +511,7 @@ export function buildToday(
     ],
     focus: work.focus,
     sprintEnd,
+    blocked: allBlocked,
     snoozed: work.snoozed,
     inScope: work.inScope,
     smallAsks: {
