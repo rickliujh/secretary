@@ -3,6 +3,7 @@ import { z } from "zod";
 import { SETTINGS_TABS, type SettingsTab } from "@/app/settings-tabs";
 import { PageHeader } from "@/components/page";
 import { AtlassianSection } from "@/components/settings/atlassian-section";
+import { CaptureSection } from "@/components/settings/capture-section";
 import { DataSection } from "@/components/settings/data-section";
 import { GeneralSection } from "@/components/settings/general-section";
 import { JiraSyncSection } from "@/components/settings/jira-sync-section";
@@ -49,6 +50,7 @@ function SettingsPage() {
         </TabsList>
         <TabsContent value="general" className="flex flex-col gap-4">
           <GeneralSection />
+          <CaptureSection />
           <PromptsCard />
           <NetworkSection />
         </TabsContent>

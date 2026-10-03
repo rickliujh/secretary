@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Building2, Settings2, Ticket, UserRound } from "lucide-react";
+import { Building2, NotebookPen, Settings2, Ticket, UserRound } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { openCapture } from "@/app/capture";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
 import { usePeople, useTeams, useTicketRows } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
@@ -78,6 +79,13 @@ export function CommandPalette({
         />
         <CommandList>
           <CommandEmpty>No results.</CommandEmpty>
+          <CommandGroup heading="Actions">
+            <CommandItem value="capture new task paste message" onSelect={() => go(openCapture)}>
+              <NotebookPen />
+              Capture
+              <CommandShortcut>To the Inbox</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
           {tickets.length > 0 && (
             <CommandGroup heading="Tickets">
               {tickets.map((t) => (

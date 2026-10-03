@@ -44,6 +44,7 @@ describe("Settings schema", () => {
       obsidian: { cliPath: "" },
       report: { style: "talk_track" },
       storage: { limitMb: 1024, autoCleanup: true },
+      capture: { shortcut: "CommandOrControl+Shift+Space", closeToTray: true },
       scoring: {
         priority: 3,
         due: 4,

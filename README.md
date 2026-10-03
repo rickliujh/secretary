@@ -87,6 +87,33 @@ Open **Settings** and work through the tabs.
    a proxy through a PAC file, choose **Manual** under Network and enter the proxy the
    PAC file returns.
 
+### Quick capture and the tray
+
+To file a message or a task without leaving what you are doing, open **Capture**:
+Ctrl+K then Enter, the global shortcut (Ctrl+Shift+Space, Cmd+Shift+Space on macOS),
+the tray menu, or `secretary --capture`. Paste or type, press Enter, and the dialog
+closes; the secretary reads it in the background and puts the window back the way it
+was. When something is waiting for your approval and the window is out of sight, a
+notification says so. Change the shortcut, or turn it off, in Settings -> General ->
+Capture and tray.
+
+Closing the window keeps Secretary running in the tray, so sync, reminders and the
+shortcut keep working; **Quit** is in the tray menu (on macOS the Dock icon also brings
+the window back). Turn this off in the same settings card, and closing quits again.
+Starting Secretary a second time brings the running window forward.
+
+On Linux:
+
+- The tray needs the AppIndicator library: `libayatana-appindicator3-1` on Debian or
+  Ubuntu, `libayatana-appindicator-gtk3` on Fedora, `libayatana-appindicator` on Arch.
+  GNOME shows tray icons only with the AppIndicator extension. Without the library
+  the app runs without a tray, and closing the window quits.
+- Wayland does not let apps register global shortcuts. Bind `secretary --capture` to
+  a key in your desktop's own settings (GNOME: Settings -> Keyboard -> Custom
+  Shortcuts; KDE: System Settings -> Shortcuts -> Custom Shortcuts). Use the full path
+  of the AppImage if that is how you run it. The key opens Capture in the running app,
+  or starts Secretary with Capture open.
+
 ### Permissions the secretary needs
 
 It acts as you, so it can do only what your account can.
@@ -124,6 +151,8 @@ It acts as you, so it can do only what your account can.
 | Jira Cloud search fails with 410 | Update: the old search endpoint was retired and the app uses the new one. |
 | "The model's answer was not usable" | The model could not produce an answer that passed its checks. Bind a stronger model to the strong tier, or try another model. Settings -> Models -> Evaluation replay compares models on your own decided items. |
 | Sprint positions ("sprint 2 of Q3") missing | Run a Full resync so each board's sprint history is read; your account needs to see the board. |
+| No tray icon, or closing the window quits | Settings -> General -> Capture and tray says why. On Linux install the AppIndicator library (see Quick capture above) and, on GNOME, the AppIndicator extension. |
+| The capture shortcut does nothing | Settings -> General -> Capture and tray shows whether it is registered. Another app may own the combination; pick another. On Wayland, bind `secretary --capture` in the desktop's keyboard settings. |
 | Offline | Cached tickets, threads and drafts keep working; syncing and model calls resume when the network returns. |
 | Tickets look out of date | Settings -> Jira -> Full resync, or Settings -> Data -> Clear Jira cache. |
 | Something else | Settings -> Data -> Logs -> Show. Logs are redacted. |
@@ -151,6 +180,10 @@ SECRETARY_EVAL_API_KEY=... \
 SECRETARY_EVAL_STANDARD_MODEL=z-ai/glm-5.3-flash \
 bun test src/test/eval
 ```
+
+A debug build on Linux runs as its own instance, so `bun run tauri dev` starts beside
+an installed Secretary instead of handing over to it. On macOS and Windows quit the
+installed app first. Both builds use the same data folder.
 
 Read `docs/requirements.md` and `docs/design.md` (decisions in section 12) before
 changing things; `docs/implementation-plan.md` is the build history and

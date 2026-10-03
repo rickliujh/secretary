@@ -1,8 +1,9 @@
+mod capture;
 mod obsidian;
 mod secrets;
 
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime, WindowEvent};
 
 const CLOSE_WINDOW: &str = "close-window";
 
@@ -71,19 +72,32 @@ fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     )
 }
 
+/// One running instance (D48). A debug build on Linux registers under its own
+/// D-Bus name, so `tauri dev` runs beside an installed copy instead of handing over
+/// to it.
+fn single_instance<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    let builder =
+        tauri_plugin_single_instance::Builder::new().callback(capture::on_second_launch);
+    #[cfg(all(debug_assertions, target_os = "linux"))]
+    let builder = builder.dbus_id("dev.rickliu.secretary.dev");
+    builder.build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default();
+    // Must be the first plugin: a second launch hands its arguments over and exits here.
+    let builder = tauri::Builder::default().plugin(single_instance());
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_menu).on_menu_event(|app, event| {
-        use tauri::Manager;
         if event.id().as_ref() == CLOSE_WINDOW {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.close();
             }
         }
     });
+    let launch_capture = capture::wants_capture(&std::env::args().collect::<Vec<_>>());
     builder
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -100,12 +114,37 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(move |app| {
+            app.manage(capture::CaptureState::new(launch_capture));
+            capture::create_tray(app.handle());
+            Ok(())
+        })
+        // Every close of the main window (the app's close button, Alt+F4, the red
+        // button, Close Window) arrives here; it hides to the tray when that is on.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && capture::keep_in_tray(window.app_handle()) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             secrets::secret_get,
             secrets::secret_set,
             secrets::secret_delete,
-            obsidian::obsidian_cli
+            obsidian::obsidian_cli,
+            capture::capture_status,
+            capture::set_close_to_tray,
+            capture::set_capture_shortcut
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            // macOS: clicking the Dock icon brings a hidden window back (D48).
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                capture::show_main(_app);
+            }
+        });
 }

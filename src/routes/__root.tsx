@@ -2,6 +2,7 @@ import { createRootRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { Search } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
+import { useCaptureBridge } from "@/app/capture-native";
 import { useDeleteWordKey } from "@/app/keyboard";
 import { CONTEXT_NAV, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
 import { macOverlay, ownWindowButtons } from "@/app/platform";
@@ -9,6 +10,7 @@ import { useFollowupReminders } from "@/app/reminders";
 import { useAutoCleanup, useStorageWarning } from "@/app/storage";
 import { useSyncScheduler } from "@/app/sync";
 import { AppSidebar } from "@/components/app-sidebar";
+import { CaptureDialog } from "@/components/capture/capture-dialog";
 import { CommandPalette } from "@/components/command-palette";
 import { StartupGate } from "@/components/startup-gate";
 import { SyncIndicator } from "@/components/sync-indicator";
@@ -37,6 +39,7 @@ function Background() {
   useAutoCleanup();
   useDeleteWordKey();
   useStorageWarning();
+  useCaptureBridge();
   return null;
 }
 
@@ -94,6 +97,7 @@ function RootLayout() {
         </SidebarInset>
         <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
         <TicketSheet issueKey={ticket} onClose={() => openTicket(null)} />
+        <CaptureDialog />
       </SidebarProvider>
     </StartupGate>
   );

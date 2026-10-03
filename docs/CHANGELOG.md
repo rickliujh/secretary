@@ -686,3 +686,60 @@ Built
   sets the home per case and was not run.
 - Not verified in the running app: the Settings section, the Track row and the hint
   were checked by typecheck and lint only, not seen on screen.
+
+## Phase 14: Quick capture and tray (2026-10-03)
+
+Why: filing a small ask meant switching to the app and finding the Inbox
+(requirements FR-11, design.md D48).
+
+Built
+- Capture: the Inbox composer in a dialog over any page, opened from Ctrl+K
+  ("Capture", the first action), the global shortcut, the tray menu and
+  `secretary --capture`. Enter files a new thread and closes the dialog; triage runs
+  in the background and a toast with "Open" follows. A window that capture had to
+  show (hidden or minimised) goes back the same way, also when the dialog is left
+  without sending.
+- One notification when a capture finishes with proposals or questions while the
+  window is out of sight; a failed triage while hidden says so too.
+- Tray icon with Open Secretary, Capture and Quit. Closing the window hides it while
+  "keep running in the tray" is on (default) and the tray exists, so sync, reminders
+  and the shortcut keep working; every close path (the app's button, Alt+F4, the red
+  button, Close Window) goes through the same check. The macOS Dock icon reopens the
+  window. The webview is not throttled in the background on macOS.
+- One running instance: a second launch focuses the window, or opens Capture with
+  `--capture`; a first launch with `--capture` starts with Capture open.
+- Settings -> General -> Capture and tray: the shortcut (blank turns it off),
+  close-to-tray, and why the tray or the shortcut is unavailable with what to do.
+- Rust: `tauri-plugin-global-shortcut` 2.3 and `tauri-plugin-single-instance` 2.4
+  (the newer releases need tauri 2.12), Tauri's `tray-icon` feature, and
+  `src-tauri/src/capture.rs`. All three native sources emit one `capture://open`
+  event; the webview does the rest.
+
+Decisions and defaults
+- Shortcut `CommandOrControl+Shift+Space`; close-to-tray on.
+- On a Wayland session the shortcut is not registered (an X11 grab through XWayland
+  only fires while an X11 window has focus); Settings shows how to bind
+  `secretary --capture` instead.
+- On Linux the AppIndicator library is looked up before the tray is built; without
+  it there is no tray and closing quits, as before.
+- Debug builds on Linux use their own D-Bus name, so `tauri dev` runs beside an
+  installed copy.
+
+Checklist
+- `cargo check` and clippy pass; typecheck, tests and lint are green.
+  `src/app/capture.test.ts` covers the open-capture event and the submit path over
+  the real intake (thread filed, window put back before triage ends, one
+  notification only when hidden), and a Rust test covers the `--capture` flag.
+- Window controls (D36), by code review: minimise and maximise are unchanged; close
+  sends a close request, which the native handler turns into hide only when the
+  setting is on and the tray exists, and otherwise closes the last window, which
+  quits.
+
+Known limits
+- Not run: nothing in this phase was tried in the running app (tray, shortcut,
+  second launch, notifications, hide and restore on macOS, Linux and Windows).
+- GNOME without the AppIndicator extension has the library but shows no icon;
+  Settings cannot tell, so turn close-to-tray off there or relaunch to show the
+  window.
+- On Linux and Windows the hidden webview's timers may be throttled by the engine;
+  the 10-minute sync and reminder timers tolerate that.

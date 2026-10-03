@@ -23,7 +23,7 @@ const DECISION_KEYS = [
   queryKeys.memories,
 ];
 
-function useInvalidateAfterDecision() {
+export function useInvalidateAfterDecision() {
   const client = useQueryClient();
   return () => {
     for (const key of DECISION_KEYS) void client.invalidateQueries({ queryKey: key });

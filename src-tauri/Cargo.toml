@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 keyring = "4"
 # OS trust store in addition to the bundled roots, so corporate TLS-inspection
@@ -32,6 +32,17 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
+
+# Quick capture (D48): a global shortcut, and one running instance that a second
+# launch (`secretary --capture`) forwards to. Pinned to the releases for tauri 2.11
+# (the next ones need tauri 2.12 and a matching @tauri-apps/api).
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-global-shortcut = "~2.3"
+tauri-plugin-single-instance = "~2.4"
+
+# Checks for the tray library before tray-icon loads it, since a missing one panics.
+[target.'cfg(target_os = "linux")'.dependencies]
+libloading = "0.7"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

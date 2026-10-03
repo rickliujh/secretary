@@ -146,6 +146,8 @@ export const SmallAsksSettingsSchema = z.object({
 });
 export type SmallAsksSettings = z.infer<typeof SmallAsksSettingsSchema>;
 
+export const DEFAULT_CAPTURE_SHORTCUT = "CommandOrControl+Shift+Space";
+
 export const SettingsSchema = z.object({
   version: z.literal(1).default(1),
   providers: z.array(ProviderSchema).default([]),
@@ -197,6 +199,14 @@ export const SettingsSchema = z.object({
       limitMb: z.number().int().min(100).max(100_000).default(1024),
       /** Daily cleanup of caches and old derived data (D34). */
       autoCleanup: z.boolean().default(true),
+    })
+    .prefault({}),
+  capture: z
+    .object({
+      /** Global shortcut for the Capture dialog, as a Tauri accelerator; blank turns it off (D48). */
+      shortcut: z.string().trim().max(60).default(DEFAULT_CAPTURE_SHORTCUT),
+      /** Closing the window keeps the app running in the tray (D48). */
+      closeToTray: z.boolean().default(true),
     })
     .prefault({}),
   network: z
