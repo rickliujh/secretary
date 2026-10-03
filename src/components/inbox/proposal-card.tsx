@@ -127,6 +127,18 @@ function PayloadView({ p, lookups }: { p: ProposalPayload; lookups: Lookups }) {
           <Row label="Follow up">{p.nextFollowupAt}</Row>
         </dl>
       );
+    case "link_issues":
+      return (
+        <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-sm">
+          <Row label="Issue">
+            <IssueRef value={p.target} lookups={lookups} />
+          </Row>
+          <Row label="Blocked by">
+            <IssueRef value={p.blocker} lookups={lookups} />
+          </Row>
+          <Row label="In Jira">A "blocks" link; the issue wakes up when the blocker is done</Row>
+        </dl>
+      );
     case "update_person":
     case "update_team": {
       const changes = Object.entries(p.changes).flatMap(([k, v]) =>

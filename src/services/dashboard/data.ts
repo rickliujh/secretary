@@ -1,25 +1,17 @@
 /** Loads one snapshot of the cache for the dashboard (FR-5). */
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { z } from "zod";
 import { issueMeta, jiraComments, jiraIssues } from "@/db/schema";
 import { localDate } from "@/lib/dates";
-import { readJson } from "@/lib/json";
+import { parseBlockers } from "@/services/blockers/logic";
 import { query } from "@/services/db";
 import { listDependencies } from "@/services/dependencies/queries";
-import { type IssueLink, IssueLinkSchema } from "@/services/jira/schemas";
+import { parseIssueLinks } from "@/services/jira/schemas";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { buildEpicHealth, type DashboardInputs, type DashIssue } from "./sections";
 
 const COMMENT_WINDOW_DAYS = 14;
-
-/** Links from the raw issue JSON; a link in an unexpected shape is skipped. */
-const parseLinks = (value: unknown): IssueLink[] =>
-  readJson(value, z.array(z.unknown()), []).flatMap((l) => {
-    const r = IssueLinkSchema.safeParse(l);
-    return r.success ? [r.data] : [];
-  });
 
 export const loadDashboardInputs = (now = new Date()) =>
   Effect.gen(function* () {
@@ -54,7 +46,7 @@ export const loadDashboardInputs = (now = new Date()) =>
     );
     const issues: DashIssue[] = rows.map((r) => ({
       ...r,
-      links: parseLinks(r.links),
+      links: parseIssueLinks(r.links),
       pinned: !!r.pinned,
       snoozedUntil: r.snoozedUntil ?? null,
       priorityOverride: r.priorityOverride ?? null,
@@ -83,6 +75,7 @@ export const loadDashboardInputs = (now = new Date()) =>
 
     const deps = yield* listDependencies();
     const sprintState = parseSprintState(yield* getState(SYNC_KEYS.sprints));
+    const blockers = parseBlockers(yield* getState(SYNC_KEYS.blockers));
     return {
       me,
       trackedEpics: settings.jira.trackedEpics,
@@ -99,6 +92,7 @@ export const loadDashboardInputs = (now = new Date()) =>
         ownerName: x.owner.name,
       })),
       comments: comments.map((c) => ({ ...c, mentionsMe: !!Number(c.mentionsMe) })),
+      blockers,
     } satisfies DashboardInputs;
   });
 

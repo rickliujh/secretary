@@ -58,9 +58,9 @@ import { SyncLive } from "@/services/sync/live";
 import { getState, parseSprintState, SYNC_KEYS, setState } from "@/services/sync/state";
 import { drainStream, TODAY } from "@/test/helpers";
 import { JIRA_BASE, jiraSettings } from "@/test/layers";
-import { fixtureRoutes } from "@/test/seed";
+import { fixtureIssues, fixtureRoutes } from "@/test/seed";
 import { json, type StubRoute, stubFetch } from "@/test/stub-fetch";
-import { EVAL_CASES, EVAL_HOME, type EvalCase } from "./cases";
+import { EVAL_CASES, EVAL_HOME, EVAL_OUTSIDE_ISSUES, type EvalCase } from "./cases";
 
 const env = process.env;
 const configured = !!(
@@ -82,6 +82,40 @@ const EVAL_VAULT = {
   enabled: true,
 };
 
+/**
+ * A "Blocks" link type, and the tickets outside the sync scope that cases name,
+ * read once from Jira when the text mentions them (D45).
+ */
+function linkRoutes(): StubRoute[] {
+  const base = fixtureIssues[0] as { fields: Record<string, unknown> };
+  return [
+    {
+      match: (u) => u.pathname.endsWith("/issueLinkType"),
+      respond: () =>
+        json({
+          issueLinkTypes: [
+            { id: "10000", name: "Blocks", inward: "is blocked by", outward: "blocks" },
+          ],
+        }),
+    },
+    ...Object.entries(EVAL_OUTSIDE_ISSUES).map(([key, summary], n) => ({
+      match: (u: URL) => u.pathname.endsWith(`/issue/${key}`),
+      respond: () =>
+        json({
+          ...base,
+          id: String(99000 + n),
+          key,
+          fields: {
+            ...base.fields,
+            summary,
+            project: { id: "300", key: key.split("-")[0], name: "Platform" },
+            issuelinks: [],
+          },
+        }),
+    })),
+  ];
+}
+
 function layerFor(tiers: TierBindings, extraRoutes: StubRoute[] = []) {
   const provider = ProviderSchema.parse({
     id: "eval",
@@ -89,7 +123,7 @@ function layerFor(tiers: TierBindings, extraRoutes: StubRoute[] = []) {
     kind: env.SECRETARY_EVAL_KIND === "openai-compatible" ? "openai-compatible" : "anthropic",
     baseUrl: env.SECRETARY_EVAL_BASE_URL,
   });
-  const jiraStub = stubFetch([...extraRoutes, ...fixtureRoutes()]);
+  const jiraStub = stubFetch([...extraRoutes, ...linkRoutes(), ...fixtureRoutes()]);
   // Jira goes to the stub; the model provider gets real network access.
   const fetcher = makeFetcherTest((input, init) => {
     const url = input instanceof Request ? input.url : String(input);

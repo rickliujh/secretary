@@ -127,6 +127,25 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
       };
     case "move_to_sprint":
       return buildMoveToSprint(action.sprintId, [action.issueKey]);
+    case "link_issues": {
+      // On the target, Jira lists the blocker as its `inwardIssue` ("is blocked
+      // by"); posting it as the inward issue is meant to create that. Some
+      // instances store it the other way, so the Executor checks and swaps (D45).
+      const [inward, outward] = action.swapped
+        ? [action.issueKey, action.blockerKey]
+        : [action.blockerKey, action.issueKey];
+      return {
+        method: "POST",
+        path: "issueLink",
+        body: {
+          type: { name: action.linkType },
+          inwardIssue: { key: inward },
+          outwardIssue: { key: outward },
+        },
+      };
+    }
+    case "delete_issue_link":
+      return { method: "DELETE", path: `issueLink/${encodeURIComponent(action.linkId)}` };
   }
 }
 

@@ -137,7 +137,7 @@ export const loadPickerSource = (now = new Date()) =>
         assigneeDisplay: i.assigneeDisplay,
         updated: i.updated,
         lastViewedAt: i.lastViewedAt,
-        blockedBy: blockInfo(i.links).blockedBy,
+        blockedBy: blockInfo(i.links, inputs.blockers).blockedBy,
       })),
       focus: dashboard.topFocus.map((f) => f.key),
     } satisfies PickerSource;

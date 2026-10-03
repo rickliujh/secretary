@@ -16,8 +16,11 @@ import {
   type ItemSnapshot,
 } from "@/prompts/classify";
 import { takeWithinBudget } from "@/prompts/common";
+import { parseLinkTypes } from "@/services/blockers/logic";
+import { blockLinks } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
 import { normalizeUsername } from "@/services/directory/schema";
+import { parseIssueLinks } from "@/services/jira/schemas";
 import { describeCorrection, describeStoredPayload } from "@/services/proposals/schema";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { defaultSmallAskType, smallAskTypes } from "@/services/small-asks/home";
@@ -156,6 +159,12 @@ const make = Effect.gen(function* () {
             dueDate: row.dueDate,
             updated: row.updated,
             reasons,
+            // Existing "blocked by" links, so the model does not propose them again (D45).
+            blockedBy: blockLinks(
+              parseIssueLinks((row.raw as { issuelinks?: unknown } | null)?.issuelinks),
+            )
+              .filter((l) => l.direction === "blockedBy")
+              .map((l) => l.key),
           })),
         (c) => `${c.key} ${c.summary} ${c.status} ${c.issueType}`,
         BUDGETS.candidates,
@@ -437,6 +446,8 @@ const make = Effect.gen(function* () {
         notes,
         sprints,
         smallAsks,
+        blockLinkType:
+          parseLinkTypes(yield* withDb(getState(SYNC_KEYS.linkTypes))).blocks?.name ?? null,
       } satisfies ItemSnapshot;
     });
 

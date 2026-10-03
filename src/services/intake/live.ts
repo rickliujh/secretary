@@ -1,6 +1,14 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect, Either, Layer } from "effect";
-import { inboxItems, inboxMessages, intakeItems, memories, people, proposals } from "@/db/schema";
+import {
+  inboxItems,
+  inboxMessages,
+  intakeItems,
+  jiraIssues,
+  memories,
+  people,
+  proposals,
+} from "@/db/schema";
 import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
@@ -31,6 +39,7 @@ import { bindDb, Db } from "@/services/db";
 import { Llm } from "@/services/llm";
 import { describePayload, effectivePayload, issueRefs } from "@/services/proposals/schema";
 import { Retrieval } from "@/services/retrieval";
+import { Sync } from "@/services/sync";
 import {
   Intake,
   IntakeError,
@@ -58,6 +67,9 @@ type ItemRow = typeof intakeItems.$inferSelect;
 type Progress = (message: string) => void;
 
 /** One item to classify in this turn. */
+/** Most tickets missing from the cache read from Jira for one item. */
+const MAX_KEY_READS = 5;
+
 type Job = {
   idx: number;
   quote: string;
@@ -88,7 +100,40 @@ const mergeRefs = (a: References, b: References): References => ({
 const make = Effect.gen(function* () {
   const llm = yield* Llm;
   const retrieval = yield* Retrieval;
+  const sync = yield* Sync;
   const { q } = bindDb(yield* Db);
+
+  /** Keys already read from Jira in this session, found or not, so each is read once (D45). */
+  const readKeys = new Set<string>();
+  /**
+   * A ticket named in the text that the cache does not hold (outside the sync
+   * scope, such as another team's PLAT-812) is read once from Jira, so it can be
+   * a candidate, for example as a blocker (D45). A failure only leaves it out.
+   */
+  const readMissingKeys = (keys: readonly string[]) =>
+    Effect.gen(function* () {
+      const fresh = [...new Set(keys)].filter((k) => !readKeys.has(k));
+      if (fresh.length === 0) return;
+      const cached = new Set(
+        (yield* q((d) =>
+          d
+            .select({ key: jiraIssues.key })
+            .from(jiraIssues)
+            .where(and(inArray(jiraIssues.key, fresh), eq(jiraIssues.stale, false)))
+            .all(),
+        )).map((r) => r.key),
+      );
+      for (const key of fresh.filter((k) => !cached.has(k)).slice(0, MAX_KEY_READS)) {
+        readKeys.add(key);
+        yield* sync
+          .refreshIssue(key)
+          .pipe(
+            Effect.catchAll((e) =>
+              Effect.sync(() => logger.info(`${key} named in the input was not read`, e.message)),
+            ),
+          );
+      }
+    });
 
   const contactsQuery = q((d) =>
     d
@@ -251,6 +296,7 @@ const make = Effect.gen(function* () {
           ],
         },
       ].reduce(mergeRefs);
+      yield* readMissingKeys(references.issueKeys);
       const snapshot = yield* retrieval.snapshot({
         quote: job.quote,
         source: ctx.source,

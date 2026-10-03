@@ -24,6 +24,16 @@
  * assignee and priority writes from the app are recorded too. Served by
  * `GET /rest/api/2/issue/{key}?expand=changelog` (Data Center) and the
  * paginated `GET /rest/api/2/issue/{key}/changelog` (Cloud shape).
+ *
+ * Issue links (D45): `GET /issueLinkType`, `POST /issueLink`, `DELETE
+ * /issueLink/{id}`, and `issuelinks` on every issue from both sides. A posted
+ * Blocks link means "inwardIssue blocks outwardIssue"; `--reversed-links`
+ * stores it the other way round, as some instances appear to. JQL
+ * `key in (...)` on its own (the blocker check) returns just those keys.
+ *
+ *   bun run mock:jira --cloud         # Cloud shape: Basic auth, POST /search/jql
+ *                                     # token paging (old /search is 410), account
+ *                                     # ids, parent epics, /priority/search
  */
 import j2m from "jira2md";
 
@@ -56,6 +66,7 @@ type Issue = {
   created: string;
   updated: string;
   comments: Comment[];
+  /** Seeded links: this issue is blocked by `inward`. The handler keeps the live set. */
   links: { type: "Blocks"; inward: string }[];
   /** Story Points; null when unestimated. */
   points: number | null;
@@ -82,6 +93,13 @@ const TRANSITIONS = Object.keys(STATUSES).map((name, i) => ({
   name,
 }));
 const ISSUE_TYPES = ["Epic", "Story", "Task", "Bug", "Sub-task"] as const;
+const LINK_TYPES = [
+  { id: "10000", name: "Blocks", inward: "is blocked by", outward: "blocks" },
+  { id: "10001", name: "Relates", inward: "relates to", outward: "relates to" },
+  { id: "10002", name: "Duplicate", inward: "is duplicated by", outward: "duplicates" },
+] as const;
+/** A live link: "from <outward> to", e.g. from blocks to. */
+export type MockLink = { id: string; type: (typeof LINK_TYPES)[number]; from: string; to: string };
 const PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"];
 const EPIC_LINK = "customfield_10100";
 const EPIC_NAME = "customfield_10102";
@@ -346,26 +364,64 @@ export function generate(total: number, now = Date.now()): Map<string, Issue> {
   return issues;
 }
 
-const userJson = (u: User | null) =>
+const dcUserJson = (u: User | null) =>
   u ? { ...u, key: `JIRAUSER-${u.name}`, active: true, timeZone: "UTC" } : null;
+/** Cloud users have an account id and no name or key (D19). */
+const cloudUserJson = (u: User | null) =>
+  u
+    ? {
+        accountId: `acc-${u.name}`,
+        displayName: u.displayName,
+        emailAddress: u.emailAddress,
+        active: true,
+        timeZone: "UTC",
+      }
+    : null;
+type UserJson = (u: User | null) => Record<string, unknown> | null;
+const userJsonFor = (cloud: boolean): UserJson => (cloud ? cloudUserJson : dcUserJson);
+/** A user from a request: DC `name`, Cloud `accountId` or `id`. */
+const userFrom = (v: unknown): User | null => {
+  const o = (v ?? {}) as { name?: string; accountId?: string; id?: string };
+  const id = o.name ?? o.accountId ?? o.id;
+  return USERS.find((u) => u.name === id || `acc-${u.name}` === id) ?? null;
+};
 const status = (name: keyof typeof STATUSES) => ({
   id: STATUSES[name].id,
   name,
   statusCategory: { key: STATUSES[name].category, name: STATUSES[name].category },
 });
-const historyJson = (h: History) => ({
+const historyJson = (h: History, userJson: UserJson) => ({
   ...h,
   author: userJson(h.author),
   items: h.items.map((i) => ({ ...i, fieldtype: "jira" })),
 });
-const commentJson = (c: Comment) => ({
+const commentJson = (c: Comment, userJson: UserJson) => ({
   ...c,
   author: userJson(c.author),
   renderedBody: j2m.jira_to_html(c.body),
 });
 
-function issueJson(issue: Issue, all: Map<string, Issue>, embedComments = 2) {
-  const parent = issue.parent ? all.get(issue.parent) : undefined;
+const linkedIssue = (other: Issue) => ({
+  id: other.id,
+  key: other.key,
+  fields: {
+    summary: other.summary,
+    status: status(other.status),
+    issuetype: { name: other.type, subtask: other.type === "Sub-task" },
+  },
+});
+
+function issueJson(
+  issue: Issue,
+  all: Map<string, Issue>,
+  embedComments = 2,
+  links: readonly MockLink[] = [],
+  cloud = false,
+) {
+  // Cloud links epics through `parent` only (D19).
+  const userJson = userJsonFor(cloud);
+  const parentKey = issue.parent ?? (cloud ? issue.epic : null);
+  const parent = parentKey ? all.get(parentKey) : undefined;
   return {
     id: issue.id,
     key: issue.key,
@@ -389,7 +445,14 @@ function issueJson(issue: Issue, all: Map<string, Issue>, embedComments = 2) {
         ? {
             id: parent.id,
             key: parent.key,
-            fields: { summary: parent.summary, issuetype: { name: parent.type, subtask: false } },
+            fields: {
+              summary: parent.summary,
+              issuetype: {
+                name: parent.type,
+                subtask: false,
+                ...(cloud ? { hierarchyLevel: parent.type === "Epic" ? 1 : 0 } : {}),
+              },
+            },
           }
         : undefined,
       labels: issue.labels,
@@ -398,30 +461,25 @@ function issueJson(issue: Issue, all: Map<string, Issue>, embedComments = 2) {
       created: issue.created,
       updated: issue.updated,
       resolutiondate: issue.status === "Done" ? issue.updated : null,
-      [EPIC_LINK]: issue.epic,
-      [EPIC_NAME]: issue.epicName,
+      ...(cloud ? {} : { [EPIC_LINK]: issue.epic, [EPIC_NAME]: issue.epicName }),
       [SPRINT]: issueSprints(issue),
       [STORY_POINTS]: issue.points,
-      issuelinks: issue.links.map((l, i) => {
-        const other = all.get(l.inward);
-        return {
-          id: `${issue.id}${i}`,
-          type: { name: "Blocks", inward: "is blocked by", outward: "blocks" },
-          inwardIssue: other
-            ? {
-                key: other.key,
-                fields: {
-                  summary: other.summary,
-                  status: status(other.status),
-                  issuetype: { name: other.type, subtask: false },
-                },
-              }
-            : undefined,
+      // Both sides: on `to` the other issue is inward ("is blocked by"), on `from` outward.
+      issuelinks: links.flatMap((l) => {
+        const type = {
+          id: l.type.id,
+          name: l.type.name,
+          inward: l.type.inward,
+          outward: l.type.outward,
         };
+        const other = all.get(l.to === issue.key ? l.from : l.to);
+        if (!other || (l.to !== issue.key && l.from !== issue.key)) return [];
+        const side = l.to === issue.key ? "inwardIssue" : "outwardIssue";
+        return [{ id: l.id, type, [side]: linkedIssue(other) }];
       }),
       attachment: [],
       comment: {
-        comments: issue.comments.slice(0, embedComments).map(commentJson),
+        comments: issue.comments.slice(0, embedComments).map((c) => commentJson(c, userJson)),
         maxResults: embedComments,
         total: issue.comments.length,
         startAt: 0,
@@ -447,13 +505,30 @@ const error = (message: string, status = 400) =>
 const parseJqlDate = (s: string) =>
   new Date(`${s.replace(/\//g, "-").replace(" ", "T")}:00Z`).getTime();
 
-export function createHandler(issues: Map<string, Issue>) {
+export type MockOptions = {
+  /** Cloud shape (D19): Basic auth, /search/jql, account ids, parent epics. */
+  cloud?: boolean;
+  /** Store a posted Blocks link the other way round, to test the direction check (D45). */
+  reversedLinks?: boolean;
+};
+
+export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}) {
+  const cloud = !!opts.cloud;
+  const userJson = userJsonFor(cloud);
   const touch = (issue: Issue) => {
     issue.updated = new Date().toISOString().replace("Z", "+0000");
   };
-  return async (req: Request): Promise<Response> => {
+  const blocks = LINK_TYPES[0];
+  let nextLink = 10000;
+  const links: MockLink[] = [];
+  for (const issue of issues.values())
+    for (const l of issue.links)
+      links.push({ id: String(nextLink++), type: blocks, from: l.inward, to: issue.key });
+  const issueOut = (issue: Issue, embed?: number) => issueJson(issue, issues, embed, links, cloud);
+
+  const handler = async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
-    if (!req.headers.get("authorization")?.startsWith("Bearer "))
+    if (!req.headers.get("authorization")?.startsWith(cloud ? "Basic " : "Bearer "))
       return new Response("", { status: 401 });
     const agile = /^\/rest\/agile\/1\.0\/board\/(\d+)\/sprint$/.exec(url.pathname);
     if (agile) {
@@ -506,6 +581,36 @@ export function createHandler(issues: Map<string, Issue>) {
         : ((await req.json().catch(() => undefined)) as Record<string, unknown> | undefined);
 
     if (path === "myself") return json({ ...userJson(USERS[0] ?? null), timeZone: "UTC" });
+    if (path === "issueLinkType") return json({ issueLinkTypes: LINK_TYPES });
+    if (path === "issueLink" && req.method === "POST") {
+      const type = LINK_TYPES.find(
+        (t) => t.name === (body?.type as { name?: string } | undefined)?.name,
+      );
+      const inward = (body?.inwardIssue as { key?: string } | undefined)?.key ?? "";
+      const outward = (body?.outwardIssue as { key?: string } | undefined)?.key ?? "";
+      if (!type) return error("No issue link type with that name could be found.", 404);
+      const a = issues.get(inward);
+      const b = issues.get(outward);
+      if (!a || !b) return error("Issue Does Not Exist", 404);
+      if (a === b) return error("You cannot link an issue to itself.");
+      // Meant as "inwardIssue blocks outwardIssue"; some instances keep it reversed.
+      const [from, to] = opts.reversedLinks ? [b, a] : [a, b];
+      links.push({ id: String(nextLink++), type, from: from.key, to: to.key });
+      touch(a);
+      touch(b);
+      return new Response(null, { status: 201 });
+    }
+    const linkPath = /^issueLink\/(\d+)$/.exec(path);
+    if (linkPath && req.method === "DELETE") {
+      const i = links.findIndex((l) => l.id === linkPath[1]);
+      if (i < 0) return error("No issue link with id exists.", 404);
+      const [gone] = links.splice(i, 1);
+      for (const key of [gone?.from, gone?.to]) {
+        const issue = key ? issues.get(key) : undefined;
+        if (issue) touch(issue);
+      }
+      return new Response(null, { status: 204 });
+    }
     if (path === "field")
       return json([
         {
@@ -514,26 +619,31 @@ export function createHandler(issues: Map<string, Issue>) {
           custom: false,
           schema: { type: "string", system: "summary" },
         },
-        {
-          id: EPIC_LINK,
-          name: "Epic Link",
-          custom: true,
-          schema: {
-            type: "any",
-            custom: "com.pyxis.greenhopper.jira:gh-epic-link",
-            customId: 10100,
-          },
-        },
-        {
-          id: EPIC_NAME,
-          name: "Epic Name",
-          custom: true,
-          schema: {
-            type: "string",
-            custom: "com.pyxis.greenhopper.jira:gh-epic-label",
-            customId: 10102,
-          },
-        },
+        // Cloud retired Epic Link and Epic Name for `parent` (D19).
+        ...(cloud
+          ? []
+          : [
+              {
+                id: EPIC_LINK,
+                name: "Epic Link",
+                custom: true,
+                schema: {
+                  type: "any",
+                  custom: "com.pyxis.greenhopper.jira:gh-epic-link",
+                  customId: 10100,
+                },
+              },
+              {
+                id: EPIC_NAME,
+                name: "Epic Name",
+                custom: true,
+                schema: {
+                  type: "string",
+                  custom: "com.pyxis.greenhopper.jira:gh-epic-label",
+                  customId: 10102,
+                },
+              },
+            ]),
         {
           id: SPRINT,
           name: "Sprint",
@@ -558,6 +668,11 @@ export function createHandler(issues: Map<string, Issue>) {
       ]);
     if (path === "priority")
       return json(PRIORITIES.map((name, i) => ({ id: String(i + 1), name })));
+    if (path === "priority/search")
+      return json({
+        isLast: true,
+        values: PRIORITIES.map((name, i) => ({ id: String(i + 1), name })),
+      });
     if (path === "project")
       return json([
         { id: "PAY", key: "PAY", name: "Payments" },
@@ -578,39 +693,47 @@ export function createHandler(issues: Map<string, Issue>) {
       );
     }
     if (path === "user/assignable/search") {
-      const q = (url.searchParams.get("username") ?? "").toLowerCase();
+      const q = (url.searchParams.get(cloud ? "query" : "username") ?? "").toLowerCase();
       return json(
         USERS.filter((u) => `${u.name} ${u.displayName}`.toLowerCase().includes(q)).map(userJson),
       );
     }
-    if (path === "search" && req.method === "POST") {
+    const searchPath = cloud ? "search/jql" : "search";
+    if (path === (cloud ? "search" : "search/jql")) return error("Gone", 410);
+    if (path === searchPath && req.method === "POST") {
       const jql = String(body?.jql ?? "");
-      const startAt = Number(body?.startAt ?? 0);
+      const startAt = cloud ? Number(body?.nextPageToken ?? 0) : Number(body?.startAt ?? 0);
       const max = Math.min(Number(body?.maxResults ?? 50), 100);
       let list = [...issues.values()];
       const parents = /^\(parent in \(([^)]*)\)\)/.exec(jql)?.[1]?.split(/,\s*/);
       if (parents) list = list.filter((i) => i.parent && parents.includes(i.parent));
+      // The blocker check reads exactly these keys (D45).
+      const keys = /^key in \(([^)]*)\)$/.exec(jql.trim())?.[1]?.split(/,\s*/);
+      if (keys) list = list.filter((i) => keys.includes(i.key));
       const since = /updated >= "([^"]+)"/.exec(jql)?.[1];
       if (since)
         list = list.filter(
           (i) => new Date(i.updated.replace("+0000", "Z")).getTime() >= parseJqlDate(since),
         );
       list.sort((a, b) => a.updated.localeCompare(b.updated));
-      return json({
-        startAt,
-        maxResults: max,
-        total: list.length,
-        issues: list.slice(startAt, startAt + max).map((i) => issueJson(i, issues)),
-      });
+      const page = list.slice(startAt, startAt + max).map((i) => issueOut(i));
+      if (cloud) {
+        const last = startAt + page.length >= list.length;
+        return json({
+          issues: page,
+          isLast: last,
+          ...(last ? {} : { nextPageToken: String(startAt + page.length) }),
+        });
+      }
+      return json({ startAt, maxResults: max, total: list.length, issues: page });
     }
 
     const meta = /^issue\/createmeta\/([A-Z]+)\/issuetypes(?:\/(\w[\w-]*))?$/.exec(path);
     if (meta) {
-      if (!meta[2])
-        return json({
-          isLast: true,
-          values: ISSUE_TYPES.map((t) => ({ id: t, name: t, subtask: t === "Sub-task" })),
-        });
+      if (!meta[2]) {
+        const types = ISSUE_TYPES.map((t) => ({ id: t, name: t, subtask: t === "Sub-task" }));
+        return json(cloud ? { issueTypes: types } : { isLast: true, values: types });
+      }
       const fieldsMeta = [
         { fieldId: "project", name: "Project", required: true },
         { fieldId: "issuetype", name: "Issue Type", required: true },
@@ -621,12 +744,20 @@ export function createHandler(issues: Map<string, Issue>) {
         { fieldId: "duedate", name: "Due Date", required: false },
         { fieldId: "labels", name: "Labels", required: false },
         ...(meta[2] === "Sub-task" ? [{ fieldId: "parent", name: "Parent", required: true }] : []),
-        ...(meta[2] === "Epic" ? [{ fieldId: EPIC_NAME, name: "Epic Name", required: true }] : []),
-        ...(meta[2] !== "Epic" && meta[2] !== "Sub-task"
-          ? [{ fieldId: EPIC_LINK, name: "Epic Link", required: false }]
-          : []),
+        ...(cloud
+          ? meta[2] !== "Epic" && meta[2] !== "Sub-task"
+            ? [{ fieldId: "parent", name: "Parent", required: false }]
+            : []
+          : [
+              ...(meta[2] === "Epic"
+                ? [{ fieldId: EPIC_NAME, name: "Epic Name", required: true }]
+                : []),
+              ...(meta[2] !== "Epic" && meta[2] !== "Sub-task"
+                ? [{ fieldId: EPIC_LINK, name: "Epic Link", required: false }]
+                : []),
+            ]),
       ];
-      return json({ isLast: true, values: fieldsMeta });
+      return json(cloud ? { fields: fieldsMeta } : { isLast: true, values: fieldsMeta });
     }
     if (path === "issue" && req.method === "POST") {
       const f = (body?.fields ?? {}) as Record<string, unknown>;
@@ -634,7 +765,7 @@ export function createHandler(issues: Map<string, Issue>) {
       const type = (f.issuetype as { id?: string } | undefined)?.id as Issue["type"] | undefined;
       if (!["PAY", "OPS"].includes(project) || !type)
         return error("project and issuetype are required");
-      if (type === "Epic" && !f[EPIC_NAME])
+      if (type === "Epic" && !cloud && !f[EPIC_NAME])
         return json({ errorMessages: [], errors: { [EPIC_NAME]: "Epic Name is required." } }, 400);
       const count = [...issues.values()].filter((i) => i.project === project).length;
       const now = new Date().toISOString().replace("Z", "+0000");
@@ -647,12 +778,18 @@ export function createHandler(issues: Map<string, Issue>) {
         description: (f.description as string | undefined) ?? null,
         status: "To Do",
         priority: (f.priority as { name?: string } | undefined)?.name ?? "Medium",
-        assignee:
-          USERS.find((u) => u.name === (f.assignee as { name?: string } | undefined)?.name) ?? null,
+        assignee: userFrom(f.assignee),
         reporter: USERS[0] as User,
-        epic: (f[EPIC_LINK] as string | undefined) ?? null,
-        epicName: (f[EPIC_NAME] as string | undefined) ?? null,
-        parent: (f.parent as { key?: string } | undefined)?.key ?? null,
+        ...(() => {
+          // On Cloud an epic is the parent of a standard issue.
+          const parentKey = (f.parent as { key?: string } | undefined)?.key ?? null;
+          const epicParent = cloud && parentKey && issues.get(parentKey)?.type === "Epic";
+          return {
+            epic: epicParent ? parentKey : ((f[EPIC_LINK] as string | undefined) ?? null),
+            epicName: (f[EPIC_NAME] as string | undefined) ?? null,
+            parent: epicParent ? null : parentKey,
+          };
+        })(),
         labels: Array.isArray(f.labels) ? f.labels.map(String) : [],
         due: (f.duedate as string | undefined) ?? null,
         created: now,
@@ -674,10 +811,10 @@ export function createHandler(issues: Map<string, Issue>) {
     if (issue) {
       const sub = m?.[2] ?? "";
       if (sub === "" && req.method === "GET") {
-        const histories = (issue.history ?? []).map(historyJson);
+        const histories = (issue.history ?? []).map((h) => historyJson(h, userJson));
         const expand = url.searchParams.get("expand")?.split(",") ?? [];
         return json({
-          ...issueJson(issue, issues, 1000),
+          ...issueOut(issue, 1000),
           ...(expand.includes("changelog")
             ? {
                 changelog: {
@@ -694,7 +831,7 @@ export function createHandler(issues: Map<string, Issue>) {
         const all = issue.history ?? [];
         const startAt = Number(url.searchParams.get("startAt") ?? 0);
         const max = Math.min(Number(url.searchParams.get("maxResults") ?? 100), 100);
-        const values = all.slice(startAt, startAt + max).map(historyJson);
+        const values = all.slice(startAt, startAt + max).map((h) => historyJson(h, userJson));
         return json({
           startAt,
           maxResults: max,
@@ -716,6 +853,14 @@ export function createHandler(issues: Map<string, Issue>) {
           issue.priority = priority;
         }
         if ("duedate" in f) issue.due = (f.duedate as string | null) ?? null;
+        if (cloud && "parent" in f) {
+          const parentKey = (f.parent as { key?: string } | null)?.key ?? null;
+          if (parentKey && issues.get(parentKey)?.type !== "Epic")
+            return json({ errorMessages: [], errors: { parent: "Not an epic." } }, 400);
+          issue.epic = parentKey;
+        }
+        if (cloud && Array.isArray((body?.update as { parent?: unknown } | undefined)?.parent))
+          issue.epic = null;
         if (STORY_POINTS in f)
           issue.points = typeof f[STORY_POINTS] === "number" ? (f[STORY_POINTS] as number) : null;
         if (EPIC_LINK in f) {
@@ -731,8 +876,7 @@ export function createHandler(issues: Map<string, Issue>) {
         return new Response(null, { status: 204 });
       }
       if (sub === "/assignee" && req.method === "PUT") {
-        const name = body?.name as string | null;
-        const assignee = name ? (USERS.find((u) => u.name === name) ?? null) : null;
+        const assignee = userFrom(body);
         if (assignee?.name !== issue.assignee?.name)
           addHistory(issue, USERS[0] as User, Date.now(), [assigneeItem(issue.assignee, assignee)]);
         issue.assignee = assignee;
@@ -744,7 +888,7 @@ export function createHandler(issues: Map<string, Issue>) {
           startAt: 0,
           maxResults: 1000,
           total: issue.comments.length,
-          comments: issue.comments.map(commentJson),
+          comments: issue.comments.map((c) => commentJson(c, userJson)),
         });
       if (sub === "/comment" && req.method === "POST") {
         const now = new Date().toISOString().replace("Z", "+0000");
@@ -757,7 +901,7 @@ export function createHandler(issues: Map<string, Issue>) {
         };
         issue.comments.push(c);
         touch(issue);
-        return json(commentJson(c), 201);
+        return json(commentJson(c, userJson), 201);
       }
       if (sub === "/transitions" && req.method === "GET")
         return json({
@@ -784,7 +928,9 @@ export function createHandler(issues: Map<string, Issue>) {
           fields:
             issue.type === "Sub-task" || issue.type === "Epic"
               ? {}
-              : { [EPIC_LINK]: { name: "Epic Link", required: false, operations: ["set"] } },
+              : cloud
+                ? { parent: { name: "Parent", required: false, operations: ["set"] } }
+                : { [EPIC_LINK]: { name: "Epic Link", required: false, operations: ["set"] } },
         });
       if (sub === "/remotelink" && req.method === "GET") return json(issue.remoteLinks ?? []);
       if (sub === "/remotelink" && req.method === "POST") {
@@ -813,13 +959,18 @@ export function createHandler(issues: Map<string, Issue>) {
     }
     return error(`Mock does not implement ${req.method} ${url.pathname}`, 404);
   };
+  return Object.assign(handler, { links });
 }
 
 if (import.meta.main) {
   const port = flag("port", 8089);
   const issues = generate(flag("issues", 80));
-  Bun.serve({ port, fetch: createHandler(issues) });
+  const cloud = args.includes("--cloud");
+  Bun.serve({
+    port,
+    fetch: createHandler(issues, { cloud, reversedLinks: args.includes("--reversed-links") }),
+  });
   console.log(
-    `Mock Jira DC on http://localhost:${port} with ${issues.size} issues (tracked epic suggestion: PAY-1)`,
+    `Mock Jira ${cloud ? "Cloud (any email and token)" : "DC"} on http://localhost:${port} with ${issues.size} issues (tracked epic suggestion: PAY-1)`,
   );
 }

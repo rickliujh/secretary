@@ -3,6 +3,7 @@ import { Clock, Effect, Layer, Option, SubscriptionRef } from "effect";
 import { jiraIssues } from "@/db/schema";
 import { nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
+import { type BlockerState, type LinkTypes, pickBlocksType } from "@/services/blockers/logic";
 import { bindDb, Db, type DbError } from "@/services/db";
 import { JiraClient, type JiraError, type RawIssue, type SearchResult } from "@/services/jira";
 import { discoverFieldIds, effectiveFieldIds, type FieldIds } from "@/services/jira/fields";
@@ -17,6 +18,7 @@ import {
   type SyncResult,
   type SyncStatus,
 } from ".";
+import { syncBlockers } from "./blockers";
 import { buildScopeJql, chunk, withUpdatedSince } from "./jql";
 import {
   getState,
@@ -109,6 +111,8 @@ const make = Effect.gen(function* () {
     /** Sprints seen on synced issues, by id, and the projects on each board. */
     sprints: Map<number, SprintInfo>;
     boardProjects: Map<number, Set<string>>;
+    /** State of every issue this run fetched, so the blocker step need not read them again. */
+    returned: Map<string, BlockerState>;
   };
 
   /** Pages through one JQL query, storing issues and comments. Returns max `updated`. */
@@ -144,6 +148,11 @@ const make = Effect.gen(function* () {
                 new Set([...(ctx.boardProjects.get(sprint.boardId) ?? []), m.issue.projectKey]),
               );
           }
+          ctx.returned.set(m.issue.key, {
+            status: m.issue.status,
+            statusCategory: m.issue.statusCategory,
+            resolvedAt: m.issue.resolved ?? null,
+          });
           comments.push(...(m.commentsComplete ? m.comments : yield* allComments(m.issue.key)));
           if (!maxUpdated || m.issue.updated > maxUpdated) maxUpdated = m.issue.updated;
         }
@@ -278,6 +287,7 @@ const make = Effect.gen(function* () {
         syncedAt: nowIso(),
         sprints: new Map(),
         boardProjects: new Map(),
+        returned: new Map(),
       };
 
       const main = yield* syncQuery(
@@ -354,6 +364,18 @@ const make = Effect.gen(function* () {
       yield* patch({ phase: "Reading sprints" });
       yield* syncSprints(ctx, full);
 
+      // The "blocks" link type, for proposing "blocked by" links (D45).
+      if (full || !(yield* withDb(getState(SYNC_KEYS.linkTypes)))) {
+        const types = yield* jira.issueLinkTypes.pipe(Effect.option);
+        if (Option.isSome(types))
+          yield* withDb(
+            setState(
+              SYNC_KEYS.linkTypes,
+              JSON.stringify({ blocks: pickBlocksType(types.value) } satisfies LinkTypes),
+            ),
+          );
+      }
+
       // Tracked-epic flags follow settings even for issues not updated in this run.
       yield* q((d) =>
         d.update(jiraIssues).set({
@@ -372,6 +394,24 @@ const make = Effect.gen(function* () {
         );
         staleMarked = stale.length;
       }
+
+      // Blockers outside this run (or the scope) are read fresh; woken issues are marked (D45).
+      yield* patch({ phase: "Checking blockers" });
+      const blockers = yield* syncBlockers({
+        me: me.id,
+        returned: ctx.returned,
+        at: nowIso(),
+      }).pipe(
+        withDb,
+        Effect.provideService(JiraClient, jira),
+        Effect.catchAll((e) =>
+          Effect.sync(() => {
+            logger.warn("Blocker check failed", e.message);
+            return null;
+          }),
+        ),
+      );
+      if (blockers?.woke.length) logger.info(`Unblocked: ${blockers.woke.join(", ")}`);
 
       const previous = yield* withDb(getState(SYNC_KEYS.watermark));
       if (maxUpdated && (!previous || maxUpdated > previous))

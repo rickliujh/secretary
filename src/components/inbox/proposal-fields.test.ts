@@ -141,3 +141,23 @@ describe("viewPayload (stored payloads that no longer parse)", () => {
     expect(viewPayload(ok)).toBe(ok);
   });
 });
+
+describe("link_issues edit form (D45)", () => {
+  test("target and blocker round trip, and a changed blocker parses", () => {
+    const p = ProposalPayloadSchema.parse({
+      kind: "link_issues",
+      target: "$new:1",
+      blocker: "PLAT-1",
+    });
+    expect(isEditable(p)).toBe(true);
+    const values = toFormValues(p);
+    expect(values).toEqual({ target: "$new:1", blocker: "PLAT-1" });
+    expect(ProposalPayloadSchema.parse(fromFormValues(p, values))).toEqual(p);
+    const edited = fromFormValues(p, { ...values, blocker: "PAY-2" });
+    expect(ProposalPayloadSchema.parse(edited)).toMatchObject({ blocker: "PAY-2" });
+    // The same issue on both ends does not parse.
+    expect(
+      ProposalPayloadSchema.safeParse(fromFormValues(p, { ...values, blocker: "$new:1" })).success,
+    ).toBe(false);
+  });
+});

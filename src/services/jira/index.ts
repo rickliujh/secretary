@@ -5,6 +5,7 @@ import type {
   CreateMetaField,
   CreateMetaIssueType,
   EditMeta,
+  IssueLinkType,
   JiraField,
   JiraUser,
   Priority,
@@ -106,6 +107,8 @@ export interface JiraClientShape {
     issueTypeId: string,
   ) => Effect.Effect<readonly CreateMetaField[], JiraError>;
   readonly remoteLinks: (key: string) => Effect.Effect<readonly RemoteLink[], JiraError>;
+  /** `GET /issueLinkType`: the instance's link types, to find "blocks" (D45). */
+  readonly issueLinkTypes: Effect.Effect<readonly IssueLinkType[], JiraError>;
   readonly projectStatuses: (projectKey: string) => Effect.Effect<ProjectStatuses, JiraError>;
   /**
    * Downloads an attachment's content (its `content` URL) with the user's

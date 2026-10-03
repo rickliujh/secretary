@@ -130,6 +130,10 @@ export const FIELD_SPECS: Record<EditableKind, FieldSpec[]> = {
     { path: "expectedAt", label: "Expected", type: "date" },
     { path: "nextFollowupAt", label: "Next follow-up", type: "date" },
   ],
+  link_issues: [
+    { path: "target", label: "Waits (is blocked)", type: "issue", issues: "any" },
+    { path: "blocker", label: "Until this is done", type: "issue", issues: "any" },
+  ],
   update_person: [
     { path: "personId", label: "Contact", type: "select", options: peopleOpts },
     { path: "changes.title", label: "Title", type: "text", optionalChange: true },

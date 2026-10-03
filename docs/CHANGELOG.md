@@ -805,3 +805,66 @@ Not verified yet
 - Nothing here was run in the desktop app: the sidebar, the tabs, the panel over the
   ticket and dependency sheets, and the redirects in a real window were checked by
   typecheck, the route tests and review only.
+
+## Phase 12: Jira links and blocker wake-up (2026-10-03)
+
+Why: "do this when PLAT-812 is done" had nowhere to go, and nothing noticed when a
+blocker outside the sync scope closed (requirements FR-3.8, design.md D45).
+
+Built
+- Intake (prompt version 8) proposes "blocked by" links (`link_issues`, target and
+  blocker) when the input says something waits for a ticket ("when X is done", "after
+  X ships", "once X is deployed", "blocked by X"). It is offered only when sync has
+  found the instance's "blocks" link type (`GET /issueLinkType`, kept in
+  `jira.linkTypes`). Candidates show what they are already blocked by; a link to
+  itself, one Jira already has, a duplicate or two issues blocking each other go back
+  for repair.
+- A ticket named in the text that the cache does not hold (another team's PLAT-812)
+  is read once from Jira and offered as a candidate.
+- On approval the Executor posts the link, reads the target back and checks it reads
+  "target is blocked by blocker"; a link stored the other way round is deleted and
+  posted swapped. Approving a link Jira already has writes nothing.
+- A small ask that waits for a ticket shows "Blocked by PLAT-812" on its Track row,
+  and Track creates the ticket, then the link. The proposal card and edit dialog
+  show both ends.
+- After every sync the blockers of your open tickets that the run did not return are
+  read with one `key in (...)` search per 100 keys (status and resolution date only)
+  into `jira.blockers`; ranking, the report, planning and the picker prefer that
+  state to the copy embedded in the link. `issue_meta` keeps each ticket's open
+  blockers; when the last one closes the ticket wakes up (`unblocked_at`,
+  `unblocked_by`, migration 0012), and a blocker that reopens puts it back to sleep.
+- The reminder loop sends one notification per woken ticket ("PAY-5 is unblocked",
+  with the reason), under the same Reminders setting as follow-ups.
+- For Today (Phase 16): `loadWokenTickets` in `src/services/blockers/queries.ts`
+  lists woken tickets, newest first, with the reason ("PLAT-812 moved to Done on
+  2 Oct"); the rules are the pure `wokenTickets` in `blockers/logic.ts`.
+- Mock Jira: `GET /issueLinkType`, `POST /issueLink`, `DELETE /issueLink/{id}`, links
+  on both issues, JQL `key in (...)`, `--reversed-links`, and a `--cloud` shape (Basic
+  auth, `/search/jql` token paging, account ids, parent epics, `/priority/search`).
+
+Decisions and defaults
+- The POST names the blocker as `inwardIssue`; the direction check is what makes
+  that safe on instances that read it the other way.
+- "Your open tickets" for the blocker step are those assigned to you and not done.
+- A key is read from Jira once per app session, at most five per pasted item.
+- A removed link wakes a ticket like a closed blocker; the reason says the key "no
+  longer blocks it".
+- At most five wake-up notifications per check; the rest follow ten minutes later.
+
+Checklist
+- FR-3.8 AC in a service test against the mock Jira (`blockers.mock-jira.test.ts`):
+  the link is created on approval, the blocker closes outside what incremental sync
+  returns, the next sync reads it with `key in (...)`, sets `unblocked_at` and one
+  reminder is due, none after it is sent; a reopened blocker clears it. The same flow
+  runs in the Cloud shape.
+- The direction check runs against a mock that stores links reversed: POST, DELETE,
+  POST swapped, one correct link left.
+- Two eval cases (a small ask blocked by PLAT-1, which is outside the fixtures and
+  read once; an existing ticket blocked by another) and scripted-model tests for the
+  schema, rule, validation, mapping and the Track row. The live eval was not run.
+
+Known limits
+- Not seen in the running app: the Track row line, the card, the edit dialog and the
+  notification were checked by typecheck, lint and tests only.
+- Only "blocked by" links are written; other link types are not.
+- No Today UI yet; woken tickets are only notified until Phase 16 lists them.

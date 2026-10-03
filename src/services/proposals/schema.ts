@@ -100,6 +100,21 @@ export const LinkDependency = z.object({
   nextFollowupAt: IsoDate.nullable().default(null),
 });
 
+/**
+ * "target is blocked by blocker" as a Jira issue link (FR-3.8, D45): the target
+ * waits until the blocker is done. Both are candidates or `$new` refs.
+ */
+export const LinkIssues = z
+  .object({
+    kind: z.literal("link_issues"),
+    target: IssueRef,
+    blocker: IssueRef,
+  })
+  .refine((p) => p.target !== p.blocker, {
+    message: "An issue cannot block itself",
+    path: ["blocker"],
+  });
+
 export const UpdatePerson = z.object({
   kind: z.literal("update_person"),
   personId: z.string().min(1),
@@ -157,6 +172,7 @@ export const ProposalPayloadSchema = z.discriminatedUnion("kind", [
   TransitionIssue,
   MoveToSprint,
   LinkDependency,
+  LinkIssues,
   UpdatePerson,
   UpdateTeam,
   Remember,
@@ -176,6 +192,7 @@ export const PROPOSAL_LABELS: Record<ProposalKind, string> = {
   transition_issue: "Move",
   move_to_sprint: "Move to sprint",
   link_dependency: "Track dependency",
+  link_issues: "Blocked by",
   update_person: "Update contact",
   update_team: "Update team",
   remember: "Remember",
@@ -225,6 +242,9 @@ export function issueRefs(p: ProposalPayload, opts: IssueRefsOptions = {}): stri
     case "link_dependency":
       values.push(p.target);
       break;
+    case "link_issues":
+      values.push(p.target, p.blocker);
+      break;
     case "draft_message":
       values.push(...p.issueKeys);
       break;
@@ -251,6 +271,8 @@ export function resolveRefs(
     case "transition_issue":
     case "link_dependency":
       return { ...p, target: r(p.target) ?? p.target };
+    case "link_issues":
+      return { ...p, target: r(p.target) ?? p.target, blocker: r(p.blocker) ?? p.blocker };
     case "draft_message":
       return { ...p, issueKeys: p.issueKeys.map((k) => r(k) ?? k) };
     default:
@@ -273,6 +295,8 @@ export function describePayload(p: ProposalPayload): string {
       return `Move ${p.target} to sprint ${p.sprintName}`;
     case "link_dependency":
       return `${p.target} waits on ${p.label}`;
+    case "link_issues":
+      return `${p.target} is blocked by ${p.blocker}`;
     case "update_person":
       return "Update contact profile";
     case "update_team":

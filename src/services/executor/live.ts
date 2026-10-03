@@ -14,8 +14,11 @@ import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redactValue } from "@/lib/redact";
+import { parseLinkTypes } from "@/services/blockers/logic";
+import { type BlockLink, blockLinks } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
 import { CreatedIssueSchema, JiraClient } from "@/services/jira";
+import { parseIssueLinks } from "@/services/jira/schemas";
 import { issueRefs, type ProposalPayload } from "@/services/proposals/schema";
 import { userActiveSprints } from "@/services/sprints/active";
 import { Sync } from "@/services/sync";
@@ -295,6 +298,75 @@ const make = Effect.gen(function* () {
       );
     });
 
+  /** The target's "blocks" links, read from Jira (not the cache) for the direction check. */
+  const blockLinksOf = (key: string) =>
+    Effect.map(jira.getIssue(key, { fields: ["issuelinks"] }), (raw) =>
+      blockLinks(parseIssueLinks(raw.fields.issuelinks)),
+    );
+
+  /**
+   * "target is blocked by blocker" (D45). Link direction in Jira's API is easy to
+   * get backwards and some instances store it reversed, so after the POST the
+   * target is read again; a link that came out the wrong way round is deleted and
+   * posted swapped.
+   */
+  const linkIssues = (p: Extract<ProposalPayload, { kind: "link_issues" }>, proposalId: string) =>
+    Effect.gen(function* () {
+      const { blocks } = parseLinkTypes(yield* withDb(getState(SYNC_KEYS.linkTypes)));
+      if (!blocks)
+        return yield* fail(
+          "unsupported",
+          'Jira has no "blocks" link type the app knows of. Sync again, or link the issues in Jira.',
+        );
+      const message = `${p.target} is now blocked by ${p.blocker}`;
+      const isRight = (links: readonly BlockLink[]) =>
+        links.some((l) => l.direction === "blockedBy" && l.key === p.blocker);
+      const reversed = (links: readonly BlockLink[]) =>
+        links.find((l) => l.direction === "blocks" && l.key === p.blocker && l.id);
+      if (isRight(yield* blockLinksOf(p.target))) {
+        yield* audit(proposalId, "link_issues", p.target, p, { skipped: "already linked" });
+        return {
+          message: `${p.target} is already blocked by ${p.blocker}`,
+          issueKey: p.target,
+        } satisfies ProposalResult;
+      }
+      const link = (swapped: boolean) =>
+        run(
+          {
+            kind: "link_issues",
+            issueKey: p.target,
+            blockerKey: p.blocker,
+            linkType: blocks.name,
+            swapped,
+          },
+          { proposalId },
+        );
+      yield* link(false);
+      const after = yield* blockLinksOf(p.target);
+      if (isRight(after)) return { message, issueKey: p.target } satisfies ProposalResult;
+      const wrong = reversed(after);
+      if (!wrong?.id)
+        return {
+          message: `Linked ${p.target} and ${p.blocker}`,
+          issueKey: p.target,
+          warning: `Jira does not show ${p.target} as blocked by ${p.blocker} after linking them; check the link in Jira.`,
+        } satisfies ProposalResult;
+      // The instance stored it the other way round: replace it with the swapped form.
+      logger.warn(`${p.target} came out blocking ${p.blocker}; linking it the other way`);
+      yield* run(
+        { kind: "delete_issue_link", issueKey: p.target, linkId: wrong.id },
+        { proposalId },
+      );
+      yield* link(true);
+      if (isRight(yield* blockLinksOf(p.target)))
+        return { message, issueKey: p.target } satisfies ProposalResult;
+      return {
+        message: `Linked ${p.target} and ${p.blocker}`,
+        issueKey: p.target,
+        warning: `Jira still does not show ${p.target} as blocked by ${p.blocker}; check the link in Jira.`,
+      } satisfies ProposalResult;
+    });
+
   const transition = (
     p: Extract<ProposalPayload, { kind: "transition_issue" }>,
     proposalId: string,
@@ -431,6 +503,8 @@ const make = Effect.gen(function* () {
             issueKey: payload.target,
           } satisfies ProposalResult;
         }
+        case "link_issues":
+          return yield* linkIssues(payload, proposalId);
         case "update_person": {
           const person = yield* q((d) =>
             d.select().from(people).where(eq(people.id, payload.personId)).get(),

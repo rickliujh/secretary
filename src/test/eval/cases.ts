@@ -40,6 +40,15 @@ export type EvalCase = {
 /** The small-asks home the `home` cases run with. */
 export const EVAL_HOME = "OPS";
 
+/**
+ * Tickets outside the sync scope that the live eval's Jira serves when asked,
+ * so a key named in the text is read once and offered (D45). The live eval also
+ * serves a "Blocks" link type, so every case may propose link_issues.
+ */
+export const EVAL_OUTSIDE_ISSUES: Record<string, string> = {
+  "PLAT-1": "Deploy the new ledger API",
+};
+
 export const EVAL_CASES: EvalCase[] = [
   {
     name: "cancellation gets a comment saying why",
@@ -349,6 +358,31 @@ export const EVAL_CASES: EvalCase[] = [
         },
       ],
       forbiddenKinds: ["needs_clarification"],
+    },
+    single: true,
+  },
+  {
+    name: "blocker: a small ask waits for a ticket outside the cache",
+    source: "typed",
+    home: true,
+    text: "Once PLAT-1 is deployed, tell the vendor they can switch to the new ledger API.",
+    expect: {
+      required: [
+        { kind: "create_issue", target: EVAL_HOME, fields: { smallAsk: true } },
+        { kind: "link_issues", fields: { blocker: "PLAT-1" } },
+      ],
+      forbiddenKinds: ["needs_clarification"],
+    },
+    single: true,
+  },
+  {
+    name: "blocker: an existing ticket waits for another",
+    source: "teams",
+    sender: "ana",
+    text: "The refund rounding fix (PAY-4) can only ship after the ledger export PAY-2 is done.",
+    expect: {
+      required: [{ kind: "link_issues", target: "PAY-4", fields: { blocker: "PAY-2" } }],
+      forbiddenKinds: ["create_issue"],
     },
     single: true,
   },

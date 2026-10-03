@@ -12,12 +12,13 @@ import {
   type ReportOutput,
   validateReport,
 } from "@/prompts/report";
+import { parseBlockers } from "@/services/blockers/logic";
 import { loadDashboardInputs } from "@/services/dashboard/data";
 import { blockInfo, buildDashboard } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
 import { listDependencies } from "@/services/dependencies/queries";
 import { JiraClient } from "@/services/jira";
-import { IssueLinkSchema } from "@/services/jira/schemas";
+import { parseIssueLinks } from "@/services/jira/schemas";
 import { Llm } from "@/services/llm";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, parseSprintState, SYNC_KEYS, setState } from "@/services/sync/state";
@@ -40,12 +41,6 @@ const HISTORY_CONCURRENCY = 4;
 const Cached = z.custom<Report>(
   (v) => typeof v === "object" && v !== null && "talkTrack" in v && "tickets" in v,
 );
-
-const linksOf = (value: unknown) =>
-  readJson(value, z.array(z.unknown()), []).flatMap((l) => {
-    const r = IssueLinkSchema.safeParse(l);
-    return r.success ? [r.data] : [];
-  });
 
 const make = Effect.gen(function* () {
   const llm = yield* Llm;
@@ -93,10 +88,12 @@ const make = Effect.gen(function* () {
           .where(eq(jiraIssues.stale, false))
           .all(),
       );
+      // Blocker states read after sync win over the status embedded in links (D45).
+      const fresh = parseBlockers(yield* withDb(getState(SYNC_KEYS.blockers)));
       const issues: (RecapIssue & { assigneeDisplay: string | null })[] = rows.map(
         ({ links, ...r }) => ({
           ...r,
-          blockedBy: blockInfo(linksOf(links)).blockedBy,
+          blockedBy: blockInfo(parseIssueLinks(links), fresh).blockedBy,
         }),
       );
       const sprints = parseSprintState(yield* withDb(getState(SYNC_KEYS.sprints))).sprints;

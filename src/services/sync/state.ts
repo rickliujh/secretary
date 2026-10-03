@@ -24,6 +24,10 @@ export const SYNC_KEYS = {
   projectMeta: "jira.projectMeta",
   /** JSON SprintState: every known sprint with dates, for the sprint calendar (D23). */
   sprints: "jira.sprints",
+  /** JSON LinkTypes: the instance's "blocks" issue link type, from GET /issueLinkType (D45). */
+  linkTypes: "jira.linkTypes",
+  /** JSON BlockerMap: fresh status of the blockers of the user's open issues, after each sync (D45). */
+  blockers: "jira.blockers",
   /** JSON CleanupResult of the last storage cleanup (D34). */
   lastCleanup: "app.lastCleanup",
 } as const;

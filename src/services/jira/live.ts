@@ -19,6 +19,7 @@ import {
   EditMetaSchema,
   FieldSchema,
   type IssueChange,
+  IssueLinkTypesSchema,
   IssueWithChangelogSchema,
   JiraClient,
   JiraError,
@@ -253,6 +254,7 @@ const make = Effect.gen(function* () {
       ),
     remoteLinks: (key) =>
       call(z.array(RemoteLinkSchema), `issue/${encodeURIComponent(key)}/remotelink`),
+    issueLinkTypes: call(IssueLinkTypesSchema, "issueLinkType"),
     send: (req) =>
       call(
         z.unknown(),

@@ -86,7 +86,7 @@ const make = Effect.gen(function* () {
           inputs.issues
             .filter((i) => i.statusCategory !== "done")
             .map((i) => {
-              const b = blockInfo(i.links);
+              const b = blockInfo(i.links, inputs.blockers);
               return {
                 key: i.key,
                 priority: i.priority,
@@ -117,7 +117,7 @@ const make = Effect.gen(function* () {
         sprint: i.sprint,
         dueDate: i.dueDate,
         resolved: extra.get(i.key)?.resolved ?? null,
-        blockedBy: blockInfo(i.links).blockedBy,
+        blockedBy: blockInfo(i.links, inputs.blockers).blockedBy,
         waitingOn: depsOf(i.key).map((d) => ({ label: d.label, expectedAt: d.expectedAt })),
         score: scores.get(i.key) ?? 0,
       }));

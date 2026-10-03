@@ -74,7 +74,7 @@ export function SmallAskRow({
   const lines = members.map((m) => ({
     id: m.id,
     status: m.status,
-    text: bundleLine((m.editedPayload ?? m.payload) as ProposalPayload) ?? m.kind,
+    text: bundleLine((m.editedPayload ?? m.payload) as ProposalPayload, payload.ref) ?? m.kind,
   }));
   const requester = payload.requesterPersonId
     ? (lookups.person.get(payload.requesterPersonId)?.displayName ?? null)

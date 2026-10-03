@@ -15,7 +15,7 @@ import {
  * Kinds that may join a Track row, each summarised in one line on the row face
  * (`bundleLine`). Adding a kind means adding its line there.
  */
-export const BUNDLE_KINDS = ["link_dependency"] as const satisfies ProposalKind[];
+export const BUNDLE_KINDS = ["link_dependency", "link_issues"] as const satisfies ProposalKind[];
 export type BundleKind = (typeof BUNDLE_KINDS)[number];
 
 const isBundleKind = (kind: string): kind is BundleKind =>
@@ -86,11 +86,18 @@ export function groupSmallAsks<P extends BundleProposal>(
   });
 }
 
-/** One line per member for the row face, so every write Track runs is visible. */
-export function bundleLine(p: ProposalPayload): string | null {
+/**
+ * One line per member for the row face, so every write Track runs is visible.
+ * `self` is the create's ref: a blocker link reads from the new ticket's side.
+ */
+export function bundleLine(p: ProposalPayload, self?: string): string | null {
   switch (p.kind) {
     case "link_dependency":
       return `Waits on ${p.label}`;
+    case "link_issues":
+      if (p.target === self) return `Blocked by ${p.blocker}`;
+      if (p.blocker === self) return `Blocks ${p.target}`;
+      return `${p.target} blocked by ${p.blocker}`;
     default:
       return null;
   }

@@ -40,6 +40,7 @@ function payloadTarget(p: ProposalPayload): string | undefined {
     case "transition_issue":
     case "move_to_sprint":
     case "link_dependency":
+    case "link_issues":
       return p.target;
     case "create_issue":
       return p.epic ?? p.projectKey;

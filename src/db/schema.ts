@@ -93,6 +93,14 @@ export const issueMeta = sqliteTable("issue_meta", {
   health: text("health"),
   /** The contact who asked for this issue, for a small ask (FR-10.4, D44). */
   requesterPersonId: text("requester_person_id"),
+  /** Keys of the issue's open blockers at the last sync; null before the first (D45). */
+  openBlockers: text("open_blockers", { mode: "json" }).$type<string[]>(),
+  /** When the last open blocker closed (the issue "woke up"); cleared if one reopens (D45). */
+  unblockedAt: text("unblocked_at"),
+  /** The blocker whose closing woke the issue. */
+  unblockedBy: text("unblocked_by"),
+  /** When the one OS notification for the wake-up was sent. */
+  unblockNotifiedAt: text("unblock_notified_at"),
 });
 
 export const issueNotes = sqliteTable(

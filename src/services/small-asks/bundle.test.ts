@@ -88,6 +88,31 @@ describe("groupSmallAsks (D44)", () => {
     ]);
   });
 
+  test("a blocker link on the new ticket joins; one that also needs another new ticket does not", () => {
+    const linkOf = (id: string, target: string, blocker: string): BundleProposal => ({
+      ...dep(id, target),
+      kind: "link_issues",
+      payload: { kind: "link_issues", target, blocker },
+    });
+    const list = [
+      create("c1", "$new:1", true),
+      linkOf("l1", "$new:1", "PLAT-1"),
+      // Waits on a second new ticket that is not created yet.
+      linkOf("l2", "$new:1", "$new:2"),
+      create("c2", "$new:2", false),
+    ];
+    expect(shape(groupSmallAsks(list))).toEqual(["track c1 [l1]", "l2", "c2"]);
+    // Once $new:2 exists, the same link may join.
+    const executed = list.map((p) => (p.id === "c2" ? { ...p, status: "executed" } : p));
+    expect(shape(groupSmallAsks(executed))).toEqual(["track c1 [l1,l2]", "c2"]);
+    expect(bundleLine({ kind: "link_issues", target: "$new:1", blocker: "PLAT-1" }, "$new:1")).toBe(
+      "Blocked by PLAT-1",
+    );
+    expect(bundleLine({ kind: "link_issues", target: "PAY-2", blocker: "$new:1" }, "$new:1")).toBe(
+      "Blocks PAY-2",
+    );
+  });
+
   test("the row face has one line per member", () => {
     expect(
       bundleLine({
