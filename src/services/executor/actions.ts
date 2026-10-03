@@ -10,6 +10,11 @@ export const JiraActionSchema = z.discriminatedUnion("kind", [
     kind: z.literal("add_comment"),
     issueKey: IssueKey,
     bodyMarkdown: z.string().trim().min(1),
+    /**
+     * Wiki markup sent instead of converting `bodyMarkdown`: an approved proposal's
+     * body, already converted and made safe by `proposalTextToWiki` (D51).
+     */
+    bodyWiki: z.string().trim().min(1).optional(),
   }),
   z.object({
     kind: z.literal("transition"),

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { Cause, Effect, Layer } from "effect";
 import {
   actionsLog,
@@ -14,6 +14,7 @@ import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redactValue } from "@/lib/redact";
+import { wikiSafetyWarning } from "@/lib/wiki-safe";
 import { parseLinkTypes } from "@/services/blockers/logic";
 import { type BlockLink, blockLinks } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
@@ -36,6 +37,7 @@ import {
   buildJiraWrite,
   droppedFieldsWarning,
   MappingError,
+  proposalTextToWiki,
 } from "./jira-mapping";
 
 const make = Effect.gen(function* () {
@@ -72,6 +74,39 @@ const make = Effect.gen(function* () {
 
   const appendNote = (existing: string | null, note: string | null) =>
     note ? `${existing ? `${existing.trimEnd()}\n\n` : ""}- ${localDate()}: ${note}` : existing;
+
+  /**
+   * Jira users a mention in proposal text may name (D51): contacts with a Jira
+   * id, the issue's assignee and reporter (from the cache, or as given for a new
+   * issue), and the user, who is the reporter of anything they create.
+   */
+  const knownJiraUsers = (issueKey: string | null, extra: readonly (string | null)[] = []) =>
+    Effect.gen(function* () {
+      const me = yield* withDb(getState(SYNC_KEYS.username));
+      const contacts = yield* q((d) =>
+        d
+          .select({ id: people.jiraUsername })
+          .from(people)
+          .where(isNotNull(people.jiraUsername))
+          .all(),
+      );
+      const issue = issueKey
+        ? yield* q((d) =>
+            d
+              .select({ assignee: jiraIssues.assignee, reporter: jiraIssues.reporter })
+              .from(jiraIssues)
+              .where(eq(jiraIssues.key, issueKey))
+              .get(),
+          )
+        : undefined;
+      return [
+        me ?? null,
+        ...contacts.map((c) => c.id),
+        issue?.assignee ?? null,
+        issue?.reporter ?? null,
+        ...extra,
+      ];
+    });
 
   /** A single user-initiated or approved Jira write: validate, send, log, re-fetch. */
   const run = (input: JiraAction, opts: { proposalId?: string } = {}) =>
@@ -152,6 +187,7 @@ const make = Effect.gen(function* () {
       }
       const fields = yield* jira.createMetaFields(p.projectKey, type.id);
       const deployment = yield* jira.deployment;
+      const knownUsers = yield* knownJiraUsers(null, [p.assignee]);
       const plan = yield* Effect.try({
         try: () =>
           buildCreateIssue(
@@ -169,7 +205,7 @@ const make = Effect.gen(function* () {
               dueDate: p.dueDate,
               labels: p.labels,
             },
-            { deployment, fieldIds, fields },
+            { deployment, fieldIds, fields, knownUsers },
           ),
         catch: (e) => fail("unsupported", e instanceof Error ? e.message : String(e)),
       });
@@ -223,6 +259,8 @@ const make = Effect.gen(function* () {
         );
       const dropped = droppedFieldsWarning(plan.dropped, `${type.name}`, p.projectKey);
       if (dropped) warnings.push(dropped);
+      const madeSafe = wikiSafetyWarning(plan.safety, "description");
+      if (madeSafe) warnings.push(madeSafe);
       // Who asked, so "what do I owe Dana" can be answered locally (FR-10.4).
       if (p.requesterPersonId) {
         const requesterPersonId = p.requesterPersonId;
@@ -454,11 +492,20 @@ const make = Effect.gen(function* () {
       switch (payload.kind) {
         case "create_issue":
           return yield* createIssue(payload, proposalId);
-        case "add_comment":
-          return yield* jiraAction(
-            { kind: "add_comment", issueKey: payload.target, bodyMarkdown: payload.bodyMd },
+        case "add_comment": {
+          const safe = proposalTextToWiki(payload.bodyMd, yield* knownJiraUsers(payload.target));
+          const result = yield* jiraAction(
+            {
+              kind: "add_comment",
+              issueKey: payload.target,
+              bodyMarkdown: payload.bodyMd,
+              bodyWiki: safe.wiki,
+            },
             `Commented on ${payload.target}`,
           );
+          const warning = wikiSafetyWarning(safe, "comment");
+          return warning ? { ...result, warning } : result;
+        }
         case "transition_issue":
           return yield* transition(payload, proposalId);
         case "move_to_sprint":

@@ -9,6 +9,7 @@ import {
   descriptionToWiki,
   droppedFieldsWarning,
   MAX_SPRINT_MOVE_ISSUES,
+  proposalTextToWiki,
 } from "./jira-mapping";
 
 const fieldIds = {
@@ -342,5 +343,69 @@ describe("pasted text in a small ask's description (D44)", () => {
     );
     const body = plan.request.body as { fields: { description: string } };
     expect(body.fields.description).toBe(descriptionToWiki(md));
+  });
+});
+
+describe("proposal text bound for Jira (D51)", () => {
+  const create = (descriptionMd: string, knownUsers: string[]) =>
+    buildCreateIssue(
+      {
+        projectKey: "ASK",
+        issueTypeId: "2",
+        issueTypeName: "Task",
+        summary: "Send it",
+        descriptionMd,
+        parent: null,
+        epic: null,
+        priority: null,
+        assignee: null,
+        dueDate: null,
+      },
+      {
+        fieldIds: {},
+        fields: [{ fieldId: "description", name: "Description", required: false }],
+        knownUsers,
+      },
+    );
+
+  test("a create's description has remote images as links and strangers as text", () => {
+    const plan = create("See ![](https://x.io/p.png), ask [~jsmith] and [~ana.b]", ["ana.b"]);
+    expect((plan.request.body as { fields: { description: string } }).fields.description).toBe(
+      "See [https://x.io/p.png], ask \\[~jsmith] and [~ana.b]",
+    );
+    expect(plan.safety).toEqual({ images: ["https://x.io/p.png"], mentions: ["jsmith"] });
+  });
+
+  test("a small ask's literal quote is not counted or changed", () => {
+    const md = withProvenance("Send it.", {
+      requester: "Dana",
+      source: "teams",
+      date: "2026-10-01",
+      quote: "![](https://x/p.png) [~jsmith]",
+    });
+    const plan = create(md, []);
+    expect(plan.safety).toEqual({ images: [], mentions: [] });
+    expect((plan.request.body as { fields: { description: string } }).fields.description).toBe(
+      descriptionToWiki(md),
+    );
+  });
+
+  test("proposalTextToWiki converts, keeps the quote literal, then makes safe", () => {
+    expect(proposalTextToWiki("**Hi** [~bob] !https://x/i.png!", ["bob"])).toEqual({
+      wiki: "*Hi* [~bob] [https://x/i.png]",
+      images: ["https://x/i.png"],
+      mentions: [],
+    });
+  });
+
+  test("a comment action with prepared wiki sends it as is; one without converts", () => {
+    const w = (bodyWiki?: string) =>
+      buildJiraWrite(
+        { kind: "add_comment", issueKey: "PAY-2", bodyMarkdown: "![](https://x/p.png)", bodyWiki },
+        { fieldIds },
+      ).body;
+    expect(w("[https://x/p.png]")).toEqual({ body: "[https://x/p.png]" });
+    // The user's own comment from the ticket view is theirs (D51).
+    expect(w()).toEqual({ body: "!https://x/p.png!" });
   });
 });

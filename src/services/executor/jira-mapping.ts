@@ -3,6 +3,7 @@
  * (design.md 7.3).
  */
 import { markdownToWiki } from "@/lib/wiki";
+import { sanitiseProposalWiki, type WikiSafety } from "@/lib/wiki-safe";
 import type { Deployment } from "@/services/atlassian/deployment";
 import type { EditMeta, JiraWrite } from "@/services/jira";
 import type { FieldIds } from "@/services/jira/fields";
@@ -50,7 +51,8 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
       return {
         method: "POST",
         path: issuePath(action.issueKey, "/comment"),
-        body: { body: markdownToWiki(action.bodyMarkdown) },
+        // A proposal's body arrives converted and made safe (D51); the user's own is converted here.
+        body: { body: action.bodyWiki ?? markdownToWiki(action.bodyMarkdown) },
       };
     case "transition":
       return {
@@ -173,6 +175,8 @@ export type CreateIssueInput = {
 
 export type CreateContext = {
   deployment?: Deployment;
+  /** Jira users a mention in the description may name (D51); others become text. */
+  knownUsers?: readonly (string | null)[];
   fieldIds: FieldIds;
   /** Create metadata for the project and issue type. */
   fields: readonly {
@@ -195,6 +199,8 @@ export type CreatePlan = {
   /** Epic to link after creation when Jira does not accept it on the create screen. */
   epicAfterCreate: string | null;
   dropped: DroppedFields;
+  /** What making the description safe changed (D51). */
+  safety: Pick<WikiSafety, "images" | "mentions">;
 };
 
 /**
@@ -236,6 +242,19 @@ export function descriptionToWiki(descriptionMd: string): string {
     .join("\n\n");
 }
 
+/**
+ * The one conversion of proposal text (a create's description, a comment's body)
+ * to wiki markup: Markdown converted, a small ask's quote kept literal (D44), then
+ * remote images turned into links and unknown mentions into text (D51). Text the
+ * user types in the ticket view does not come through here.
+ */
+export function proposalTextToWiki(
+  markdown: string,
+  knownUsers: readonly (string | null)[],
+): WikiSafety {
+  return sanitiseProposalWiki(descriptionToWiki(markdown), knownUsers);
+}
+
 // Fields Jira fills itself or that the app always sends.
 const IMPLICIT_FIELDS = new Set(["project", "issuetype", "summary", "reporter"]);
 
@@ -253,8 +272,13 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
     return true;
   };
   const dropped: DroppedFields = { labels: [], assignee: null, description: false };
-  if (input.descriptionMd)
-    dropped.description = !set("description", descriptionToWiki(input.descriptionMd));
+  const safety: CreatePlan["safety"] = { images: [], mentions: [] };
+  if (input.descriptionMd) {
+    const safe = proposalTextToWiki(input.descriptionMd, ctx.knownUsers ?? []);
+    dropped.description = !set("description", safe.wiki);
+    if (!dropped.description)
+      Object.assign(safety, { images: safe.images, mentions: safe.mentions });
+  }
   if (input.priority) set("priority", { name: input.priority });
   if (
     input.assignee &&
@@ -305,5 +329,6 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
     request: { method: "POST", path: "issue", body: { fields } },
     epicAfterCreate,
     dropped,
+    safety,
   };
 }
