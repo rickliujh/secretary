@@ -2,7 +2,9 @@
 
 Status: approved for implementation. Date: 2026-09-23.
 Owner: Rick Liu. Executor: Claude Opus 5.5 (see `implementation-plan.md`).
-Now: built. Later changes to scope are decisions D19–D28 in `design.md` section 12.
+Now: built. Later changes to scope are decisions D19–D43 in `design.md` section 12.
+Small asks (FR-10 to FR-13, and the additions to FR-2 and FR-3) were approved on
+2026-10-03: decisions D44–D50, built in Phases 11–16 of `implementation-plan.md`.
 
 ## 1. Vision
 
@@ -13,6 +15,12 @@ dependencies (people, teams, ServiceNow incidents), holds organisational context
 (teams, people, personalities, Confluence pages), tells the user what matters most
 right now, drafts outbound Teams messages and emails in the right tone for the
 recipient, and improves from the user's corrections over time.
+
+Since 2026-10-03 the first job is keeping track of **small asks**: the tasks that
+pop up beside the main work (a message from a manager, an email asking for a change,
+an answer to wait for, a request to send, a page to update), often with a condition
+(when a ticket is done, when someone is back). Each one becomes a Jira ticket with one
+click, comes back when its condition is met, and shows in one list (FR-10 to FR-12).
 
 Principles, in priority order:
 
@@ -54,6 +62,10 @@ Principles, in priority order:
 | Contact | A person record with title, team, contact details and communication profile |
 | Memory | A stored rule, fact, preference or correction example the secretary uses in later reasoning |
 | Brief | The dashboard's generated summary of what matters now |
+| Small ask | A small task that arrives outside planned work. It is a Jira ticket in the small-asks home (a configured project and label), assigned to the user (FR-10) |
+| Wait | Another word for an open dependency: someone else has the next move |
+| Blocker | A ticket another ticket waits for, recorded in Jira as an "is blocked by" link (FR-3.8) |
+| Woke up | A ticket whose blockers are all done, or a wait whose owner is back, shown first on Today with the reason |
 
 ## 4. Functional requirements
 
@@ -92,6 +104,8 @@ scope; "Should" is v1 if time permits; "Could" is later.
   - add comment to issue
   - transition issue
   - link dependency (person/team/incident/external) to issue
+  - link two issues: one is blocked by the other (FR-3.8, D45)
+  - update a dependency: log a reply, reschedule or resolve it (FR-3.7, D46)
   - update contact or team profile with a learned fact
   - remember a rule or preference
   - draft a message (hands off to FR-6)
@@ -123,8 +137,23 @@ scope; "Should" is v1 if time permits; "Could" is later.
 - FR-3.4 (Should) Mirror a dependency as a Jira remote link on the issue (opt-in per
   dependency) so teammates see it in Jira.
 - FR-3.5 (Should) OS notifications when a follow-up date arrives while the app runs.
+- FR-3.6 (Must, D47) A contact has an optional "away until" date, set by hand or
+  proposed from a pasted out-of-office reply. While the owner of a dependency is away
+  the dependency sleeps: no reminder, not overdue, not chased. From the first working
+  day after the date it is due for follow-up with the reason "<name> is back".
+- FR-3.7 (Must, D46) Intake can update an open dependency from pasted text: log a
+  reply on its timeline, reschedule it or resolve it. Code supplies the open
+  dependencies that may be meant (by sender, by ticket, by wording); the model picks
+  from them.
+- FR-3.8 (Must, D45) "Do this when ticket X is done" is a Jira "is blocked by" link,
+  proposed by intake and created on approval. The app keeps the state of blockers
+  fresh, also for blockers outside the sync scope, and when the last open blocker of
+  a ticket closes the ticket wakes up: first on Today with the reason, and one OS
+  notification.
 - AC: a dependency created today with expected date yesterday shows as overdue on the
-  dashboard and in the waiting list.
+  dashboard and in the waiting list. Pasting "Bob sent the numbers" from Bob proposes
+  resolving the open dependency on Bob. A ticket blocked by PLAT-1 shows as woken up
+  after the sync that sees PLAT-1 done.
 
 ### FR-4 Organisational context
 
@@ -147,6 +176,10 @@ scope; "Should" is v1 if time permits; "Could" is later.
   drafts than one with "casual, likes context".
 
 ### FR-5 Dashboard and priorities
+
+Now: the dashboard is the Today page (FR-12, D49). FR-5.1's sections are folded into
+its three lists; ranking (FR-5.2), pin and snooze (FR-5.3) and the brief (FR-5.4) are
+unchanged.
 
 - FR-5.1 (Must) Dashboard sections: Top focus (ranked tickets), Waiting on me
   (assigned to me, unresolved, recently updated by others, or mentioned), I am
@@ -222,6 +255,74 @@ scope; "Should" is v1 if time permits; "Could" is later.
   "reset cache" that clears synced Jira data but keeps secretary data.
 - FR-9.7 (Must) Secrets never appear in logs, exports or the UI after entry.
 
+### FR-10 Small asks (D44)
+
+- FR-10.1 (Must) Settings hold the small-asks home: a Jira project, a label (default
+  `small-ask`) and whether new small asks join the active sprint (default yes). Saving
+  checks the project's create metadata and lists required fields the app cannot fill.
+- FR-10.2 (Must) When pasted or typed input holds an ask that no existing ticket
+  covers (reply owed, request to send, question to answer, thing to chase or check,
+  document to update), intake proposes a ticket in the home. Code sets project, label,
+  assignee (the user) and sprint; the model writes the summary and due date and picks
+  the issue type and epic from lists the code supplies. An ask that belongs to an
+  existing story becomes a sub-task of it.
+- FR-10.3 (Must) The proposal shows as one compact row: summary, issue type and epic
+  (each changeable from a list), what it waits on, and a Track button that approves
+  the ticket and the proposals that hang on it (dependency, blocker link) in one
+  click. The full cards are one click away. Nothing is created without that click.
+- FR-10.4 (Must) The ticket records who asked: a line and the quoted source in the
+  description, and a local link to the contact so "what do I owe Dana" can be answered.
+- FR-10.5 (Must) With no home configured, intake behaves as before and the Inbox
+  points to the setting once.
+- FR-10.6 (Later) Private asks that the team must not see. Not built; the home is an
+  ordinary project.
+- AC: with a home set, pasting "can you send me the Q3 numbers by Friday?" from a
+  contact yields one row; Track creates a ticket in the home project with the label,
+  assigned to the user, in the active sprint, due Friday, naming the contact.
+
+### FR-11 Quick capture and tray (D48)
+
+- FR-11.1 (Must) A Capture dialog (the Inbox composer) opens from Ctrl+K, from a
+  global shortcut (setting, default Ctrl/Cmd+Shift+Space), from the tray menu and from
+  a second launch with `--capture`. Enter files the input and closes the dialog;
+  triage runs in the background.
+- FR-11.2 (Must) Closing the window keeps the app in the tray (setting, default on)
+  so sync, reminders and the shortcut keep working. The tray menu has Open, Capture
+  and Quit. A second launch focuses the running app. No extra process.
+- FR-11.3 (Must) Where the tray or the shortcut is not available (no appindicator
+  library, Wayland), the app says so in settings and works without it.
+- FR-11.4 (Should) A notification when a capture made while the window was hidden
+  has proposals to approve.
+
+### FR-12 Today and the sweep (D49)
+
+- FR-12.1 (Must) Today replaces the dashboard with a capture box and three lists.
+  **Your move**: tickets that woke up, open small asks with nothing to wait for,
+  comments and mentions waiting on the user, Inbox threads with pending decisions.
+  **Their move**: open dependencies (overdue and due first, sleeping ones last) and
+  the user's tickets with an open blocker. **Sprint work**: Top focus (D29) with
+  "at risk" and "due soon" as badges.
+- FR-12.2 (Must) Row actions without leaving the page: Done (a transition the user
+  makes, through the Executor), snooze (tomorrow, Monday, after the sprint, a date),
+  chase or reply draft, log a reply, resolve.
+- FR-12.3 (Must) A keyboard sweep steps through what needs a decision (woken up,
+  follow-ups due, owners back, asks due or overdue, and once a week asks untouched
+  for 14 days): done, nudge, snooze, drop, skip.
+- FR-12.4 (Must) Epic health moves to the Sprint page; the brief opens from a
+  button; suggested prompts stay in the chat.
+- AC: Today renders in under 1 second from the local cache with 2,000 issues.
+
+### FR-13 Navigation (D50)
+
+- FR-13.1 (Must) Seven pages: Today, Inbox, Tickets, Waiting on, Sprint (Plan,
+  Report, Epics), Chat, Context (People, Teams, Memory), plus Settings. Old paths
+  redirect.
+- FR-13.2 (Must) Drafts open as a panel from a ticket, a dependency, a person and
+  Ctrl+K. The Drafts page stays in the app, out of the sidebar unless a setting
+  turns it back on.
+- FR-13.3 (Must) Settings group model routing, ranking weights and evaluation
+  replay under Advanced.
+
 ## 5. Non-functional requirements
 
 - NFR-1 Works offline for browsing cached data, drafting from cache and editing
@@ -252,6 +353,9 @@ scope; "Should" is v1 if time permits; "Could" is later.
 - ServiceNow API integration.
 - Multi-user or server deployment.
 - Voice input.
+- Later, after Phases 11–16: private asks (FR-10.6), turning promises in sent drafts
+  into small asks, tasks that watch a Confluence page, dropping a saved email on the
+  capture dialog, recurring asks, reading mail and chats through Microsoft Graph.
 
 ## 7. Assumptions (settled)
 

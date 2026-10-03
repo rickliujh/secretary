@@ -13,7 +13,8 @@ Personal AI secretary desktop app for a single user whose work is tracked in Jir
 dependencies, holds team and people context, ranks what matters, and drafts Teams
 messages and emails. Read `docs/requirements.md` (what) and `docs/design.md` (how;
 decisions in section 12) before changing anything. `docs/implementation-plan.md` is
-the history of how it was built, not a to-do list.
+the history of how it was built; its Part 2 (Phases 11–16, small asks) is the plan
+in progress.
 
 ## Stack
 
