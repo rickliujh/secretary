@@ -17,7 +17,10 @@ export const SYNC_KEYS = {
   fieldsSynced: "jira.fieldsSynced",
   timeZone: "jira.timeZone",
   username: "jira.username",
-  /** JSON { [projectKey]: { issueTypes: string[], statuses: string[] } } from /project/{key}/statuses. */
+  /**
+   * JSON { [projectKey]: { issueTypes, statuses, subtaskTypes } } from /project/{key}/statuses.
+   * `subtaskTypes` (Jira's sub-task flag) is missing in metadata stored before it was kept.
+   */
   projectMeta: "jira.projectMeta",
   /** JSON SprintState: every known sprint with dates, for the sprint calendar (D23). */
   sprints: "jira.sprints",
@@ -54,6 +57,8 @@ const ProjectMetaSchema = z.record(
   z.object({
     issueTypes: z.array(z.string()).default([]),
     statuses: z.array(z.string()).default([]),
+    /** Types Jira flags as sub-tasks; absent in older metadata, where the name decides. */
+    subtaskTypes: z.array(z.string()).optional(),
   }),
 );
 export type ProjectMeta = z.infer<typeof ProjectMetaSchema>;

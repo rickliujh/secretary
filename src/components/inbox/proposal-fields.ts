@@ -254,3 +254,27 @@ export function fromFormValues(original: ProposalPayload, values: Record<string,
     delete changes.profile;
   return out;
 }
+
+/**
+ * A payload as the card shows it. `parsePayload` returns a stored payload that no
+ * longer parses as it was stored, so fields added later (labels) or required
+ * nested objects may be missing; they read as empty here instead of crashing.
+ */
+export function viewPayload(p: ProposalPayload): ProposalPayload {
+  const v = p as Record<string, unknown>;
+  const arr = (x: unknown) =>
+    Array.isArray(x) ? x.filter((y): y is string => typeof y === "string") : [];
+  const obj = (x: unknown) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
+  switch (p.kind) {
+    case "create_issue":
+      return { ...p, labels: arr(v.labels) };
+    case "draft_message":
+      return { ...p, issueKeys: arr(v.issueKeys) };
+    case "update_issue":
+    case "update_person":
+    case "update_team":
+      return { ...p, changes: obj(v.changes) } as ProposalPayload;
+    default:
+      return p;
+  }
+}

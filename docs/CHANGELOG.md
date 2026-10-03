@@ -687,6 +687,25 @@ Built
 - Not verified in the running app: the Settings section, the Track row and the hint
   were checked by typecheck and lint only, not seen on screen.
 
+Review fixes
+- Track runs only what the row shows: a row takes a dependency (and, from Phase 12, a
+  blocker link) on the new ticket, one line each on its face; a comment, move, update
+  or draft on the new ticket stays a card under the row, as does anything that also
+  points at another new ticket not created yet.
+- Once Jira has created the ticket, a later failure (the epic link, remembering who
+  asked, the action log, finding or joining the sprint) is a warning on an executed
+  card, so Retry cannot create a second ticket.
+- A create screen without Assignee or Description now warns like one without Labels,
+  and Settings lists such types, plus required fields the app fills only when the
+  model gives a value (due date, priority, parent, Epic Link): "needed on every ask; a
+  small ask without one will fail".
+- Sub-task types are recognised by Jira's flag, stored per project at sync, not by
+  name; metadata synced before still works by name until the next full sync.
+- The quoted words go to Jira inside `{noformat}`, so pasted `!image!`, `[~user]`,
+  `{macro}` or link markup shows as text. A made-up "Asked by" line from the model is
+  removed wherever it is, and a reply in the thread keeps the date the ask arrived.
+- A proposal card shows a stored payload that no longer parses instead of failing.
+
 ## Phase 14: Quick capture and tray (2026-10-03)
 
 Why: filing a small ask meant switching to the app and finding the Inbox

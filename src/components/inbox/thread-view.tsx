@@ -30,7 +30,7 @@ import { inboxDetail, type ProposalView, type ThreadMessage } from "@/services/i
 import type { Source } from "@/services/intake";
 import type { MessagePart } from "@/services/intake/thread";
 import { describePayload } from "@/services/proposals/schema";
-import { groupSmallAsks } from "@/services/small-asks/bundle";
+import { executedRefs, groupSmallAsks } from "@/services/small-asks/bundle";
 import { Composer, type ComposerMessage } from "./composer";
 import { ProposalCard } from "./proposal-card";
 import { SmallAskRow } from "./small-ask-row";
@@ -158,11 +158,14 @@ function AssistantTurn({
   proposals,
   lookups,
   answeringId,
+  created,
 }: {
   summary: string | null;
   proposals: ProposalView[];
   lookups: Lookups;
   answeringId: string | null;
+  /** `$new` refs the thread already created, from any turn. */
+  created: ReadonlySet<string>;
 }) {
   const shown = proposals.filter((p) => p.status !== "superseded");
   const replaced = proposals.filter((p) => p.status === "superseded");
@@ -172,7 +175,7 @@ function AssistantTurn({
         <Sparkles className="size-3.5 shrink-0" />
         {summary ?? (shown.length ? "Here is what I propose." : "Nothing to do here.")}
       </p>
-      {groupSmallAsks(shown).map((entry) => {
+      {groupSmallAsks(shown, created).map((entry) => {
         if (entry.type === "track")
           return (
             <SmallAskRow
@@ -229,6 +232,7 @@ export function ThreadView({ id }: { id: string }) {
     .filter((p) => p.kind === "needs_clarification" && p.status === "pending")
     .at(-1);
   const answering = openQuestion && openQuestion.id !== skipAnswer ? openQuestion : null;
+  const created = executedRefs(d.proposals);
   const last = d.messages.at(-1);
   const firstUser = d.messages.find((m) => m.role === "user");
   const origin = firstUser?.role === "user" ? firstUser.origin : null;
@@ -255,6 +259,7 @@ export function ThreadView({ id }: { id: string }) {
         proposals={byMessage.get(m.id) ?? []}
         lookups={lookups}
         answeringId={answering?.id ?? null}
+        created={created}
       />
     );
 
@@ -305,6 +310,7 @@ export function ThreadView({ id }: { id: string }) {
               proposals={byMessage.get(null) ?? []}
               lookups={lookups}
               answeringId={answering?.id ?? null}
+              created={created}
             />
           )}
           {sending && (

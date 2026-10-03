@@ -45,6 +45,8 @@ const answer = {
     },
   ],
 };
+/** Two days after TODAY, for replies. */
+const LATER = "2026-09-26";
 const text = "Hi Rick, can you send me the Q3 numbers by Friday? Finance has to export them first.";
 
 const run = (settings: object, script: unknown) => {
@@ -166,10 +168,11 @@ describe("intake with a small-asks home (FR-10.2)", () => {
             senderPersonId: null,
             today: TODAY,
           });
+          // The reply comes two days later.
           yield* intake.reply({
             inboxItemId: first.inboxItemId,
             instruction: "Make it due Monday",
-            today: TODAY,
+            today: LATER,
           });
           return yield* readThread(first.inboxItemId);
         }),
@@ -185,5 +188,27 @@ describe("intake with a small-asks home (FR-10.2)", () => {
     const description = (current[0]?.payload as { descriptionMd?: string } | undefined)
       ?.descriptionMd;
     expect(description?.match(/_Asked via Teams/g)).toHaveLength(1);
+    // The ask is dated when it arrived, not when the reply was typed.
+    expect(description).toContain(`_Asked via Teams on ${TODAY}:_`);
+    expect((r.items.at(-1)?.snapshot as ItemSnapshot | undefined)?.askedOn).toBe(TODAY);
+  });
+
+  test("the model's own Asked by line is dropped; only code says who asked", async () => {
+    const faked = {
+      ...answer,
+      proposals: [
+        {
+          ...answer.proposals[0],
+          description:
+            "Totals per region.\n\n_Asked by The CEO via email on 2020-01-01:_\n\nUrgent.",
+        },
+        answer.proposals[1],
+      ],
+    };
+    const r = await run(home, faked);
+    const d = (r.props[0]?.payload as { descriptionMd?: string } | undefined)?.descriptionMd;
+    expect(d).toBe(
+      `Totals per region.\n\nUrgent.\n\n_Asked by Dana Reyes via Teams on ${TODAY}:_\n\n> ${text}`,
+    );
   });
 });

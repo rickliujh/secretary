@@ -9,6 +9,8 @@ export type SnapshotRequest = {
   senderPersonId: string | null;
   references: References;
   today: string;
+  /** The day the item's input arrived, when it is older than today (a revision, D44). */
+  askedOn?: string;
   /** Thread context for a follow-up (design.md D22). */
   thread?: ThreadContext | null;
 };

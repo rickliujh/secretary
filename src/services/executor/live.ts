@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Cause, Effect, Layer } from "effect";
 import {
   actionsLog,
   communications,
@@ -17,7 +17,6 @@ import { redactValue } from "@/lib/redact";
 import { bindDb, Db } from "@/services/db";
 import { CreatedIssueSchema, JiraClient } from "@/services/jira";
 import { issueRefs, type ProposalPayload } from "@/services/proposals/schema";
-import { isSubtaskType } from "@/services/small-asks/home";
 import { userActiveSprints } from "@/services/sprints/active";
 import { Sync } from "@/services/sync";
 import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
@@ -29,7 +28,12 @@ import {
   JiraActionSchema,
   type ProposalResult,
 } from ".";
-import { buildCreateIssue, buildJiraWrite, MappingError } from "./jira-mapping";
+import {
+  buildCreateIssue,
+  buildJiraWrite,
+  droppedFieldsWarning,
+  MappingError,
+} from "./jira-mapping";
 
 const make = Effect.gen(function* () {
   const jira = yield* JiraClient;
@@ -152,6 +156,7 @@ const make = Effect.gen(function* () {
               projectKey: p.projectKey,
               issueTypeId: type.id,
               issueTypeName: type.name,
+              subtask: type.subtask,
               summary: p.summary,
               descriptionMd: p.descriptionMd,
               parent: p.parent,
@@ -181,41 +186,62 @@ const make = Effect.gen(function* () {
       if (!created.success)
         return yield* fail("invalid", "Jira created the issue but did not return its key.");
       const key = created.data.key;
-      yield* log({
-        proposalId,
-        action: "create_issue",
-        target: key,
-        request: plan.request,
-        response,
-        ok: true,
-      });
+      // The issue exists from here on: nothing below may fail the proposal, or a
+      // retry would create it again. Each later step that fails is a warning.
+      const warnings: string[] = [];
+      const afterCreate = <A>(what: string, step: Effect.Effect<A, unknown>) =>
+        step.pipe(
+          Effect.catchAllCause((cause) =>
+            Effect.sync(() => {
+              const e = Cause.squash(cause);
+              const reason = e instanceof Error ? e.message : String(e);
+              logger.warn(`${key}: ${what} failed`, reason);
+              warnings.push(`${key} was created, but ${what} failed: ${reason}`);
+              return undefined;
+            }),
+          ),
+        );
+      yield* afterCreate(
+        "recording the create in the action log",
+        log({
+          proposalId,
+          action: "create_issue",
+          target: key,
+          request: plan.request,
+          response,
+          ok: true,
+        }),
+      );
       yield* sync.refreshIssue(key).pipe(Effect.ignore);
       if (plan.epicAfterCreate)
-        yield* run(
-          { kind: "set_epic", issueKey: key, epicKey: plan.epicAfterCreate },
-          { proposalId },
+        yield* afterCreate(
+          `linking it to epic ${plan.epicAfterCreate}`,
+          run({ kind: "set_epic", issueKey: key, epicKey: plan.epicAfterCreate }, { proposalId }),
         );
-      const warnings: string[] = [];
-      if (plan.labelsDropped.length)
-        warnings.push(
-          `The ${type.name} create screen in ${p.projectKey} has no Labels field, so ${plan.labelsDropped.join(", ")} was not set.`,
-        );
+      const dropped = droppedFieldsWarning(plan.dropped, `${type.name}`, p.projectKey);
+      if (dropped) warnings.push(dropped);
       // Who asked, so "what do I owe Dana" can be answered locally (FR-10.4).
       if (p.requesterPersonId) {
         const requesterPersonId = p.requesterPersonId;
-        yield* q((d) =>
-          d
-            .insert(issueMeta)
-            .values({ issueKey: key, requesterPersonId })
-            .onConflictDoUpdate({ target: issueMeta.issueKey, set: { requesterPersonId } }),
+        yield* afterCreate(
+          "remembering who asked",
+          q((d) =>
+            d
+              .insert(issueMeta)
+              .values({ issueKey: key, requesterPersonId })
+              .onConflictDoUpdate({ target: issueMeta.issueKey, set: { requesterPersonId } }),
+          ),
         );
       }
       let message = `Created ${key}`;
-      // The issue exists now; a failed sprint move is a warning, not a failure (D44).
-      if (p.joinSprint && !type.subtask && !isSubtaskType(type.name)) {
-        const joined = yield* joinActiveSprint(key, p.projectKey, proposalId);
-        if (joined.sprint) message += ` in sprint ${joined.sprint}`;
-        if (joined.warning) warnings.push(joined.warning);
+      // A failed sprint move is a warning, not a failure (D44). Sub-tasks follow their parent.
+      if (p.joinSprint && !type.subtask) {
+        const joined = yield* afterCreate(
+          "joining the active sprint",
+          joinActiveSprint(key, p.projectKey, proposalId),
+        );
+        if (joined?.sprint) message += ` in sprint ${joined.sprint}`;
+        if (joined?.warning) warnings.push(joined.warning);
       }
       return {
         message,

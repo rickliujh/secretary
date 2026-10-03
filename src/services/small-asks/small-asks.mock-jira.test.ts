@@ -155,7 +155,10 @@ describe("small asks against the mock Jira (FR-10 AC)", () => {
     });
     expect(created?.assignee?.name).toBe("me");
     expect(created?.description).toContain("_Asked by Dana Reyes via Teams on 2026-10-05:_");
-    expect(created?.description).toContain("bq. can you send me the Q3 numbers by Friday?");
+    // The pasted words arrive literally, not as wiki markup.
+    expect(created?.description).toContain(
+      "{noformat}\ncan you send me the Q3 numbers by Friday?\n{noformat}",
+    );
     // The cache shows Jira's version, and the contact is linked locally.
     expect(r.cached).toMatchObject({ sprint: active.name, labels: ["small-ask"], assignee: "me" });
     expect(r.meta?.requesterPersonId).toBe(r.dana);

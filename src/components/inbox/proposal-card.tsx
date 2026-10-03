@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
 import { NEW_REF_RE, PROPOSAL_LABELS, type ProposalPayload } from "@/services/proposals/schema";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
-import { isEditable } from "./proposal-fields";
+import { isEditable, viewPayload } from "./proposal-fields";
 import { useDecisions } from "./use-inbox";
 
 const STATUS_TONE: Record<string, string> = {
@@ -243,7 +243,7 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
         <span className="ml-auto" />
         <Confidence value={proposal.confidence} />
       </header>
-      <PayloadView p={payload} lookups={lookups} />
+      <PayloadView p={viewPayload(payload)} lookups={lookups} />
       {proposal.rationale && <p className="text-xs text-muted-foreground">{proposal.rationale}</p>}
       {proposal.evidence && (
         <blockquote className="border-l-2 pl-2 text-xs text-muted-foreground italic">

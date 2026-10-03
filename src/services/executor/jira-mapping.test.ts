@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { EditMetaSchema } from "@/services/jira";
+import { withProvenance } from "@/services/small-asks/home";
 import editmeta from "@/test/fixtures/jira/editmeta-PAY-2.json";
 import {
   buildCreateIssue,
   buildJiraWrite,
   buildMoveToSprint,
+  descriptionToWiki,
+  droppedFieldsWarning,
   MAX_SPRINT_MOVE_ISSUES,
 } from "./jira-mapping";
 
@@ -209,7 +212,7 @@ describe("buildCreateIssue", () => {
         labels: ["small-ask"],
       },
     });
-    expect(plan.labelsDropped).toEqual([]);
+    expect(plan.dropped).toEqual({ labels: [], assignee: null, description: false });
   });
 
   test("without a Labels field the labels are reported as dropped, not sent", () => {
@@ -220,11 +223,124 @@ describe("buildCreateIssue", () => {
     const fields = (plan.request.body as { fields: Record<string, unknown> }).fields;
     expect(fields.labels).toBeUndefined();
     expect(fields.assignee).toEqual({ id: "rliu" });
-    expect(plan.labelsDropped).toEqual(["small-ask"]);
+    expect(plan.dropped.labels).toEqual(["small-ask"]);
+  });
+
+  test("assignee and description missing from the screen are reported, like labels", () => {
+    const bare = ["project", "issuetype", "summary", "duedate"].map((f) => field(f));
+    const plan = buildCreateIssue(
+      { ...input, labels: ["small-ask"] },
+      { fieldIds: {}, fields: bare },
+    );
+    const fields = (plan.request.body as { fields: Record<string, unknown> }).fields;
+    expect(fields).not.toHaveProperty("assignee");
+    expect(fields).not.toHaveProperty("description");
+    expect(plan.dropped).toEqual({ labels: ["small-ask"], assignee: "rliu", description: true });
+    expect(droppedFieldsWarning(plan.dropped, "Task", "ASK")).toBe(
+      "The Task create screen in ASK has no Labels, Assignee or Description field, so the label small-ask was not set and it was not assigned to rliu and the description (with who asked) was not sent.",
+    );
+    expect(
+      droppedFieldsWarning({ labels: [], assignee: "rliu", description: false }, "Bug", "ASK"),
+    ).toBe("The Bug create screen in ASK has no Assignee field, so it was not assigned to rliu.");
+    expect(
+      droppedFieldsWarning({ labels: [], assignee: null, description: false }, "Bug", "ASK"),
+    ).toBeNull();
+  });
+
+  test("Jira's sub-task flag decides, not the type name", () => {
+    const ctx = { fieldIds: {}, fields: [...screen, field("parent")] };
+    // A sub-task type named "Action" needs its parent.
+    expect(() =>
+      buildCreateIssue({ ...input, issueTypeName: "Action", subtask: true }, ctx),
+    ).toThrow("needs a parent");
+    const sub = buildCreateIssue(
+      { ...input, issueTypeName: "Action", subtask: true, parent: "ASK-1" },
+      ctx,
+    );
+    expect((sub.request.body as { fields: Record<string, unknown> }).fields.parent).toEqual({
+      key: "ASK-1",
+    });
+    // A standard type that happens to be called "Subtask review" takes an epic as parent.
+    const std = buildCreateIssue(
+      { ...input, issueTypeName: "Subtask review", subtask: false, epic: "ASK-9" },
+      { ...ctx, deployment: "cloud" },
+    );
+    expect((std.request.body as { fields: Record<string, unknown> }).fields.parent).toEqual({
+      key: "ASK-9",
+    });
   });
 
   test("a create without labels (stored before labels existed) sends none", () => {
     const plan = buildCreateIssue(input, { fieldIds: {}, fields: [...screen, field("labels")] });
     expect((plan.request.body as { fields: object }).fields).not.toHaveProperty("labels");
+  });
+});
+
+describe("pasted text in a small ask's description (D44)", () => {
+  const hostile = [
+    "![](https://x/p.png)",
+    "[~jsmith]",
+    "{color:red}x{color}",
+    "!http://x/p.png!",
+    "[link|http://x]",
+    "{noformat}",
+    "{code}x{code}",
+  ].join("\n");
+  const md = withProvenance("Send the **numbers**.", {
+    requester: "Dana Reyes",
+    source: "teams",
+    date: "2026-10-01",
+    quote: hostile,
+  });
+
+  test("the quote reaches Jira as one literal noformat block", () => {
+    const wiki = descriptionToWiki(md);
+    expect(wiki).toBe(
+      [
+        "Send the *numbers*.",
+        "_Asked by Dana Reyes via Teams on 2026-10-01:_",
+        "{noformat}",
+        "![](https://x/p.png)",
+        "[~jsmith]",
+        "{color:red}x{color}",
+        "!http://x/p.png!",
+        "[link|http://x]",
+        "{ noformat}",
+        "{code}x{code}",
+        "{noformat}",
+      ]
+        .join("\n")
+        .replace("_\n{noformat}", "_\n\n{noformat}")
+        .replace(".\n_Asked", ".\n\n_Asked"),
+    );
+    // Only the closing marker ends the block: the one in the text was broken up.
+    expect(wiki.match(/\{noformat\}/g)).toHaveLength(2);
+    // Outside the block nothing from the paste became markup.
+    const outside = wiki.replace(/\{noformat\}[\s\S]*\{noformat\}/, "");
+    expect(outside).not.toMatch(/!https?:|\[~|\{color|\[link\|/);
+  });
+
+  test("a description without the block converts as before", () => {
+    expect(descriptionToWiki("Do **it**")).toBe("Do *it*");
+  });
+
+  test("the create request carries the literal quote", () => {
+    const plan = buildCreateIssue(
+      {
+        projectKey: "ASK",
+        issueTypeId: "2",
+        issueTypeName: "Task",
+        summary: "Send it",
+        descriptionMd: md,
+        parent: null,
+        epic: null,
+        priority: null,
+        assignee: null,
+        dueDate: null,
+      },
+      { fieldIds: {}, fields: [{ fieldId: "description", name: "Description", required: false }] },
+    );
+    const body = plan.request.body as { fields: { description: string } };
+    expect(body.fields.description).toBe(descriptionToWiki(md));
   });
 });

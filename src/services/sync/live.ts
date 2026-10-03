@@ -337,6 +337,15 @@ const make = Effect.gen(function* () {
         meta[key] = {
           issueTypes: [...new Set(types.value.map((t) => t.name))].sort(),
           statuses: [...new Set(types.value.flatMap((t) => t.statuses.map((x) => x.name)))].sort(),
+          // Jira's flag, so a sub-task type with another name is known as one (D44).
+          // A response without the flag leaves it unknown; the name decides then.
+          ...(types.value.some((t) => t.subtask !== undefined)
+            ? {
+                subtaskTypes: [
+                  ...new Set(types.value.filter((t) => t.subtask).map((t) => t.name)),
+                ].sort(),
+              }
+            : {}),
         };
         metaChanged = true;
       }

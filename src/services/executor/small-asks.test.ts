@@ -1,10 +1,10 @@
 /** Executing a small ask (D44): labels, requester, and joining the active sprint. */
 import { describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { inboxItems, issueMeta, jiraIssues, proposals } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
-import { query } from "@/services/db";
+import { type Db, query } from "@/services/db";
 import { Proposals, type StoredProposalPayload } from "@/services/proposals";
 import { ProposalsLive } from "@/services/proposals/live";
 import { fixtureIssues, syncedJiraLayer, syncOnce } from "@/test/seed";
@@ -79,9 +79,14 @@ const smallAsk: StoredProposalPayload = {
 };
 
 /** Approves one proposal; `mine` puts the user's PAY-4 into the active sprint first. */
-const approve = (payload: StoredProposalPayload, mine = true) =>
+const approve = (
+  payload: StoredProposalPayload,
+  mine = true,
+  before: Effect.Effect<unknown, unknown, Db> = Effect.void,
+) =>
   Effect.gen(function* () {
     yield* syncOnce;
+    yield* before.pipe(Effect.orDie);
     if (mine)
       yield* query((d) =>
         d.update(jiraIssues).set({ sprint: "Payments 15" }).where(eq(jiraIssues.key, "PAY-4")),
@@ -110,8 +115,9 @@ const approve = (payload: StoredProposalPayload, mine = true) =>
     const result = yield* (yield* Proposals).approve(id);
     const meta = yield* query((d) =>
       d.select().from(issueMeta).where(eq(issueMeta.issueKey, "PAY-5")).get(),
-    );
-    return { result, meta };
+    ).pipe(Effect.orElseSucceed(() => undefined));
+    const row = yield* query((d) => d.select().from(proposals).where(eq(proposals.id, id)).get());
+    return { result, meta, row };
   });
 
 describe("executing a small ask (D44)", () => {
@@ -163,5 +169,41 @@ describe("executing a small ask (D44)", () => {
     expect(r.result).toMatchObject({ status: "executed", message: "Created PAY-5" });
     expect(r.result.warning).toBeUndefined();
     expect(seen.some((x) => x.url.includes("/rest/agile/1.0/sprint/"))).toBe(false);
+  });
+
+  const creates = (seen: { url: string; method: string }[]) =>
+    seen.filter((x) => x.method === "POST" && x.url.endsWith("/rest/api/2/issue")).length;
+
+  test("a failed epic link after the create is a warning on an executed proposal", async () => {
+    const { layer, seen } = setup();
+    // No Epic Link or parent on the create screen, so the epic is set afterwards,
+    // and that edit fails (no edit metadata).
+    const r = await Effect.runPromise(
+      Effect.provide(approve({ ...smallAsk, epic: "PAY-1" }), layer),
+    );
+    expect(r.result.status).toBe("executed");
+    expect(r.result.issueKey).toBe("PAY-5");
+    expect(r.result.warning).toContain("PAY-5 was created, but linking it to epic PAY-1 failed");
+    expect(r.row?.status).toBe("executed");
+    // The sprint move after it still ran, and nothing is left to retry.
+    expect(r.result.message).toBe("Created PAY-5 in sprint Payments 15");
+    expect(creates(seen)).toBe(1);
+  });
+
+  test("a failed local write after the create is a warning too, not a failure", async () => {
+    const { layer, seen } = setup();
+    const r = await Effect.runPromise(
+      Effect.provide(
+        approve(
+          smallAsk,
+          true,
+          query((d) => d.run(sql`DROP TABLE issue_meta`)),
+        ),
+        layer,
+      ),
+    );
+    expect(r.result).toMatchObject({ status: "executed", issueKey: "PAY-5" });
+    expect(r.result.warning).toContain("PAY-5 was created, but remembering who asked failed");
+    expect(creates(seen)).toBe(1);
   });
 });

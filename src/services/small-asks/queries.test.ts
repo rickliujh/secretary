@@ -9,6 +9,8 @@ const types = [
   { id: "2", name: "Task", subtask: false },
   { id: "3", name: "Bug", subtask: false },
   { id: "4", name: "Sub-task", subtask: true },
+  // A sub-task type by Jira's flag, whatever its name.
+  { id: "5", name: "Action", subtask: true },
 ];
 const base = [
   { fieldId: "project", name: "Project", required: true },
@@ -25,7 +27,11 @@ const createMeta = {
     return json({
       values:
         id === "2"
-          ? [...base, { fieldId: "labels", name: "Labels", required: false }]
+          ? [
+              ...base,
+              { fieldId: "labels", name: "Labels", required: false },
+              { fieldId: "duedate", name: "Due Date", required: true },
+            ]
           : [...base, { fieldId: "components", name: "Component/s", required: true }],
     });
   },
@@ -58,6 +64,7 @@ describe("small-asks home (FR-10.1)", () => {
       joinActiveSprint: true,
       issueTypes: ["Task"],
       defaultType: "Task",
+      subtaskTypes: ["Sub-task"],
     });
   });
 
@@ -67,7 +74,7 @@ describe("small-asks home (FR-10.1)", () => {
     expect(r).toEqual({ home: null, hintDismissed: false });
   });
 
-  test("the check lists the types and the required fields the app cannot fill", async () => {
+  test("the check lists the types, the fields the app cannot fill, and those it fills only sometimes", async () => {
     const { layer } = syncedJiraLayer([createMeta]);
     const r = await Effect.runPromise(Effect.provide(checkHome("ASK"), layer));
     expect(r).toEqual({
@@ -75,7 +82,11 @@ describe("small-asks home (FR-10.1)", () => {
       issueTypes: ["Task", "Bug"],
       defaultType: "Task",
       blocked: [{ issueType: "Bug", fields: ["Component/s"] }],
-      noLabels: ["Bug"],
+      needed: [{ issueType: "Task", fields: ["Due Date"] }],
+      notOnScreen: [
+        { issueType: "Task", fields: ["Description"] },
+        { issueType: "Bug", fields: ["Labels", "Description"] },
+      ],
     });
   });
 });

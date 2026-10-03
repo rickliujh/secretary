@@ -6,6 +6,7 @@ import { markdownToWiki } from "@/lib/wiki";
 import type { Deployment } from "@/services/atlassian/deployment";
 import type { EditMeta, JiraWrite } from "@/services/jira";
 import type { FieldIds } from "@/services/jira/fields";
+import { literalWiki, splitProvenance } from "@/services/small-asks/home";
 import type { JiraAction } from "./actions";
 
 export type MappingContext = {
@@ -137,6 +138,8 @@ export type CreateIssueInput = {
   projectKey: string;
   issueTypeId: string;
   issueTypeName: string;
+  /** Jira's sub-task flag for the type (create metadata); the name decides only when it is unknown. */
+  subtask?: boolean;
   summary: string;
   descriptionMd: string | null;
   /** Resolved keys (no `$new` refs). */
@@ -161,13 +164,58 @@ export type CreateContext = {
   }[];
 };
 
+/** Values asked for that the create screen has no field for, so they were not sent. */
+export type DroppedFields = {
+  labels: string[];
+  assignee: string | null;
+  description: boolean;
+};
+
 export type CreatePlan = {
   request: JiraWrite;
   /** Epic to link after creation when Jira does not accept it on the create screen. */
   epicAfterCreate: string | null;
-  /** Labels asked for that the create screen has no field for, so they were not sent. */
-  labelsDropped: string[];
+  dropped: DroppedFields;
 };
+
+/**
+ * "The Task create screen in OPS has no Labels or Assignee field, so ..." (D44),
+ * or null when nothing was dropped.
+ */
+export function droppedFieldsWarning(
+  d: DroppedFields,
+  issueType: string,
+  projectKey: string,
+): string | null {
+  const parts: [string, string][] = [];
+  if (d.labels.length) parts.push(["Labels", `the label ${d.labels.join(", ")} was not set`]);
+  if (d.assignee) parts.push(["Assignee", `it was not assigned to ${d.assignee}`]);
+  if (d.description) parts.push(["Description", "the description (with who asked) was not sent"]);
+  if (!parts.length) return null;
+  const names = parts.map(([n]) => n);
+  const fields =
+    names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`;
+  return `The ${issueType} create screen in ${projectKey} has no ${fields} field, so ${parts
+    .map(([, what]) => what)
+    .join(" and ")}.`;
+}
+
+/**
+ * A create's Markdown description as wiki markup. The provenance block's quote
+ * is pasted text (untrusted), so it goes to Jira as a literal `{noformat}` block:
+ * it cannot embed remote images, mention users or run macros (D44).
+ */
+export function descriptionToWiki(descriptionMd: string): string {
+  const block = splitProvenance(descriptionMd);
+  if (!block) return markdownToWiki(descriptionMd);
+  return [
+    block.base && markdownToWiki(block.base),
+    markdownToWiki(`${block.line}`),
+    block.quote && literalWiki(block.quote),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
 
 // Fields Jira fills itself or that the app always sends.
 const IMPLICIT_FIELDS = new Set(["project", "issuetype", "summary", "reporter"]);
@@ -179,18 +227,26 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
     issuetype: { id: input.issueTypeId },
     summary: input.summary,
   };
+  /** Sets a field the create screen has; false when it has none, so the value is dropped. */
   const set = (fieldId: string, value: unknown) => {
-    if (allowed.has(fieldId)) fields[fieldId] = value;
+    if (!allowed.has(fieldId)) return false;
+    fields[fieldId] = value;
+    return true;
   };
-  if (input.descriptionMd) set("description", markdownToWiki(input.descriptionMd));
+  const dropped: DroppedFields = { labels: [], assignee: null, description: false };
+  if (input.descriptionMd)
+    dropped.description = !set("description", descriptionToWiki(input.descriptionMd));
   if (input.priority) set("priority", { name: input.priority });
-  if (input.assignee)
-    set("assignee", ctx.deployment === "cloud" ? { id: input.assignee } : { name: input.assignee });
+  if (
+    input.assignee &&
+    !set("assignee", ctx.deployment === "cloud" ? { id: input.assignee } : { name: input.assignee })
+  )
+    dropped.assignee = input.assignee;
   if (input.dueDate) set("duedate", input.dueDate);
   const labels = [...new Set(input.labels ?? [])];
-  if (labels.length) set("labels", labels);
+  if (labels.length && !set("labels", labels)) dropped.labels = labels;
 
-  const isSubtask = /sub-?task/i.test(input.issueTypeName);
+  const isSubtask = input.subtask ?? /sub-?task/i.test(input.issueTypeName);
   if (isSubtask) {
     if (!input.parent) throw new MappingError("A sub-task needs a parent issue.");
     fields.parent = { key: input.parent };
@@ -229,6 +285,6 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
   return {
     request: { method: "POST", path: "issue", body: { fields } },
     epicAfterCreate,
-    labelsDropped: allowed.has("labels") ? [] : labels,
+    dropped,
   };
 }

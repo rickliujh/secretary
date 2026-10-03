@@ -188,13 +188,15 @@ const make = Effect.gen(function* () {
       const homeTypes = homeKey
         ? (projectMeta[homeKey]?.issueTypes ?? [...(projects.get(homeKey)?.issueTypes ?? [])])
         : [];
+      // Jira's sub-task flag where sync stored it; the name decides only without it.
+      const homeSubtasks = homeKey ? (projectMeta[homeKey]?.subtaskTypes ?? null) : null;
       const smallAsks = homeKey
         ? {
             projectKey: homeKey,
             label: settings.smallAsks.label,
             joinSprint: settings.smallAsks.joinActiveSprint,
-            issueTypes: smallAskTypes(homeTypes).sort(),
-            defaultType: defaultSmallAskType([...homeTypes].sort()),
+            issueTypes: smallAskTypes(homeTypes, homeSubtasks).sort(),
+            defaultType: defaultSmallAskType([...homeTypes].sort(), homeSubtasks),
           }
         : null;
       const priorities = orderPriorities(
@@ -385,6 +387,7 @@ const make = Effect.gen(function* () {
       return {
         promptVersion: CLASSIFY_PROMPT_VERSION,
         today: req.today,
+        askedOn: req.askedOn ?? req.today,
         me: me ? { username: me } : null,
         outputLanguage: settings.general.outputLanguage,
         source: req.source,
@@ -410,7 +413,13 @@ const make = Effect.gen(function* () {
           .map((p) => {
             const meta = projectMeta[p.key];
             return meta
-              ? { key: p.key, issueTypes: meta.issueTypes, statuses: meta.statuses, complete: true }
+              ? {
+                  key: p.key,
+                  issueTypes: meta.issueTypes,
+                  statuses: meta.statuses,
+                  complete: true,
+                  ...(meta.subtaskTypes ? { subtaskTypes: meta.subtaskTypes } : {}),
+                }
               : {
                   key: p.key,
                   issueTypes: [...p.issueTypes].sort(),

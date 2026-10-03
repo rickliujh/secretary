@@ -47,7 +47,8 @@ const toValues = (s: AppSettings): Values => ({
 });
 
 function CheckResult({ check }: { check: HomeCheck }) {
-  const problems = check.blocked.length > 0 || check.noLabels.length > 0;
+  const problems =
+    check.blocked.length > 0 || check.needed.length > 0 || check.notOnScreen.length > 0;
   if (check.issueTypes.length === 0)
     return (
       <Alert variant="destructive">
@@ -74,12 +75,18 @@ function CheckResult({ check }: { check: HomeCheck }) {
                 creating one will fail.
               </li>
             ))}
-            {check.noLabels.length > 0 && (
-              <li>
-                {check.noLabels.join(", ")}: no Labels field on the create screen, so the label is
-                not set.
+            {check.needed.map((b) => (
+              <li key={`needed-${b.issueType}`}>
+                {b.issueType}: Jira requires {b.fields.join(", ")}, needed on every ask; a small ask
+                without one will fail.
               </li>
-            )}
+            ))}
+            {check.notOnScreen.map((b) => (
+              <li key={`screen-${b.issueType}`}>
+                {b.issueType}: no {b.fields.join(", ")} field on the create screen, so{" "}
+                {b.fields.length === 1 ? "it is" : "they are"} not set on new small asks.
+              </li>
+            ))}
           </ul>
         </AlertDescription>
       )}

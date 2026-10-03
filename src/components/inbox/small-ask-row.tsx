@@ -19,7 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
 import type { PayloadOf, ProposalPayload } from "@/services/proposals/schema";
-import { trackOrder } from "@/services/small-asks/bundle";
+import { bundleLine, trackOrder } from "@/services/small-asks/bundle";
 import { isSubtaskType } from "@/services/small-asks/home";
 import { smallAskHome } from "@/services/small-asks/queries";
 import { ProposalCard } from "./proposal-card";
@@ -59,7 +59,7 @@ export function SmallAskRow({
     setEpic(payload.epic ?? "");
   }, [payload.issueType, payload.epic]);
 
-  const subtask = isSubtaskType(payload.issueType);
+  const subtask = isSubtaskType(payload.issueType, home.data?.home?.subtaskTypes);
   const types = [...new Set([...(home.data?.home?.issueTypes ?? []), payload.issueType])];
   const ids = trackOrder(create, members);
   const createOpen = create.status === "pending" || create.status === "failed";
@@ -70,10 +70,12 @@ export function SmallAskRow({
   const warnings = [create, ...members]
     .map((p) => (p.result as Result)?.warning)
     .filter((w): w is string => !!w);
-  const waits = members.flatMap((m) => {
-    const p = (m.editedPayload ?? m.payload) as ProposalPayload;
-    return p.kind === "link_dependency" ? [p.label] : [];
-  });
+  // Every member Track runs gets a line on the face (D44).
+  const lines = members.map((m) => ({
+    id: m.id,
+    status: m.status,
+    text: bundleLine((m.editedPayload ?? m.payload) as ProposalPayload) ?? m.kind,
+  }));
   const requester = payload.requesterPersonId
     ? (lookups.person.get(payload.requesterPersonId)?.displayName ?? null)
     : null;
@@ -112,8 +114,15 @@ export function SmallAskRow({
             .join(" · ")}
         </span>
       </header>
-      {waits.length > 0 && (
-        <p className="text-xs text-muted-foreground">Waits on {waits.join("; ")}</p>
+      {lines.length > 0 && (
+        <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+          {lines.map((l) => (
+            <li key={l.id}>
+              {l.text}
+              {l.status !== "pending" && <span className="ml-1">({l.status})</span>}
+            </li>
+          ))}
+        </ul>
       )}
       {createOpen && (
         <div className="flex flex-wrap items-center gap-2">

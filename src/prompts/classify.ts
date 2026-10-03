@@ -83,6 +83,8 @@ export type ItemSnapshot = {
   sprints?: PromptSprint[];
   promptVersion: number;
   today: string;
+  /** The day the item's input arrived; a revision keeps it for "Asked ... on" (D44). */
+  askedOn?: string;
   me: { username: string } | null;
   outputLanguage: string;
   source: string;
@@ -100,7 +102,14 @@ export type ItemSnapshot = {
    * `complete` when issue types and statuses come from Jira's project metadata;
    * otherwise they are only what the cached issues happen to use.
    */
-  projects: { key: string; issueTypes: string[]; statuses: string[]; complete?: boolean }[];
+  projects: {
+    key: string;
+    issueTypes: string[];
+    statuses: string[];
+    complete?: boolean;
+    /** Types Jira flags as sub-tasks; absent when unknown (cache only, or older metadata). */
+    subtaskTypes?: string[];
+  }[];
   priorities: string[];
   jiraUsers: { username: string; displayName: string }[];
   teams: { id: string; name: string; function: string | null; contactFor: string | null }[];
@@ -306,6 +315,16 @@ const defined = <T extends Record<string, unknown>>(o: T) =>
     Object.entries(o).filter(([, v]) => v !== null && v !== undefined),
   ) as Partial<T>;
 
+/**
+ * Whether a type is a sub-task type: Jira's flag from a project that has the type
+ * and stored flags, else the name (D44).
+ */
+function isSubtaskIn(s: ItemSnapshot, type: string): boolean {
+  const flagged = s.projects.filter((p) => p.subtaskTypes && p.issueTypes.includes(type));
+  if (flagged.length) return flagged.some((p) => p.subtaskTypes?.includes(type));
+  return isSubtaskType(type);
+}
+
 /** A create_issue the model marked as a small ask, with a home configured (D44). */
 const isSmallAsk = (p: Record<string, unknown>, s?: ItemSnapshot) =>
   p.kind === "create_issue" && !!s?.smallAsks && p.smallAsk === "yes";
@@ -318,7 +337,7 @@ const isSmallAsk = (p: Record<string, unknown>, s?: ItemSnapshot) =>
 function smallAskPlacement(p: Record<string, unknown>, s: ItemSnapshot) {
   const home = s.smallAsks as SmallAskHomeSnapshot;
   const issueType = str(p.issueType) ?? home.defaultType ?? "Task";
-  const subtask = isSubtaskType(issueType);
+  const subtask = isSubtaskIn(s, issueType);
   const parent = subtask ? s.candidates.find((c) => c.key === p.parent) : undefined;
   return { home, issueType, subtask, projectKey: parent?.projectKey ?? home.projectKey };
 }
@@ -338,7 +357,7 @@ function smallAskPayload(p: ItemOutput["proposals"][number], s: ItemSnapshot): P
     descriptionMd: withProvenance(str(p.description), {
       requester: requester?.displayName ?? null,
       source: s.source,
-      date: s.today,
+      date: s.askedOn ?? s.today,
       quote: s.quote,
     }),
     parent: subtask ? str(p.parent) : null,
@@ -483,7 +502,7 @@ function validateSmallAsk(
   const { home, issueType, subtask, projectKey } = smallAskPlacement(p, s);
   if (subtask) {
     const parent = s.candidates.find((c) => c.key === p.parent);
-    if (!parent || parent.issueType === "Epic" || isSubtaskType(parent.issueType))
+    if (!parent || parent.issueType === "Epic" || isSubtaskIn(s, parent.issueType))
       errors.push(
         `${at}: a small ask can be a Sub-task only under an existing candidate story or task; set parent to it, or pick another type.`,
       );
@@ -558,7 +577,7 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
         errors.push(
           `${at}: issue type ${p.issueType} is not available in ${p.projectKey} (${proj.issueTypes.join(", ")}).`,
         );
-      const subtask = /sub-?task/i.test(String(p.issueType));
+      const subtask = isSubtaskIn(s, String(p.issueType));
       if (subtask && !p.parent) errors.push(`${at}: a Sub-task needs a parent.`);
       if (!subtask && p.parent)
         errors.push(`${at}: only a Sub-task has a parent; use epic for epics.`);

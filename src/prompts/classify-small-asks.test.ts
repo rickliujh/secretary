@@ -125,6 +125,27 @@ describe("mapping a small ask (code sets the home)", () => {
     });
   });
 
+  test("Jira's sub-task flag decides which type is a sub-task, not its name", () => {
+    // PAY calls its sub-task type "Action"; flags were stored at sync.
+    const s: ItemSnapshot = {
+      ...home,
+      projects: home.projects.map((p) =>
+        p.key === "PAY"
+          ? { ...p, issueTypes: ["Epic", "Story", "Task", "Action"], subtaskTypes: ["Action"] }
+          : { ...p, subtaskTypes: ["Sub-task"] },
+      ),
+    };
+    const sub = { ...ask, issueType: "Action", parent: "PAY-2", epic: null };
+    expect(validateItemOutput(answer(sub), s)).toEqual([]);
+    const [m] = mapItemOutput(answer(sub), s.quote, s);
+    expect(m?.payload).toMatchObject({
+      projectKey: "PAY",
+      issueType: "Action",
+      parent: "PAY-2",
+      joinSprint: false,
+    });
+  });
+
   test("planned work is smallAsk no and keeps the model's project and type", () => {
     const planned = {
       ...ask,

@@ -20,10 +20,12 @@ function projectStatuses(projectKey: string) {
   return projectKey === "PAY"
     ? ["Epic", "Story", "Task", "Bug", "Sub-task"].map((name) => ({
         name,
+        subtask: name === "Sub-task",
         statuses: statuses(["To Do", "In Progress", "Blocked", "In Review", "Done"]),
       }))
     : ["Task", "Sub-task"].map((name) => ({
         name,
+        subtask: name === "Sub-task",
         statuses: statuses(["To Do", "In Progress", "Done"]),
       }));
 }

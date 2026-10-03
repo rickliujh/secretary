@@ -10,7 +10,7 @@ import { JiraClient } from "@/services/jira";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sync } from "@/services/sync";
 import { getState, parseProjectMeta, SYNC_KEYS } from "@/services/sync/state";
-import { defaultSmallAskType, isSubtaskType, smallAskTypes, unfillableFields } from "./home";
+import { checkCreateFields, defaultSmallAskType, knownSubtaskTypes, smallAskTypes } from "./home";
 
 /** Projects the app knows: those of cached issues and those with stored metadata. */
 export const syncedProjectKeys = Effect.gen(function* () {
@@ -32,6 +32,8 @@ export type SmallAskHome = {
   /** Types a small ask may take in the home, from Jira's project metadata; empty before a sync. */
   issueTypes: string[];
   defaultType: string | null;
+  /** Sub-task types Jira flags across the synced projects; null when not known (older metadata). */
+  subtaskTypes: string[] | null;
 };
 
 /** The configured home, or null when none is set; `hintDismissed` for the Inbox hint. */
@@ -39,14 +41,17 @@ export const smallAskHome = Effect.gen(function* () {
   const settings = yield* settingsOrDefault(yield* Settings);
   const s = settings.smallAsks;
   if (!s.projectKey) return { home: null, hintDismissed: s.hintDismissed };
-  const meta = parseProjectMeta(yield* getState(SYNC_KEYS.projectMeta))[s.projectKey];
+  const all = parseProjectMeta(yield* getState(SYNC_KEYS.projectMeta));
+  const meta = all[s.projectKey];
   const types = meta?.issueTypes ?? [];
+  const subtasks = meta?.subtaskTypes ?? null;
   const home: SmallAskHome = {
     projectKey: s.projectKey,
     label: s.label,
     joinActiveSprint: s.joinActiveSprint,
-    issueTypes: smallAskTypes(types),
-    defaultType: defaultSmallAskType(types),
+    issueTypes: smallAskTypes(types, subtasks),
+    defaultType: defaultSmallAskType(types, subtasks),
+    subtaskTypes: knownSubtaskTypes(all),
   };
   return { home, hintDismissed: s.hintDismissed };
 });
@@ -58,8 +63,10 @@ export type HomeCheck = {
   defaultType: string | null;
   /** Per type: required fields the app cannot fill, so a create would fail. */
   blocked: { issueType: string; fields: string[] }[];
-  /** Types whose create screen has no Labels field, so the label cannot be set. */
-  noLabels: string[];
+  /** Per type: required fields filled only when the model gives a value; an ask without one fails. */
+  needed: { issueType: string; fields: string[] }[];
+  /** Per type: Labels, Assignee or Description missing from the create screen, so they are not set. */
+  notOnScreen: { issueType: string; fields: string[] }[];
 };
 
 /** Most issue types read from the create metadata in one check. */
@@ -74,26 +81,26 @@ export const checkHome = (projectKey: string) =>
     const jira = yield* JiraClient;
     const { effective } = yield* (yield* Sync).fieldInfo;
     const types = yield* jira.createMetaIssueTypes(projectKey);
-    const standard = types.filter(
-      (t) => !t.subtask && !isSubtaskType(t.name) && smallAskTypes([t.name]).length > 0,
-    );
+    // Jira's own sub-task flag decides, not the name.
+    const subtasks = types.filter((t) => t.subtask).map((t) => t.name);
+    const standard = types.filter((t) => smallAskTypes([t.name], subtasks).length > 0);
     const blocked: HomeCheck["blocked"] = [];
-    const noLabels: string[] = [];
+    const needed: HomeCheck["needed"] = [];
+    const notOnScreen: HomeCheck["notOnScreen"] = [];
     for (const t of standard.slice(0, MAX_TYPES)) {
       const fields = yield* jira.createMetaFields(projectKey, t.id);
-      const missing = unfillableFields(
-        fields,
-        [effective.epicLink].filter((f): f is string => !!f),
-      );
-      if (missing.length) blocked.push({ issueType: t.name, fields: missing });
-      if (!fields.some((f) => f.fieldId === "labels")) noLabels.push(t.name);
+      const c = checkCreateFields(fields, effective.epicLink);
+      if (c.unfillable.length) blocked.push({ issueType: t.name, fields: c.unfillable });
+      if (c.whenGiven.length) needed.push({ issueType: t.name, fields: c.whenGiven });
+      if (c.notOnScreen.length) notOnScreen.push({ issueType: t.name, fields: c.notOnScreen });
     }
     const names = standard.map((t) => t.name);
     return {
       projectKey,
       issueTypes: names,
-      defaultType: defaultSmallAskType(names),
+      defaultType: defaultSmallAskType(names, subtasks),
       blocked,
-      noLabels,
+      needed,
+      notOnScreen,
     } satisfies HomeCheck;
   });

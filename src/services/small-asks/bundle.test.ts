@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type BundleProposal, groupSmallAsks, trackOrder } from "./bundle";
+import { type BundleProposal, bundleLine, groupSmallAsks, trackOrder } from "./bundle";
 
 const create = (id: string, ref: string, smallAsk: boolean, item = "i1"): BundleProposal => ({
   id,
@@ -55,6 +55,54 @@ describe("groupSmallAsks (D44)", () => {
     edited.editedPayload = { ...(edited.payload as object), smallAsk: true };
     const list = [create("c1", "$new:1", true), edited, dep("d1", "$new:2"), dep("d2", "$new:1")];
     expect(shape(groupSmallAsks(list))).toEqual(["track c1 [d2]", "track c2 [d1]"]);
+  });
+
+  test("only bundle kinds join: other writes on the new ticket stay cards under the row", () => {
+    const other = (id: string, kind: string, payload: object): BundleProposal => ({
+      ...dep(id, "$new:1"),
+      kind,
+      payload: { kind, ...payload },
+    });
+    const list = [
+      create("c1", "$new:1", true),
+      dep("d1", "$new:1"),
+      other("cm", "add_comment", { target: "$new:1", bodyMd: "Started" }),
+      other("tr", "transition_issue", { target: "$new:1", toStatus: "In Progress" }),
+      other("up", "update_issue", { target: "$new:1", changes: { priority: "High" } }),
+      other("dm", "draft_message", {
+        channel: "teams",
+        intent: "fyi",
+        recipientPersonId: "p1",
+        issueKeys: ["$new:1"],
+      }),
+    ];
+    expect(shape(groupSmallAsks(list))).toEqual(["track c1 [d1]", "cm", "tr", "up", "dm"]);
+  });
+
+  test("refs created earlier in the thread do not keep a member out", () => {
+    const executed = { ...create("c2", "$new:2", false), status: "executed" };
+    const list = [create("c1", "$new:1", true), executed, dep("d1", "$new:1")];
+    expect(shape(groupSmallAsks(list))).toEqual(["track c1 [d1]", "c2"]);
+    expect(shape(groupSmallAsks([create("c1", "$new:1", true)], new Set(["$new:2"])))).toEqual([
+      "track c1 []",
+    ]);
+  });
+
+  test("the row face has one line per member", () => {
+    expect(
+      bundleLine({
+        kind: "link_dependency",
+        target: "$new:1",
+        dependencyKind: "team",
+        label: "Finance",
+        ownerPersonId: null,
+        ownerTeamId: null,
+        externalRef: null,
+        externalUrl: null,
+        expectedAt: null,
+        nextFollowupAt: null,
+      }),
+    ).toBe("Waits on Finance");
   });
 
   test("Track runs the create first, then the members by seq, skipping decided ones", () => {

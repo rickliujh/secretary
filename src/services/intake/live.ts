@@ -9,6 +9,7 @@ import {
   buildItemSchema,
   fromPayload,
   type ItemOutput,
+  type ItemSnapshot,
   type MappedProposal,
   mapItemOutput,
   type ThreadContext,
@@ -63,6 +64,8 @@ type Job = {
   instructions: string[];
   /** Undecided proposals being revised; empty for new input. */
   revising: ProposalRow[];
+  /** The day the item first arrived, for a revision (D44: "Asked ... on" keeps it). */
+  askedOn?: string;
 };
 
 type Classified = {
@@ -254,6 +257,7 @@ const make = Effect.gen(function* () {
         senderPersonId: ctx.senderPersonId,
         references,
         today: ctx.today,
+        ...(job.askedOn ? { askedOn: job.askedOn } : {}),
         thread,
       });
       const result = yield* Effect.either(
@@ -566,11 +570,13 @@ const make = Effect.gen(function* () {
             const p = effectivePayload(r);
             return p.kind === "create_issue" && used.has(p.ref);
           });
+        const snapshot = thread.current.get(idx)?.snapshot as Partial<ItemSnapshot> | null;
         return {
           idx,
           quote: thread.current.get(idx)?.quote ?? "",
           instructions: thread.instructions,
           revising: [...borrowed, ...own],
+          askedOn: snapshot?.askedOn ?? snapshot?.today,
         };
       });
       const results = yield* classifyAll(
