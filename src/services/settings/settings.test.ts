@@ -44,7 +44,11 @@ describe("Settings schema", () => {
       obsidian: { cliPath: "" },
       report: { style: "talk_track" },
       storage: { limitMb: 1024, autoCleanup: true },
-      capture: { shortcut: "CommandOrControl+Shift+Space", closeToTray: true },
+      capture: {
+        shortcut: "CommandOrControl+Shift+Space",
+        closeToTray: true,
+        trayNoticeShown: false,
+      },
       scoring: {
         priority: 3,
         due: 4,
@@ -80,6 +84,17 @@ describe("Settings schema", () => {
     });
     expect(SettingsSchema.safeParse({ smallAsks: { label: "small ask" } }).success).toBe(false);
     expect(SettingsSchema.safeParse({ smallAsks: { projectKey: "ask" } }).success).toBe(false);
+  });
+
+  test("the tray notice flag defaults to unsent and survives a stored capture section", () => {
+    expect(SettingsSchema.parse({ capture: { closeToTray: false } }).capture).toEqual({
+      shortcut: "CommandOrControl+Shift+Space",
+      closeToTray: false,
+      trayNoticeShown: false,
+    });
+    expect(
+      SettingsSchema.parse({ capture: { trayNoticeShown: true } }).capture.trayNoticeShown,
+    ).toBe(true);
   });
 
   test("partial data keeps stored values and fills the rest", async () => {

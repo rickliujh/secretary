@@ -45,7 +45,7 @@ export function CaptureSection() {
   }, [settings, form]);
 
   const onSubmit = form.handleSubmit((values) =>
-    update.mutate((s) => ({ ...s, capture: values }), {
+    update.mutate((s) => ({ ...s, capture: { ...s.capture, ...values } }), {
       onSuccess: () => toast.success("Saved"),
     }),
   );

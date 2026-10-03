@@ -868,3 +868,20 @@ Known limits
   notification were checked by typecheck, lint and tests only.
 - Only "blocked by" links are written; other link types are not.
 - No Today UI yet; woken tickets are only notified until Phase 16 lists them.
+
+## Polish: Sprint plan, tray notice, palette (2026-10-03)
+
+- Sprint: the Plan tab stays mounted, hidden, once opened, so a drafted plan that
+  was not sent (and its notes, picks and goal, or a draft still being written)
+  survives switching to Report or Epics and back. Report and Epics still load only
+  when opened. Leaving the Sprint page still discards it. Context was checked: its
+  edits are in modal dialogs and sheets, so only the People search text resets.
+- Tray: the first close that hides the window to the tray sends one notification,
+  "Secretary is still running in the tray. Quit from the tray menu, or turn this off
+  in Settings." Once ever (`capture.trayNoticeShown`); a refused notification
+  permission does not use it up. The native close handler emits
+  `capture://hidden-to-tray` only when it hid the window, so nothing is sent without
+  a tray. Saving Settings > Capture now keeps the flag.
+- Command palette: "New draft" moved into the Actions group, after Capture.
+- Not run in the desktop app: the notification and the hidden Plan tab were checked
+  by cargo check, typecheck, unit tests and review only.

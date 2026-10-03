@@ -10,6 +10,9 @@ import type { TriageInput, TriageResult } from "@/services/intake";
 /** Emitted by the Rust side for the tray, the global shortcut and `--capture`. */
 export const OPEN_CAPTURE_EVENT = "capture://open";
 
+/** Emitted by the Rust side when a close of the main window hid it to the tray instead. */
+export const HIDDEN_TO_TRAY_EVENT = "capture://hidden-to-tray";
+
 /** How to put the window back after capture: it was hidden, minimised, or already open. */
 export type Restore = "hide" | "minimize" | null;
 
@@ -132,4 +135,35 @@ export async function submitCapture(
   if (result.proposals + result.questions > 0 && (await quietly(deps.windowHidden(), false)))
     await quietly(deps.notify("Secretary", describeCapture(result)), undefined);
   return result;
+}
+
+export const TRAY_NOTICE = {
+  title: "Secretary",
+  body: "Secretary is still running in the tray. Quit from the tray menu, or turn this off in Settings.",
+};
+
+export type TrayNoticeDeps = {
+  /** Whether the notice was already sent (the `capture.trayNoticeShown` setting). */
+  shown: () => Promise<boolean>;
+  markShown: () => Promise<void>;
+  /** Resolves false when the notification was not sent (not allowed). */
+  notify: (title: string, body: string) => Promise<boolean>;
+};
+
+let trayNoticeRunning = false;
+
+/**
+ * The first close that hides the window to the tray says so, once ever (D48).
+ * Only a sent notification counts, so a refused permission does not use it up;
+ * a second close while the first is still being handled does nothing.
+ */
+export async function onHiddenToTray(deps: TrayNoticeDeps): Promise<void> {
+  if (trayNoticeRunning) return;
+  trayNoticeRunning = true;
+  try {
+    if (await deps.shown()) return;
+    if (await deps.notify(TRAY_NOTICE.title, TRAY_NOTICE.body)) await deps.markShown();
+  } finally {
+    trayNoticeRunning = false;
+  }
 }

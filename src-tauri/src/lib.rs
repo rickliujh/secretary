@@ -125,7 +125,7 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" && capture::keep_in_tray(window.app_handle()) {
                     api.prevent_close();
-                    let _ = window.hide();
+                    capture::hide_to_tray(window);
                 }
             }
         })

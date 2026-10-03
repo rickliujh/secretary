@@ -11,11 +11,13 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State, Window};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 /// The event the webview listens to; the payload says how to put the window back.
 pub const OPEN_CAPTURE: &str = "capture://open";
+/// Emitted when a close of the main window hid it instead; the webview says so once.
+pub const HIDDEN_TO_TRAY: &str = "capture://hidden-to-tray";
 const MAIN: &str = "main";
 const CAPTURE_ARG: &str = "--capture";
 
@@ -102,6 +104,13 @@ pub fn keep_in_tray<R: Runtime>(app: &AppHandle<R>) -> bool {
     app.try_state::<CaptureState>().is_some_and(|s| {
         s.close_to_tray.load(Ordering::Relaxed) && s.tray.load(Ordering::Relaxed)
     })
+}
+
+/// Hides the main window in place of closing it and tells the webview.
+pub fn hide_to_tray<R: Runtime>(window: &Window<R>) {
+    if window.hide().is_ok() {
+        let _ = window.emit_to(MAIN, HIDDEN_TO_TRAY, ());
+    }
 }
 
 /// The tray library is loaded at run time on Linux, and a missing one panics

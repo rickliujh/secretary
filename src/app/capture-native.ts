@@ -1,13 +1,26 @@
 /** Connects quick capture to the desktop: window, tray, global shortcut, `--capture` (D48). */
+
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Effect } from "effect";
 import { useEffect } from "react";
 import { logger } from "@/lib/log";
-import { captureStore, OPEN_CAPTURE_EVENT, onOpenCaptureEvent, type Restore } from "./capture";
+import { Settings } from "@/services/settings";
+import {
+  captureStore,
+  HIDDEN_TO_TRAY_EVENT,
+  OPEN_CAPTURE_EVENT,
+  onHiddenToTray,
+  onOpenCaptureEvent,
+  type Restore,
+} from "./capture";
 import { useSettings } from "./hooks";
 import { sendOsNotification } from "./notify";
 import { inTauri } from "./platform";
+import { queryKeys } from "./query-client";
+import { run } from "./runtime";
 
 type CaptureStatus = {
   tray: boolean;
@@ -31,6 +44,19 @@ export async function windowHidden() {
 export const notify = (title: string, body: string) =>
   inTauri ? sendOsNotification(title, body) : Promise.resolve(false);
 
+/** The once-ever "still running in the tray" notice, kept in settings (D48). */
+const trayNotice = (client: QueryClient) =>
+  onHiddenToTray({
+    shown: () => run(Effect.flatMap(Settings, (s) => s.get)).then((s) => s.capture.trayNoticeShown),
+    markShown: () =>
+      run(
+        Effect.flatMap(Settings, (s) =>
+          s.update((v) => ({ ...v, capture: { ...v.capture, trayNoticeShown: true } })),
+        ),
+      ).then((next) => void client.setQueryData(queryKeys.settings, next)),
+    notify,
+  });
+
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
@@ -38,18 +64,23 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * `--capture`, and hands the Capture settings to the native side.
  */
 export function useCaptureBridge() {
+  const client = useQueryClient();
   const { data: settings } = useSettings();
   const shortcut = settings?.capture.shortcut;
   const closeToTray = settings?.capture.closeToTray;
 
   useEffect(() => {
     if (!inTauri) return;
-    let stop: (() => void) | undefined;
+    const stops: (() => void)[] = [];
     let cancelled = false;
-    void listen(OPEN_CAPTURE_EVENT, (e) => onOpenCaptureEvent(e.payload)).then((un) => {
+    const keep = (un: () => void) => {
       if (cancelled) un();
-      else stop = un;
-    });
+      else stops.push(un);
+    };
+    void listen(OPEN_CAPTURE_EVENT, (e) => onOpenCaptureEvent(e.payload)).then(keep);
+    void listen(HIDDEN_TO_TRAY_EVENT, () =>
+      trayNotice(client).catch((e) => logger.warn("Tray notice failed", e)),
+    ).then(keep);
     void invoke<CaptureStatus>("capture_status")
       .then((s) => {
         captureStore.setNative({ tray: s.tray, trayError: s.trayError, wayland: s.wayland });
@@ -58,9 +89,9 @@ export function useCaptureBridge() {
       .catch((e) => logger.warn("Capture status failed", e));
     return () => {
       cancelled = true;
-      stop?.();
+      for (const un of stops) un();
     };
-  }, []);
+  }, [client]);
 
   useEffect(() => {
     if (!inTauri || closeToTray === undefined) return;

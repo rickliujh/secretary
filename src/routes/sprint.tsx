@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { SPRINT_TABS, SprintSearch, type SprintTab } from "@/app/tabs";
 import { PlanningPage } from "@/components/planning/planning-page";
 import { ReportPage } from "@/components/report/report-page";
@@ -14,6 +15,11 @@ export const Route = createFileRoute("/sprint")({
 function SprintPage() {
   const { tab } = Route.useSearch();
   const navigate = useNavigate({ from: "/sprint" });
+  // An unsent plan lives in the Plan tab's own state (a model call and the user's
+  // edits), so once opened the tab stays mounted and is only hidden. Report and
+  // Epics still mount, and load, when opened.
+  const [planOpened, setPlanOpened] = useState(tab === "plan");
+  if (tab === "plan" && !planOpened) setPlanOpened(true);
   return (
     <Tabs
       value={tab}
@@ -27,7 +33,11 @@ function SprintPage() {
           </TabsTrigger>
         ))}
       </TabsList>
-      <TabsContent value="plan">
+      <TabsContent
+        value="plan"
+        forceMount={planOpened || undefined}
+        className="data-[state=inactive]:hidden"
+      >
         <PlanningPage />
       </TabsContent>
       <TabsContent value="report">

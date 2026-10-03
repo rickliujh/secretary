@@ -87,6 +87,13 @@ export function CommandPalette({
               Capture
               <CommandShortcut>To the Inbox</CommandShortcut>
             </CommandItem>
+            <CommandItem
+              value="new draft message email teams"
+              onSelect={() => go(() => drafts.open({ prefill: {} }))}
+            >
+              <PenLine />
+              New draft
+            </CommandItem>
           </CommandGroup>
           {tickets.length > 0 && (
             <CommandGroup heading="Tickets">
@@ -137,15 +144,6 @@ export function CommandPalette({
               ))}
             </CommandGroup>
           )}
-          <CommandGroup heading="Drafts">
-            <CommandItem
-              value="new draft message email teams"
-              onSelect={() => go(() => drafts.open({ prefill: {} }))}
-            >
-              <PenLine />
-              New draft
-            </CommandItem>
-          </CommandGroup>
           <CommandGroup heading="Pages">
             {ALL_PAGES.map((item) => (
               <CommandItem key={item.to} onSelect={() => go(() => navigate({ to: item.to }))}>

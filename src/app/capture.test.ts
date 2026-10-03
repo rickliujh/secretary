@@ -9,9 +9,11 @@ import {
   captureStore,
   describeCapture,
   displayShortcut,
+  onHiddenToTray,
   onOpenCaptureEvent,
   type Restore,
   submitCapture,
+  TRAY_NOTICE,
 } from "./capture";
 
 afterEach(() => captureStore.close());
@@ -168,5 +170,70 @@ describe("submitCapture", () => {
       },
     });
     expect(r.proposals).toBe(1);
+  });
+});
+
+describe("tray notice (D48)", () => {
+  /** A settings flag and a notifier that records what was sent. */
+  const desktop = (opts: { shown?: boolean; allowed?: boolean } = {}) => {
+    let shown = opts.shown ?? false;
+    const sent: string[] = [];
+    return {
+      sent,
+      isShown: () => shown,
+      deps: {
+        shown: async () => shown,
+        markShown: async () => {
+          shown = true;
+        },
+        notify: async (title: string, body: string) => {
+          if (opts.allowed === false) return false;
+          sent.push(`${title}: ${body}`);
+          return true;
+        },
+      },
+    };
+  };
+
+  test("the first hide to the tray says so, and later ones do not", async () => {
+    const d = desktop();
+    await onHiddenToTray(d.deps);
+    await onHiddenToTray(d.deps);
+    expect(d.sent).toEqual([`${TRAY_NOTICE.title}: ${TRAY_NOTICE.body}`]);
+    expect(TRAY_NOTICE.body).toContain("Quit from the tray menu");
+    expect(d.isShown()).toBe(true);
+  });
+
+  test("nothing is sent once the flag is set", async () => {
+    const d = desktop({ shown: true });
+    await onHiddenToTray(d.deps);
+    expect(d.sent).toEqual([]);
+  });
+
+  test("a refused notification does not use the notice up", async () => {
+    const d = desktop({ allowed: false });
+    await onHiddenToTray(d.deps);
+    expect(d.isShown()).toBe(false);
+  });
+
+  test("two closes in quick succession send one notice", async () => {
+    const d = desktop();
+    await Promise.all([onHiddenToTray(d.deps), onHiddenToTray(d.deps)]);
+    expect(d.sent).toHaveLength(1);
+  });
+
+  test("a failed settings read sends nothing and lets the next close try again", async () => {
+    const d = desktop();
+    await expect(
+      onHiddenToTray({
+        ...d.deps,
+        shown: async () => {
+          throw new Error("store unreadable");
+        },
+      }),
+    ).rejects.toThrow("store unreadable");
+    expect(d.sent).toEqual([]);
+    await onHiddenToTray(d.deps);
+    expect(d.sent).toHaveLength(1);
   });
 });

@@ -209,6 +209,8 @@ export const SettingsSchema = z.object({
       shortcut: z.string().trim().max(60).default(DEFAULT_CAPTURE_SHORTCUT),
       /** Closing the window keeps the app running in the tray (D48). */
       closeToTray: z.boolean().default(true),
+      /** The one-time notice that closing kept the app running in the tray was sent (D48). */
+      trayNoticeShown: z.boolean().default(false),
     })
     .prefault({}),
   network: z
