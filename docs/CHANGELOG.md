@@ -1119,3 +1119,31 @@ Review fixes
   in their badge; the snoozed and pinned icons have names.
 - Still not seen in the running app; checked by typecheck, tests, lint and the
   build.
+
+## Live eval: concurrent, verbose, fail-fast; reasoning effort for compatible providers (2026-10-03)
+
+- The intake eval runs every case in its own layer and in-memory database, six at
+  a time (`SECRETARY_EVAL_CONCURRENCY`, 1 for one after another); a thread's turns
+  stay in order inside their case. Corrections, waits and the small-asks home are
+  per case, so nothing is cleaned up between cases. The other live tests
+  (drafts, chat, planning, report, vault, fast versus standard) run concurrently
+  beside it; each prints its time and model calls.
+- Each case prints PASS or FAIL, seconds and model calls (repairs, escalations and
+  failed calls from its `llm_calls`) when it finishes. The final report keeps the
+  details and adds wall time, total calls, input and output tokens, the five
+  slowest cases and which upstream provider answered.
+- The run stops when the first three cases all end in the same provider error
+  (timeout, rate limit, server or request error), and at once on 401/403, saying
+  what to try (`harness.ts`, unit-tested).
+- D52: the provider effort setting now also applies to OpenAI-compatible
+  providers as `reasoning_effort` (max sends xhigh); "Provider default" still sends
+  nothing. The provider form shows it for both kinds. The eval takes
+  `SECRETARY_EVAL_EFFORT`.
+- Eval only: `SECRETARY_EVAL_PROVIDER` pins OpenRouter's upstream provider
+  (`provider.only`, no fallbacks), and the eval's model fetch waits out up to six
+  429s with backoff before the app sees one, inside the app's own timeout.
+- First run on GLM 5.3 Flash pinned to `deepinfra/fp4`: DeepInfra's shared pool
+  answered 429 ("engine overloaded") to nearly every request, so the first three
+  cases timed out and the run stopped after 4 minutes instead of grinding on. When
+  it does answer, DeepInfra returned the classify call in 15 s (700 output tokens,
+  55 of them reasoning) with valid JSON. No intake result yet.

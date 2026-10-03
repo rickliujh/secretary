@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { generateText } from "ai";
 import { ProviderSchema } from "@/services/settings/schema";
-import { callSettings, makeLanguageModel } from "./providers";
+import { callSettings, makeLanguageModel, reasoningEffort } from "./providers";
 
 type Captured = { url: string; headers: Record<string, string>; body: Record<string, unknown> };
 
@@ -109,5 +109,47 @@ describe("provider construction", () => {
     expect(captured[0]?.headers.authorization).toBe("Bearer k-1");
     expect(captured[0]?.body.temperature).toBe(0);
     expect(captured[0]?.body.seed).toBe(7);
+    // Provider default sends no reasoning field: compatible servers may reject it.
+    expect("reasoning_effort" in (captured[0]?.body ?? {})).toBe(false);
+  });
+
+  test("openai-compatible sends a chosen effort as reasoning_effort", async () => {
+    const provider = ProviderSchema.parse({
+      id: "o",
+      name: "Router",
+      kind: "openai-compatible",
+      baseUrl: "https://router.test/v1",
+      effort: "low",
+    });
+    const { fetch, captured } = stubFetch(openaiReply);
+    const model = makeLanguageModel({ provider, model: "m", apiKey: "k", headers: {}, fetch });
+    await generateText({ model, prompt: "hi", ...callSettings(provider) });
+    expect(captured[0]?.body.reasoning_effort).toBe("low");
+    expect(captured[0]?.body.temperature).toBe(0);
+  });
+});
+
+describe("reasoning effort for OpenAI-compatible providers (D52)", () => {
+  test("maps every setting value", () => {
+    expect(reasoningEffort("default")).toBeUndefined();
+    expect(reasoningEffort("low")).toBe("low");
+    expect(reasoningEffort("medium")).toBe("medium");
+    expect(reasoningEffort("high")).toBe("high");
+    expect(reasoningEffort("xhigh")).toBe("xhigh");
+    // The field has nothing above xhigh.
+    expect(reasoningEffort("max")).toBe("xhigh");
+  });
+
+  test("anthropic providers keep their own effort option", () => {
+    const provider = ProviderSchema.parse({
+      id: "a",
+      name: "A",
+      kind: "anthropic",
+      baseUrl: "https://api.anthropic.test/v1",
+      effort: "max",
+    });
+    expect(callSettings(provider).providerOptions).toEqual({
+      anthropic: { structuredOutputMode: "auto", effort: "max" },
+    });
   });
 });

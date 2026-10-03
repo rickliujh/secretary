@@ -20,6 +20,7 @@ export const ProviderSchema = z.object({
   // Anthropic-compatible options. Proxies may reject thinking/effort, so both are opt-in.
   authStyle: z.enum(["x-api-key", "bearer"]).default("x-api-key"),
   thinking: z.enum(["default", "adaptive", "disabled"]).default("default"),
+  /** Both kinds; OpenAI-compatible servers get it as `reasoning_effort` (D52). Opt-in. */
   effort: z.enum(["default", "low", "medium", "high", "xhigh", "max"]).default("default"),
   structuredOutputMode: z.enum(["auto", "outputFormat", "jsonTool"]).default("auto"),
   // OpenAI-compatible options.

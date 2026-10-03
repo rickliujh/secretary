@@ -86,6 +86,11 @@ function defaults(p?: Provider): FormValues {
 
 type Option = { value: string; label: string };
 
+const EFFORT_OPTIONS: Option[] = ProviderSchema.shape.effort.unwrap().options.map((v) => ({
+  value: v,
+  label: v === "default" ? "Provider default" : v,
+}));
+
 function SelectField({
   control,
   name,
@@ -332,10 +337,7 @@ export function ProviderDialog({
                     control={form.control}
                     name="effort"
                     label="Effort"
-                    options={["default", "low", "medium", "high", "xhigh", "max"].map((v) => ({
-                      value: v,
-                      label: v === "default" ? "Provider default" : v,
-                    }))}
+                    options={EFFORT_OPTIONS}
                   />
                 </div>
               </FieldSet>
@@ -353,6 +355,13 @@ export function ProviderDialog({
                   name="sendTemperature"
                   label="Send temperature 0"
                   description="Turn off for endpoints that reject sampling parameters."
+                />
+                <SelectField
+                  control={form.control}
+                  name="effort"
+                  label="Reasoning effort"
+                  description='Sent as reasoning_effort; xhigh and max both send "xhigh". Some servers reject the field: leave it on "Provider default" if unsure. Lower effort makes reasoning models answer faster.'
+                  options={EFFORT_OPTIONS}
                 />
                 <Field data-invalid={!!errors.seed}>
                   <FieldLabel htmlFor="provider-seed">Seed</FieldLabel>
