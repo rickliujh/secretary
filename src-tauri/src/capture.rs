@@ -11,9 +11,10 @@
 //! so there the whole app is hidden the way Cmd+H does it: focus goes back to the
 //! previous app, the Dock icon stays, and Cmd+Tab or a Dock click unhides it.
 //!
-//! Troubleshooting: `SECRETARY_NO_TRAY=1` starts without the tray icon and
-//! `SECRETARY_NO_SHORTCUT=1` without the global shortcut, so each can be ruled out
-//! on a desktop where the app misbehaves. Settings shows which switch is on.
+//! Troubleshooting: `SECRETARY_NO_TRAY=1` starts without the tray icon,
+//! `SECRETARY_NO_SHORTCUT=1` without the global shortcut plugin and
+//! `SECRETARY_NO_SINGLE_INSTANCE=1` without the single-instance plugin, so each can
+//! be ruled out on a desktop where the app misbehaves. Settings shows the first two.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -36,15 +37,17 @@ const TRAY_CAPTURE: &str = "tray-capture";
 const TRAY_QUIT: &str = "tray-quit";
 
 const WAYLAND_REASON: &str = "Wayland does not let apps register global shortcuts.";
-const NO_TRAY: &str = "SECRETARY_NO_TRAY";
-const NO_SHORTCUT: &str = "SECRETARY_NO_SHORTCUT";
+pub const NO_TRAY: &str = "SECRETARY_NO_TRAY";
+pub const NO_SHORTCUT: &str = "SECRETARY_NO_SHORTCUT";
+pub const NO_SINGLE_INSTANCE: &str = "SECRETARY_NO_SINGLE_INSTANCE";
 
 /// A troubleshooting switch is on when its variable is set to anything but "" or "0".
 fn switch_on(value: Option<std::ffi::OsString>) -> bool {
     value.is_some_and(|v| !v.is_empty() && v != "0")
 }
 
-fn switched_off(var: &str) -> Option<String> {
+/// The reason a piece is off, when its troubleshooting switch is on.
+pub fn switched_off(var: &str) -> Option<String> {
     switch_on(std::env::var_os(var)).then(|| format!("Turned off by {var}."))
 }
 
@@ -287,6 +290,14 @@ pub fn capture_window_hidden(app: AppHandle) -> bool {
 /// plugin's main-thread dispatch does not wait on the main thread itself.
 #[tauri::command]
 pub async fn set_capture_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
+    // Without the plugin there is nothing to register with (and no state to read).
+    if let Some(reason) = switched_off(NO_SHORTCUT) {
+        return if shortcut.trim().is_empty() {
+            Ok(())
+        } else {
+            Err(reason)
+        };
+    }
     let state = app.state::<CaptureState>();
     let shortcuts = app.global_shortcut();
     let mut current = state.shortcut.lock().unwrap();
@@ -296,9 +307,6 @@ pub async fn set_capture_shortcut(app: AppHandle, shortcut: String) -> Result<()
     let shortcut = shortcut.trim();
     if shortcut.is_empty() {
         return Ok(());
-    }
-    if let Some(reason) = switched_off(NO_SHORTCUT) {
-        return Err(reason);
     }
     if is_wayland() {
         return Err(WAYLAND_REASON.into());

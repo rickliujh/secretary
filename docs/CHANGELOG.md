@@ -774,8 +774,9 @@ Fix (macOS, after a first run there)
   `reveal`); the webview no longer hides the window itself but calls
   `capture_restore` and `capture_window_hidden`, and loses `core:window:allow-hide`.
 - Troubleshooting switches for the desktop pieces this phase added: `SECRETARY_NO_TRAY=1`
-  starts without the tray icon and `SECRETARY_NO_SHORTCUT=1` without the global
-  shortcut; Settings shows which one is on. Added while chasing a macOS 26 report
+  starts without the tray icon, `SECRETARY_NO_SHORTCUT=1` without the global shortcut
+  plugin and `SECRETARY_NO_SINGLE_INSTANCE=1` without the single-instance plugin;
+  Settings shows the first two. Added while chasing a macOS 26 report
   (`tauri dev` window shown but never activated, no Dock icon, menu bar icon present).
   A Rust test pins the `restore` payload. Not yet re-run on macOS.
 

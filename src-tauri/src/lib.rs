@@ -85,7 +85,11 @@ fn single_instance<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Must be the first plugin: a second launch hands its arguments over and exits here.
-    let builder = tauri::Builder::default().plugin(single_instance());
+    let mut builder = tauri::Builder::default();
+    match capture::switched_off(capture::NO_SINGLE_INSTANCE) {
+        Some(reason) => eprintln!("No single-instance plugin: {reason}"),
+        None => builder = builder.plugin(single_instance()),
+    }
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_menu).on_menu_event(|app, event| {
         if event.id().as_ref() == CLOSE_WINDOW {
@@ -95,8 +99,11 @@ pub fn run() {
         }
     });
     let launch_capture = capture::wants_capture(&std::env::args().collect::<Vec<_>>());
+    match capture::switched_off(capture::NO_SHORTCUT) {
+        Some(reason) => eprintln!("No global shortcut plugin: {reason}"),
+        None => builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build()),
+    }
     builder
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
