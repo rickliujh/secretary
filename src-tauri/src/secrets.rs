@@ -53,7 +53,10 @@ mod tests {
         secret_delete(name.clone()).unwrap();
         assert_eq!(secret_get(name.clone()).unwrap(), None);
         secret_set(name.clone(), "value-123".into()).unwrap();
-        assert_eq!(secret_get(name.clone()).unwrap().as_deref(), Some("value-123"));
+        assert_eq!(
+            secret_get(name.clone()).unwrap().as_deref(),
+            Some("value-123")
+        );
         secret_delete(name.clone()).unwrap();
         assert_eq!(secret_get(name).unwrap(), None);
     }

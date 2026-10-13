@@ -76,8 +76,7 @@ fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 /// D-Bus name, so `tauri dev` runs beside an installed copy instead of handing over
 /// to it.
 fn single_instance<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    let builder =
-        tauri_plugin_single_instance::Builder::new().callback(capture::on_second_launch);
+    let builder = tauri_plugin_single_instance::Builder::new().callback(capture::on_second_launch);
     #[cfg(all(debug_assertions, target_os = "linux"))]
     let builder = builder.dbus_id("dev.rickliu.secretary.dev");
     builder.build()

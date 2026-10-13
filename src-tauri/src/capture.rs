@@ -10,6 +10,10 @@
 //! keyboard, and a Dock click or Cmd+Tab does not bring it back (tauri#7540, #2149),
 //! so there the whole app is hidden the way Cmd+H does it: focus goes back to the
 //! previous app, the Dock icon stays, and Cmd+Tab or a Dock click unhides it.
+//!
+//! Troubleshooting: `SECRETARY_NO_TRAY=1` starts without the tray icon and
+//! `SECRETARY_NO_SHORTCUT=1` without the global shortcut, so each can be ruled out
+//! on a desktop where the app misbehaves. Settings shows which switch is on.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -32,6 +36,17 @@ const TRAY_CAPTURE: &str = "tray-capture";
 const TRAY_QUIT: &str = "tray-quit";
 
 const WAYLAND_REASON: &str = "Wayland does not let apps register global shortcuts.";
+const NO_TRAY: &str = "SECRETARY_NO_TRAY";
+const NO_SHORTCUT: &str = "SECRETARY_NO_SHORTCUT";
+
+/// A troubleshooting switch is on when its variable is set to anything but "" or "0".
+fn switch_on(value: Option<std::ffi::OsString>) -> bool {
+    value.is_some_and(|v| !v.is_empty() && v != "0")
+}
+
+fn switched_off(var: &str) -> Option<String> {
+    switch_on(std::env::var_os(var)).then(|| format!("Turned off by {var}."))
+}
 
 #[derive(Default)]
 pub struct CaptureState {
@@ -50,7 +65,9 @@ pub struct CaptureState {
 impl CaptureState {
     pub fn new(launch_capture: bool) -> Self {
         let state = Self::default();
-        state.launch_capture.store(launch_capture, Ordering::Relaxed);
+        state
+            .launch_capture
+            .store(launch_capture, Ordering::Relaxed);
         state
     }
 }
@@ -141,9 +158,8 @@ pub fn on_second_launch<R: Runtime>(app: &AppHandle<R>, args: Vec<String>, _cwd:
 
 /// Whether a close request on the main window should hide it instead.
 pub fn keep_in_tray<R: Runtime>(app: &AppHandle<R>) -> bool {
-    app.try_state::<CaptureState>().is_some_and(|s| {
-        s.close_to_tray.load(Ordering::Relaxed) && s.tray.load(Ordering::Relaxed)
-    })
+    app.try_state::<CaptureState>()
+        .is_some_and(|s| s.close_to_tray.load(Ordering::Relaxed) && s.tray.load(Ordering::Relaxed))
 }
 
 /// Hides the main window (the app on macOS) in place of closing it and tells the webview.
@@ -165,10 +181,16 @@ fn tray_library() -> Result<(), String> {
     ];
     // SAFETY: loading these libraries runs no initialisers beyond GLib type setup,
     // the same load tray-icon performs when it builds the icon.
-    if NAMES.iter().any(|name| unsafe { libloading::Library::new(name) }.is_ok()) {
+    if NAMES
+        .iter()
+        .any(|name| unsafe { libloading::Library::new(name) }.is_ok())
+    {
         Ok(())
     } else {
-        Err("The tray library is not installed (libayatana-appindicator3 or libappindicator3).".into())
+        Err(
+            "The tray library is not installed (libayatana-appindicator3 or libappindicator3)."
+                .into(),
+        )
     }
 }
 
@@ -203,7 +225,10 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 /// Creates the tray icon; without one the app runs as before and Settings says why.
 pub fn create_tray<R: Runtime>(app: &AppHandle<R>) {
-    let result = tray_library().and_then(|()| build_tray(app).map_err(|e| e.to_string()));
+    let result = match switched_off(NO_TRAY) {
+        Some(reason) => Err(reason),
+        None => tray_library().and_then(|()| build_tray(app).map_err(|e| e.to_string())),
+    };
     let state = app.state::<CaptureState>();
     if let Err(reason) = &result {
         tauri_plugin_log::log::warn!("No tray icon: {reason}");
@@ -272,6 +297,9 @@ pub async fn set_capture_shortcut(app: AppHandle, shortcut: String) -> Result<()
     if shortcut.is_empty() {
         return Ok(());
     }
+    if let Some(reason) = switched_off(NO_SHORTCUT) {
+        return Err(reason);
+    }
     if is_wayland() {
         return Err(WAYLAND_REASON.into());
     }
@@ -289,6 +317,16 @@ pub async fn set_capture_shortcut(app: AppHandle, shortcut: String) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switches_read_set_empty_and_zero() {
+        let on = |v: &str| switch_on(Some(v.into()));
+        assert!(on("1"));
+        assert!(on("yes"));
+        assert!(!on(""));
+        assert!(!on("0"));
+        assert!(!switch_on(None));
+    }
 
     #[test]
     fn capture_flag_anywhere_in_the_arguments() {
