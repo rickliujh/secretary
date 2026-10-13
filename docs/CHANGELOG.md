@@ -763,6 +763,18 @@ Known limits
 - On Linux and Windows the hidden webview's timers may be throttled by the engine;
   the 10-minute sync and reminder timers tolerate that.
 
+Fix (macOS, after a first run there)
+- Closing to the tray hid only the window, which left the app active with no window
+  to take the keyboard; the Dock and Cmd+Tab did not bring it back and nothing could
+  be typed (tauri#7540, #2149). On macOS hiding is now at the application level, as
+  Cmd+H: closing, and putting the window back after capture, hide the app, so focus
+  returns to the previous app and the Dock icon stays; the tray, the shortcut, a Dock
+  click and a second launch unhide the app, then show and focus the window. Linux and
+  Windows still hide the window. The choice lives in `capture.rs` (`hide_main`,
+  `reveal`); the webview no longer hides the window itself but calls
+  `capture_restore` and `capture_window_hidden`, and loses `core:window:allow-hide`.
+  A Rust test pins the `restore` payload. Not yet re-run on macOS.
+
 ## Phase 15: Navigation (2026-10-03)
 
 Built

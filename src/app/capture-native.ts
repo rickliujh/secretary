@@ -3,7 +3,6 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Effect } from "effect";
 import { useEffect } from "react";
 import { logger } from "@/lib/log";
@@ -29,16 +28,19 @@ type CaptureStatus = {
   launchCapture: boolean;
 };
 
+/**
+ * Puts the window back the way capture found it. The native side knows how per
+ * platform: on macOS "hide" hides the app, since a hidden window keeps the keyboard.
+ */
 export async function restoreWindow(restore: Restore) {
   if (!inTauri || !restore) return;
-  const win = getCurrentWindow();
-  await (restore === "hide" ? win.hide() : win.minimize());
+  await invoke("capture_restore", { restore });
 }
 
+/** Whether the window is out of sight (hidden, the app hidden on macOS, or minimised). */
 export async function windowHidden() {
   if (!inTauri) return false;
-  const win = getCurrentWindow();
-  return !(await win.isVisible()) || (await win.isMinimized());
+  return invoke<boolean>("capture_window_hidden");
 }
 
 export const notify = (title: string, body: string) =>

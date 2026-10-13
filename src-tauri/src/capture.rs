@@ -4,14 +4,20 @@
 //! in [`open_capture`]: show the main window and emit one event; the webview opens
 //! the Capture dialog and does the rest. Closing the main window hides it while
 //! "keep running in the tray" is on and the tray exists.
+//!
+//! Hiding and showing differ by platform, and only [`hide_main`] and [`reveal`] know
+//! how. On macOS a hidden window leaves the app active with nothing to take the
+//! keyboard, and a Dock click or Cmd+Tab does not bring it back (tauri#7540, #2149),
+//! so there the whole app is hidden the way Cmd+H does it: focus goes back to the
+//! previous app, the Dock icon stays, and Cmd+Tab or a Dock click unhides it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, Runtime, State, Window};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow, Window};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 /// The event the webview listens to; the payload says how to put the window back.
@@ -49,10 +55,19 @@ impl CaptureState {
     }
 }
 
+/// How capture found the main window, so it can be put back the same way. On macOS
+/// "hide" means the app was hidden (or the window ordered out) and hides the app again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Restore {
+    Hide,
+    Minimize,
+}
+
 #[derive(Clone, Serialize)]
 struct OpenCapture {
     /// "hide" or "minimize" when capture had to show the window, else null.
-    restore: Option<&'static str>,
+    restore: Option<Restore>,
 }
 
 pub fn wants_capture<S: AsRef<str>>(args: &[S]) -> bool {
@@ -65,20 +80,45 @@ fn is_wayland() -> bool {
             || std::env::var("XDG_SESSION_TYPE").is_ok_and(|v| v.eq_ignore_ascii_case("wayland")))
 }
 
-/// Shows, unminimises and focuses the main window; returns what it was before.
-fn reveal<R: Runtime>(app: &AppHandle<R>) -> Option<&'static str> {
-    let window = app.get_webview_window(MAIN)?;
-    let restore = if !window.is_visible().unwrap_or(true) {
-        Some("hide")
+/// What the user cannot see of the main window: hidden (on macOS also the app being
+/// hidden, whose windows report not visible) or minimised.
+fn out_of_sight<R: Runtime>(window: &WebviewWindow<R>) -> Option<Restore> {
+    if !window.is_visible().unwrap_or(true) {
+        Some(Restore::Hide)
     } else if window.is_minimized().unwrap_or(false) {
-        Some("minimize")
+        Some(Restore::Minimize)
     } else {
         None
-    };
+    }
+}
+
+/// Unhides the app (macOS), then shows, unminimises and focuses the main window;
+/// returns what it was before. On macOS `show` unhides the app and activates it, and
+/// `set_focus` makes the window key and activates the app again, so typing reaches it.
+fn reveal<R: Runtime>(app: &AppHandle<R>) -> Option<Restore> {
+    let window = app.get_webview_window(MAIN)?;
+    let restore = out_of_sight(&window);
+    #[cfg(target_os = "macos")]
+    let _ = app.show();
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
     restore
+}
+
+/// Takes the main window out of sight: on macOS hides the app (as Cmd+H), elsewhere
+/// hides the window.
+#[cfg(target_os = "macos")]
+fn hide_main<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    app.hide()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn hide_main<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    match app.get_webview_window(MAIN) {
+        Some(window) => window.hide(),
+        None => Ok(()),
+    }
 }
 
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
@@ -106,9 +146,9 @@ pub fn keep_in_tray<R: Runtime>(app: &AppHandle<R>) -> bool {
     })
 }
 
-/// Hides the main window in place of closing it and tells the webview.
+/// Hides the main window (the app on macOS) in place of closing it and tells the webview.
 pub fn hide_to_tray<R: Runtime>(window: &Window<R>) {
-    if window.hide().is_ok() {
+    if hide_main(window.app_handle()).is_ok() {
         let _ = window.emit_to(MAIN, HIDDEN_TO_TRAY, ());
     }
 }
@@ -197,6 +237,27 @@ pub fn set_close_to_tray(state: State<'_, CaptureState>, enabled: bool) {
     state.close_to_tray.store(enabled, Ordering::Relaxed);
 }
 
+/// Puts the main window back the way capture found it (the `restore` of the open event).
+#[tauri::command]
+pub fn capture_restore(app: AppHandle, restore: Option<Restore>) -> Result<(), String> {
+    match restore {
+        Some(Restore::Hide) => hide_main(&app),
+        Some(Restore::Minimize) => match app.get_webview_window(MAIN) {
+            Some(window) => window.minimize(),
+            None => Ok(()),
+        },
+        None => Ok(()),
+    }
+    .map_err(|e| e.to_string())
+}
+
+/// Whether the user cannot see the main window (hidden, the app hidden, or minimised).
+#[tauri::command]
+pub fn capture_window_hidden(app: AppHandle) -> bool {
+    app.get_webview_window(MAIN)
+        .is_none_or(|window| out_of_sight(&window).is_some())
+}
+
 /// Replaces the capture shortcut; an empty string turns it off. Async so the
 /// plugin's main-thread dispatch does not wait on the main thread itself.
 #[tauri::command]
@@ -235,5 +296,19 @@ mod tests {
         assert!(wants_capture(&["/usr/bin/secretary", "-v", "--capture"]));
         assert!(!wants_capture(&["secretary"]));
         assert!(!wants_capture(&["secretary", "--capture=no"]));
+    }
+
+    /// The webview reads the open event's `restore` and sends it back unchanged.
+    #[test]
+    fn restore_matches_the_webview_payload() {
+        let json = |restore| serde_json::to_string(&OpenCapture { restore }).unwrap();
+        assert_eq!(json(Some(Restore::Hide)), r#"{"restore":"hide"}"#);
+        assert_eq!(json(Some(Restore::Minimize)), r#"{"restore":"minimize"}"#);
+        assert_eq!(json(None), r#"{"restore":null}"#);
+        let parse = |s: &str| serde_json::from_str::<Option<Restore>>(s).ok();
+        assert_eq!(parse(r#""hide""#), Some(Some(Restore::Hide)));
+        assert_eq!(parse(r#""minimize""#), Some(Some(Restore::Minimize)));
+        assert_eq!(parse("null"), Some(None));
+        assert_eq!(parse(r#""close""#), None);
     }
 }

@@ -104,8 +104,9 @@ notification says so. Change the shortcut, or turn it off, in Settings -> Genera
 Capture and tray.
 
 Closing the window keeps Secretary running in the tray, so sync, reminders and the
-shortcut keep working; **Quit** is in the tray menu (on macOS the Dock icon also brings
-the window back). Turn this off in the same settings card, and closing quits again.
+shortcut keep working; **Quit** is in the tray menu. On macOS closing hides the app the
+way Cmd+H does: the Dock icon stays, and a Dock click, Cmd+Tab or the menu bar icon
+brings the window back. Turn this off in the same settings card, and closing quits again.
 Starting Secretary a second time brings the running window forward.
 
 On Linux:

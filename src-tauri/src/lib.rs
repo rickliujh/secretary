@@ -136,12 +136,14 @@ pub fn run() {
             obsidian::obsidian_cli,
             capture::capture_status,
             capture::set_close_to_tray,
-            capture::set_capture_shortcut
+            capture::set_capture_shortcut,
+            capture::capture_restore,
+            capture::capture_window_hidden
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {
-            // macOS: clicking the Dock icon brings a hidden window back (D48).
+            // macOS: clicking the Dock icon unhides the app and focuses the window (D48).
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 capture::show_main(_app);
