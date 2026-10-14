@@ -226,6 +226,13 @@ A debug build on Linux runs as its own instance, so `bun run tauri dev` starts b
 an installed Secretary instead of handing over to it. On macOS and Windows quit the
 installed app first. Both builds use the same data folder.
 
+On macOS 26, start `bun run tauri dev` from the built-in Terminal app. Started from
+some other terminal apps, the dev window shows but never becomes active: there is no
+Dock icon and typing goes to the previous app. The cause is macOS activation, not
+the app, and the installed app is not affected. If a desktop piece is ever in doubt,
+`SECRETARY_NO_TRAY=1`, `SECRETARY_NO_SHORTCUT=1` and `SECRETARY_NO_SINGLE_INSTANCE=1`
+start without the tray icon, the global shortcut and the single-instance check.
+
 Read `docs/requirements.md` and `docs/design.md` (decisions in section 12) before
 changing things; `docs/implementation-plan.md` is the build history and
 `docs/CHANGELOG.md` what changed since. `CLAUDE.md` has the working rules.

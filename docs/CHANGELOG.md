@@ -777,7 +777,10 @@ Fix (macOS, after a first run there)
   starts without the tray icon, `SECRETARY_NO_SHORTCUT=1` without the global shortcut
   plugin and `SECRETARY_NO_SINGLE_INSTANCE=1` without the single-instance plugin;
   Settings shows the first two. Added while chasing a macOS 26 report
-  (`tauri dev` window shown but never activated, no Dock icon, menu bar icon present).
+  (`tauri dev` window shown but never activated, no Dock icon, typing went to the
+  previous app). The cause was the launch, not the app: started from the built-in
+  Terminal app, the same build works, and every build back to Phase 11 behaved the
+  same from the other terminal. README Development says so.
   A Rust test pins the `restore` payload. Not yet re-run on macOS.
 
 ## Phase 15: Navigation (2026-10-03)
