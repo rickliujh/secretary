@@ -1177,18 +1177,3 @@ Review fixes
   first full run had read "until Friday 2 October" as 1 October. A new eval case
   covers the back-on form. Full run on GLM 5.3 Flash: 27 of 27 passed in 4
   minutes, served by StreamLake 34 and DeepInfra 13 after 34 DeepInfra 429s.
-
-## macOS dev builds: no OS notifications (D53)
-
-- `tauri dev` on macOS 26 lost its Dock icon and the window could not take the
-  keyboard (typing went to the previous app), while the process kept running. The
-  notification plugin, in dev builds only, makes the process report Terminal's
-  bundle identifier before its first notification. Phase 11's follow-up reminders
-  already fired at launch once something was due, so every build from then on was
-  affected, not only the tray work.
-- Dev builds on macOS now show a toast in place of an OS notification and report it
-  as not sent, so reminders and the one-time tray notice stay pending. Release
-  builds are unchanged (`osNotificationsUsable` in `src/app/notify.ts`).
-- The `SECRETARY_NO_TRAY`, `SECRETARY_NO_SHORTCUT` and `SECRETARY_NO_SINGLE_INSTANCE`
-  switches added while chasing this stay as troubleshooting aids.
-
