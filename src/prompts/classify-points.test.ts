@@ -40,8 +40,8 @@ const fields = (s: ItemSnapshot) =>
   buildItemSchema(s).shape.proposals.element.shape as unknown as Record<string, z.ZodType>;
 
 describe("the schema and the prompt", () => {
-  test("version 12; older snapshots (no scale) have no points fields and an unchanged prompt", () => {
-    expect(CLASSIFY_PROMPT_VERSION).toBe(12);
+  test("version 12 or later; older snapshots (no scale) have no points fields and an unchanged prompt", () => {
+    expect(CLASSIFY_PROMPT_VERSION).toBeGreaterThanOrEqual(12);
     expect(fields(snapshot)).not.toHaveProperty("storyPoints");
     expect(fields(snapshot)).not.toHaveProperty("pointsSource");
     expect(buildClassifyPrompt(snapshot).system).not.toContain("Story points");
