@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { onSelect } from "@/lib/select-change";
 import {
   createDependency,
   type Dependency,
@@ -130,7 +131,7 @@ export function DependencyDialog({
       render={({ field }) => (
         <Field>
           <FieldLabel htmlFor={`dep-${name}`}>{label}</FieldLabel>
-          <Select value={field.value} onValueChange={field.onChange}>
+          <Select value={field.value} onValueChange={onSelect(field.onChange)}>
             <SelectTrigger id={`dep-${name}`} className="w-full">
               <SelectValue />
             </SelectTrigger>

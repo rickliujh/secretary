@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { onSelect } from "@/lib/select-change";
 import { resolveTask } from "@/services/llm/routing";
 import {
   ANTHROPIC_MODEL_SUGGESTIONS,
@@ -123,7 +124,7 @@ function TiersCard({ settings }: { settings: AppSettings }) {
                   control={form.control}
                   name={`${tier}.providerId`}
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
+                    <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                       <SelectTrigger aria-label={`${tier} provider`} className="w-full">
                         <SelectValue />
                       </SelectTrigger>

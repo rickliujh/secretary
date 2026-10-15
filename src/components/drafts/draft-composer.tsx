@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { onSelect } from "@/lib/select-change";
 import { DRAFT_CHANNELS } from "@/services/comms";
 import { listDependencies } from "@/services/dependencies/queries";
 import { MESSAGE_INTENTS } from "@/services/proposals/schema";
@@ -176,7 +177,7 @@ export function DraftComposer({
           render={({ field }) => (
             <Field>
               <FieldLabel htmlFor="intent">Purpose</FieldLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
+              <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                 <SelectTrigger id="intent" className="w-full">
                   <SelectValue />
                 </SelectTrigger>

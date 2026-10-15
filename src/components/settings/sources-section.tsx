@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { newId } from "@/lib/ids";
+import { onSelect } from "@/lib/select-change";
 import type { DataSource } from "@/services/settings";
 import { type SourceCheck, Sources } from "@/services/sources";
 
@@ -220,7 +221,7 @@ function AddVault({ sources }: { sources: DataSource[] }) {
             render={({ field }) => (
               <Select
                 value={field.value}
-                onValueChange={field.onChange}
+                onValueChange={onSelect(field.onChange)}
                 disabled={vaults.isPending}
               >
                 <SelectTrigger id="add-vault" className="w-64">

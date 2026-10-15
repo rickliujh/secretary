@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { onSelect } from "@/lib/select-change";
 import { secretNames } from "@/services/secrets";
 import { type Provider, ProviderKind, ProviderSchema } from "@/services/settings";
 import { parseHeaderLines, saveProvider } from "@/services/settings/providers";
@@ -111,7 +112,7 @@ function SelectField({
       render={({ field }) => (
         <Field>
           <FieldLabel htmlFor={`provider-${name}`}>{label}</FieldLabel>
-          <Select value={field.value} onValueChange={field.onChange}>
+          <Select value={field.value} onValueChange={onSelect(field.onChange)}>
             <SelectTrigger id={`provider-${name}`}>
               <SelectValue />
             </SelectTrigger>

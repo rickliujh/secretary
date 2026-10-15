@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { onSelect } from "@/lib/select-change";
 import {
   createMemory,
   EDITABLE_KINDS,
@@ -123,7 +124,7 @@ export function MemoryDialog({
             render={({ field }) => (
               <Field>
                 <FieldLabel htmlFor="memory-kind">Kind</FieldLabel>
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                   <SelectTrigger id="memory-kind" className="w-40">
                     <SelectValue />
                   </SelectTrigger>
@@ -188,7 +189,7 @@ export function MemoryDialog({
                         onChange={(e) => field.onChange(e.target.value.toUpperCase())}
                       />
                     ) : (
-                      <Select value={field.value} onValueChange={field.onChange}>
+                      <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                         <SelectTrigger id="memory-subject" className="w-full">
                           <SelectValue placeholder="Choose" />
                         </SelectTrigger>
@@ -216,7 +217,7 @@ export function MemoryDialog({
             render={({ field }) => (
               <Field>
                 <FieldLabel htmlFor="memory-weight">Importance</FieldLabel>
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                   <SelectTrigger id="memory-weight" className="w-40">
                     <SelectValue />
                   </SelectTrigger>
