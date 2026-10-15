@@ -49,14 +49,17 @@ export function IssueCombobox({
     setOpen(false);
     setSearch("");
   };
+  // Modal, so the list scrolls inside a dialog: the popover is portaled outside the
+  // dialog, whose scroll lock would otherwise swallow the wheel.
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} modal>
       <PopoverTrigger asChild>
         <Button
           id={id}
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          title={value ? [value, current?.label].filter(Boolean).join(" ") : undefined}
           className="w-full justify-between font-normal"
         >
           <span className={cn("truncate", !value && "text-muted-foreground")}>
@@ -72,7 +75,11 @@ export function IssueCombobox({
           <ChevronsUpDown className="opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
+      {/* Wider than a narrow trigger, so summaries are readable; hover shows the rest. */}
+      <PopoverContent
+        className="w-[min(36rem,calc(100vw-2rem))] min-w-(--radix-popover-trigger-width) p-0"
+        align="start"
+      >
         <Command>
           <CommandInput
             placeholder="Search by key or summary"
@@ -96,12 +103,13 @@ export function IssueCombobox({
                 <CommandItem
                   key={o.value}
                   value={`${o.value} ${o.label}`}
+                  title={`${o.value} ${o.label}`}
                   onSelect={() => pick(o.value)}
                 >
                   <Check
                     className={cn("size-4", o.value === value ? "opacity-100" : "opacity-0")}
                   />
-                  <span className="font-mono text-xs">{o.value}</span>
+                  <span className="shrink-0 whitespace-nowrap font-mono text-xs">{o.value}</span>
                   <span className="truncate">{o.label}</span>
                   {o.hint && (
                     <span className="ml-auto shrink-0 text-xs text-muted-foreground">{o.hint}</span>
