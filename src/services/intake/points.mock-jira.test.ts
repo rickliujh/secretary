@@ -87,7 +87,9 @@ function setup(
         }
       : {}),
   });
-  const models = makeScriptedModels({ "std-m": [out(modelAnswer)] });
+  // One answer per turn; an array scripts a thread's turns in order.
+  const answers = Array.isArray(modelAnswer) ? modelAnswer : [modelAnswer];
+  const models = makeScriptedModels({ "std-m": answers.map(out) });
   const llm = Layer.provideMerge(
     LlmLive,
     Layer.merge(Layer.provideMerge(SyncLive, base), models.layer),
@@ -96,7 +98,7 @@ function setup(
     Layer.merge(IntakeLive, ProposalsLive),
     Layer.provideMerge(Layer.merge(RetrievalLive, ExecutorLive), llm),
   );
-  return { issues, target, epic, layer };
+  return { issues, target, epic, layer, calls: models.calls };
 }
 
 /** Pastes `text`, then approves every proposal the turn made (a small ask with Track). */
@@ -222,6 +224,68 @@ describe("story points on proposals against the mock Jira (FR-15 AC)", () => {
       undone: [`Set the story points back to 3 on ${target.key}`],
     });
     expect(target.points).toBe(3);
+  });
+
+  test('a bare "1" answering the points question sets 1 on the existing ticket', async () => {
+    const issues0 = generate(80);
+    const key = [...issues0.values()].find(
+      (i) => i.project === "PAY" && i.type === "Story" && i.status !== "Done",
+    )?.key;
+    const question = {
+      summary: "Story points",
+      question: `How many story points should ${key} have?`,
+      confidence: 0.6,
+      proposals: [],
+    };
+    const update = { kind: "update_issue", target: key, storyPoints: "1", pointsSource: "stated" };
+    const { target, layer, calls } = setup([question, answer({ ...update, ...e })]);
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const intake = yield* Intake;
+          const turn = yield* intake.triage({
+            text: `What are the story points on ${target.key}? Can you set them?`,
+            source: "typed",
+            senderPersonId: null,
+            today: "2026-10-05",
+          });
+          const asked = (yield* inboxDetail(turn.inboxItemId))?.proposals.find(
+            (p) => p.kind === "needs_clarification",
+          );
+          yield* intake.reply({
+            inboxItemId: turn.inboxItemId,
+            instruction: "1",
+            answers: asked?.id ?? null,
+            today: "2026-10-05",
+          });
+          const rows = (yield* inboxDetail(turn.inboxItemId))?.proposals ?? [];
+          const pending = rows.filter((p) => p.status === "pending");
+          const result = yield* (yield* Proposals).approve(pending[0]?.id ?? "");
+          const items = yield* query((d) =>
+            d
+              .select({ error: intakeItems.error })
+              .from(intakeItems)
+              .where(eq(intakeItems.inboxItemId, turn.inboxItemId))
+              .all(),
+          );
+          return { asked, pending, result, errors: items.map((i) => i.error).filter(Boolean) };
+        }),
+        layer,
+      ),
+    );
+    expect(r.asked?.payload).toEqual({
+      kind: "needs_clarification",
+      question: `How many story points should ${target.key} have?`,
+    });
+    // The answer validated the first time: no repair call, no error, one update.
+    expect(calls).toHaveLength(2);
+    expect(r.errors).toEqual([]);
+    expect(r.pending.map((p) => p.payload)).toEqual([
+      { kind: "update_issue", target: target.key, changes: { storyPoints: 1 } },
+    ]);
+    expect(r.result.status).toBe("executed");
+    expect(target.points).toBe(1);
   });
 
   test("a create screen without the field creates without points, with a warning", async () => {

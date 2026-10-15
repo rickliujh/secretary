@@ -496,4 +496,17 @@ export const EVAL_CASES: EvalCase[] = [
     },
     single: true,
   },
+  {
+    // The model may not estimate PAY-4, so it asks; the user's bare answer is the
+    // number (D55 answers, 2026-10-15). No comment talks to the user on the ticket.
+    name: "points: a bare answer to the points question sets them on an existing ticket",
+    source: "typed",
+    text: "What are the story points on PAY-4? Can you set them for me?",
+    followUp: "3",
+    expect: {
+      required: [{ kind: "update_issue", target: "PAY-4", fields: { storyPoints: 3 } }],
+      forbiddenKinds: ["add_comment", "create_issue", "needs_clarification"],
+    },
+    single: false,
+  },
 ];

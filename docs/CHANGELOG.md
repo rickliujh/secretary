@@ -1409,6 +1409,18 @@ Built
   stated, a suggestion, the small-ask default, "is more like a 5" and its revoke,
   a create screen without the field, an update without it), the Cloud two-field
   path end to end, and the mock's 400s. Three live eval cases.
+- Fixed (2026-10-15): in the user's own words (typed input, instructions,
+  answers) an un-cued number states points while points are the topic: a bare
+  number or a short "set it to 3" / "make PAY-12 a 5", or points named in their
+  words or the model's question (`ownStatedNumbers`), so a bare "1" answering
+  the points question sets 1. Pasted input and the chat's requests still need a
+  cue; "make it (a) N" is one now; «…» values are not the user's words; only the
+  newest instruction ends a clear; each item keeps its own source across
+  revisions. A comment is for the ticket's readers: a classify rule, and a
+  best-effort check (`prompts/comment-audience.ts`) that sends a comment about
+  points telling the user what cannot be done or asking them for a value to
+  repair, telling the model to ask in its question. A fourth live eval case
+  answers the question with "3".
 
 Known limits
 - On update_issue an empty points field means "no change"; clearing uses the

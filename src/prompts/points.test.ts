@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
+  aboutPoints,
   createPoints,
   keptPoints,
+  ownNumbers,
+  ownStatedNumbers,
   type PointsContext,
   parsePoints,
   pointSources,
   pointsKey,
   pointsProblems,
   statedNumbers,
+  withoutInlineValues,
 } from "./points";
 
 describe("parsePoints", () => {
@@ -63,6 +67,82 @@ describe("statedNumbers: numbers given as points", () => {
 
   test("the user's instructions count too", () => {
     expect(statedNumbers(["Create a ticket for it", "make it 0.5 points"]).has(0.5)).toBe(true);
+  });
+
+  test("a bare number has no cue, so pasted text giving one does not state points", () => {
+    expect(stated("1")).toEqual([]);
+    expect(stated("set it to 3")).toEqual([]);
+  });
+
+  test('"make it (a) N" and "make KEY (a) N" are cues when the number ends the phrase', () => {
+    expect(stated("make it a 5")).toEqual([5]);
+    expect(stated("make PAY-12 a 5.")).toEqual([5]);
+    expect(stated("ok, make it 3 points")).toEqual([3]);
+    expect(stated("make it three, then")).toEqual([3]);
+    expect(stated("make it 2 weeks")).toEqual([]);
+    expect(stated("make 2 copies")).toEqual([]);
+    expect(stated("make it one of the release tickets")).toEqual([]);
+  });
+});
+
+describe("ownStatedNumbers: un-cued numbers count only while points are the topic", () => {
+  const own = (texts: string[], topic = false) =>
+    [...ownStatedNumbers(texts, topic)].sort((a, b) => a - b);
+
+  test("by form: just a number, or a short set/make", () => {
+    for (const words of [
+      "1",
+      " 1 ",
+      "1 point",
+      "3.",
+      "set it to 3",
+      "make PAY-12 a 5",
+      "make it 2",
+    ])
+      expect({ words, n: own([words]).length }).toEqual({ words, n: 1 });
+  });
+
+  test("other numbers only with the topic", () => {
+    expect(own(["send 2 reports to PAY-12"])).toEqual([]);
+    expect(own(["move PAY-12 to sprint 24"])).toEqual([]);
+    expect(own(["PAY-12 due Oct 5"])).toEqual([]);
+    expect(own(["go with 2 I think"])).toEqual([]);
+    expect(own(["go with 2 I think"], true)).toEqual([2]);
+    // Cued numbers always count, «…» values included; un-cued ones in values never.
+    expect(own(["Dana says «it's a 2-pointer»"])).toEqual([2]);
+    expect(own(["set PAY-2 to «13»"], true)).toEqual([]);
+  });
+
+  test("aboutPoints: points, story points, SP, estimates, pointers; not inside «…» values", () => {
+    for (const t of ["why no story points?", "re-estimate it", "a 3-pointer", "SP?", "the points"])
+      expect({ t, about: aboutPoints(t) }).toEqual({ t, about: true });
+    expect(aboutPoints("send 2 reports")).toBe(false);
+    expect(aboutPoints("Dana wrote «5 points»")).toBe(false);
+  });
+});
+
+describe("ownNumbers: every number of a text, cue or not", () => {
+  const own = (...texts: string[]) => [...ownNumbers(texts)].sort((a, b) => a - b);
+
+  test("an answer, a typed instruction, a number word", () => {
+    expect(own("1")).toEqual([1]);
+    expect(own(" 1 ")).toEqual([1]);
+    expect(own("set it to 3")).toEqual([3]);
+    expect(own("make PAY-12 a 5")).toEqual([5]);
+    expect(own("make it three")).toEqual([3]);
+    expect(own("0.5 please")).toEqual([0.5]);
+    expect(own("eighteen")).toEqual([18]);
+  });
+
+  test("issue keys, ISO dates, times and digits inside a word still do not count", () => {
+    expect(own("pay-12 and PAY-7, due 2026-10-09 at 14:30")).toEqual([]);
+    expect(own("the Q3 numbers for v2, someone said")).toEqual([]);
+  });
+
+  test("«…» values pasted inline are left out of typed text; none, no change", () => {
+    expect(own(withoutInlineValues("make it 3, Dana said «send me two reports»"))).toEqual([3]);
+    expect(own(withoutInlineValues("make it 3 «and 5 more"))).toEqual([3]);
+    expect(withoutInlineValues("make it 3")).toBe("make it 3");
   });
 });
 
@@ -165,6 +245,13 @@ describe("pointsProblems (D55)", () => {
     expect(
       check({ storyPoints: "13", pointsSource: "stated", kept: { points: null, cleared: false } }),
     ).not.toEqual([]);
+  });
+
+  test("an update with a number nobody gave asks the user instead of suggesting an estimate", () => {
+    const [problem] = check({ kind: "update_issue", storyPoints: "2", pointsSource: "stated" });
+    expect(problem).toContain("storyPoints 2 is not given as story points in the input");
+    expect(problem).toContain("ask the user for the number in question");
+    expect(problem).not.toContain("pointsSource estimated");
   });
 
   test("points the user cleared stay cleared unless their instructions give a number", () => {

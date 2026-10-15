@@ -672,6 +672,9 @@ export function chatTools(
             const r = yield* (yield* Intake).triage({
               text: request,
               source: "typed",
+              // The chat model's words, maybe carrying numbers from Jira or Confluence:
+              // not the user's own, so its numbers need a points cue (D55).
+              author: "chat",
               senderPersonId: null,
             });
             const rows = yield* query((d) =>

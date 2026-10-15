@@ -328,3 +328,202 @@ describe("revisions (D22)", () => {
     expect(validateItemOutput(offScale, noDefault as ItemSnapshot)).not.toEqual([]);
   });
 });
+
+describe("the user's own words state points (answers, 2026-10-15)", () => {
+  const asked: ItemSnapshot = {
+    ...withScale,
+    quote: "What are the story points on PAY-2? Can you set them?",
+  };
+  const turn = (
+    instructions: string[],
+    pending: Record<string, unknown>[] = [],
+    more: Partial<ItemSnapshot> = {},
+  ): ItemSnapshot => ({
+    ...asked,
+    ...more,
+    thread: { instructions, decided: [], pending },
+  });
+  /** A thread whose input does not mention points (pasted, so not the user's words). */
+  const plain = (instructions: string[], questions?: string[]): ItemSnapshot => ({
+    ...withScale,
+    quote: "Ana: PAY-2 needs a look before the release.",
+    thread: { instructions, decided: [], pending: [], ...(questions ? { questions } : {}) },
+  });
+  const update = (points: string) =>
+    answer({
+      kind: "update_issue",
+      target: "PAY-2",
+      storyPoints: points,
+      pointsSource: "stated",
+      ...e,
+    });
+  const created = (points: string) =>
+    answer({ ...story, storyPoints: points, pointsSource: "stated" });
+  const notStated = (points: number) => `storyPoints ${points} is not given as story points`;
+
+  test('the reported flow: a typed "why no story points?", then "1" answering the question', () => {
+    const typed = {
+      source: "typed",
+      ownInput: true,
+      quote: "why does PAY-2 have no story points?",
+    };
+    // Without the answer the number is the model's own: refused, and it is told to ask.
+    const refused = validateItemOutput(update("1"), { ...asked, ...typed }).join(" ");
+    expect(refused).toContain(notStated(1));
+    expect(refused).toContain("ask the user for the number in question");
+    const answered: ItemSnapshot = {
+      ...asked,
+      ...typed,
+      thread: {
+        instructions: ["1"],
+        decided: [],
+        pending: [],
+        questions: ["How many story points should PAY-2 have?"],
+      },
+    };
+    expect(validateItemOutput(update("1"), answered)).toEqual([]);
+    expect(mapItemOutput(update("1"), "", answered)[0]?.payload).toEqual({
+      kind: "update_issue",
+      target: "PAY-2",
+      changes: { storyPoints: 1 },
+    });
+  });
+
+  test("a bare number or a short set/make form is about points by its form", () => {
+    for (const words of ["2", "2 points", "2.", "set it to 2", "make it a 2", "make PAY-2 a 2"])
+      expect({ words, errors: validateItemOutput(update("2"), plain([words])) }).toEqual({
+        words,
+        errors: [],
+      });
+  });
+
+  test("an answer to a question about points, or points named in the user's words, makes any number points", () => {
+    const answer2 = ["go with 2 I think"];
+    expect(validateItemOutput(update("2"), plain(answer2)).join(" ")).toContain(notStated(2));
+    expect(
+      validateItemOutput(update("2"), plain(answer2, ["How many story points should PAY-2 get?"])),
+    ).toEqual([]);
+    // A question about something else does not.
+    expect(
+      validateItemOutput(update("2"), plain(answer2, ["Which sprint should PAY-2 go to?"])).join(
+        " ",
+      ),
+    ).toContain(notStated(2));
+    expect(
+      validateItemOutput(update("2"), plain(["let's fix the points on PAY-2", ...answer2])),
+    ).toEqual([]);
+  });
+
+  test("numbers in the user's words about something else are not points", () => {
+    expect(
+      validateItemOutput(update("2"), plain(["send 2 reports to PAY-12"])).join(" "),
+    ).toContain(notStated(2));
+    expect(
+      validateItemOutput(update("24"), plain(["move PAY-12 to sprint 24"])).join(" "),
+    ).toContain(notStated(24));
+    expect(validateItemOutput(update("5"), plain(["PAY-12 due Oct 5"])).join(" ")).toContain(
+      notStated(5),
+    );
+  });
+
+  test('a typed opening message is the user\'s own words: "make PAY-2 a 5", "PAY-2 should be 5 points now"', () => {
+    const typed = (quote: string): ItemSnapshot => ({
+      ...withScale,
+      source: "typed",
+      ownInput: true,
+      quote,
+    });
+    expect(validateItemOutput(update("5"), typed("make PAY-2 a 5"))).toEqual([]);
+    // Points named anywhere in their words: an un-cued number counts.
+    expect(validateItemOutput(update("5"), typed("Fix the points: PAY-2 should be 5"))).toEqual([]);
+    // The same words without the flag (pasted, or written by the chat) need a cue.
+    expect(
+      validateItemOutput(update("5"), {
+        ...typed("Fix the points: PAY-2 should be 5"),
+        ownInput: false,
+      }).join(" "),
+    ).toContain(notStated(5));
+  });
+
+  test("«…» values inside typed input and instructions are not the user's words", () => {
+    const typed: ItemSnapshot = {
+      ...withScale,
+      source: "typed",
+      ownInput: true,
+      quote: "Create a story: Dana wrote «can you send me two reports by Friday?»",
+    };
+    expect(validateItemOutput(created("2"), typed).join(" ")).toContain(notStated(2));
+    // A cue inside the value still counts, as it does in any pasted text.
+    const cued = { ...typed, quote: "Create a story: Dana wrote «it's a 2-pointer»" };
+    expect(validateItemOutput(created("2"), cued)).toEqual([]);
+    // In an instruction too.
+    expect(validateItemOutput(update("13"), plain(["set PAY-2 to «13»"])).join(" ")).toContain(
+      notStated(13),
+    );
+    expect(validateItemOutput(update("2"), plain(["Dana says «it's a 2-pointer»"]))).toEqual([]);
+  });
+
+  test("pasted input (any source) still needs a cue; the make forms are cues", () => {
+    for (const source of ["typed", "teams", "email", "meeting", "other"]) {
+      const pasted: ItemSnapshot = {
+        ...withScale,
+        source,
+        quote: "Fix the points: PAY-2 should be 5",
+      };
+      expect(validateItemOutput(update("5"), pasted).join(" ")).toContain(notStated(5));
+    }
+    expect(validateItemOutput(update("5"), { ...withScale, quote: "make PAY-2 a 5" })).toEqual([]);
+    expect(
+      validateItemOutput(created("2"), {
+        ...withScale,
+        quote: "Can you send me two reports?",
+      }).join(" "),
+    ).toContain(notStated(2));
+  });
+
+  test("only the newest instruction or answer ends a clear", () => {
+    const cleared = { ...story, pointsCleared: true };
+    const two = created("2");
+    // An older instruction's number, cued or not, does not undo the later clear.
+    for (const older of ["create it, 2 reviewers needed", "create it, 2 points"])
+      expect(
+        validateItemOutput(two, turn([older, "make the summary shorter"], [cleared])).join(" "),
+      ).toContain("the user cleared this ticket's story points");
+    // Nor does typed input, which stays the same across turns.
+    const typed = turn(["make the summary shorter"], [cleared], {
+      source: "typed",
+      ownInput: true,
+      quote: "We need a story for credit notes, 2 points",
+    });
+    expect(validateItemOutput(two, typed).join(" ")).toContain(
+      "the user cleared this ticket's story points",
+    );
+    // The newest one does.
+    expect(validateItemOutput(two, turn(["make the summary shorter", "2"], [cleared]))).toEqual([]);
+  });
+
+  test("the per-proposal kept rules still hold", () => {
+    // A pending create's estimate is no stated number, whatever else the user typed.
+    const estimate = { ...story, storyPoints: "8", pointsSource: "estimated" };
+    expect(validateItemOutput(update("8"), turn(["make it 1"], [estimate])).join(" ")).toContain(
+      notStated(8),
+    );
+    // The user's own 13 on the proposal it revises is kept.
+    const kept = { ...story, storyPoints: "13", pointsSource: "stated" };
+    expect(
+      validateItemOutput(
+        answer({ ...kept, summary: "Credit notes to the ledger" }),
+        turn(["shorter summary"], [kept]),
+      ),
+    ).toEqual([]);
+  });
+
+  test("the field descriptions and the rule say the user's words count", () => {
+    const f = fields(asked);
+    expect(f.pointsSource?.description).toContain('an answer "1" to your question about points');
+    expect(buildClassifyPrompt(asked).system).toContain('"1" answering your question about points');
+    expect(buildClassifyPrompt(asked).system).toContain(
+      "When the user wants an existing ticket's points set but gives no number, ask for it in question.",
+    );
+  });
+});

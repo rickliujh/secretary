@@ -1,8 +1,10 @@
 /**
  * Story points in `classify_item` (D55): the model's `storyPoints` text and
- * `pointsSource`, parsed and checked in code. A number stated in the input is
- * used as stated; an estimate is only for a new ticket and only a value on the
- * scale code computed from the cache; an existing ticket is never re-estimated.
+ * `pointsSource`, parsed and checked in code. A number the input gives as
+ * points, or one the user's own words give while points are the topic, is used
+ * as stated; an estimate
+ * is only for a new ticket and only a value on the scale code computed from the
+ * cache; an existing ticket is never re-estimated.
  */
 import { MAX_STORY_POINTS } from "@/services/proposals/schema";
 
@@ -67,26 +69,99 @@ const AFTER_CUE = new RegExp(
   "gi",
 );
 
+const KEY = String.raw`[A-Za-z][A-Za-z0-9_]*-\d+`;
 /**
- * The numbers the texts give as story points: digits or English number words
- * next to a points cue ("a 3-pointer", "5 points", "estimate of 8", "more like a
- * 5"), every number of a list ("3, 5 or 8 points"). Numbers without a cue ("send
- * me two reports"), issue keys (any case), ISO dates and times do not count, so
- * stated points can be told from a model's invention.
+ * "make it a 5", "make PAY-12 a 5", "make it 3.": the number ends the phrase or
+ * a points word follows, so "make it 2 weeks" is no cue. Matched with keys kept.
+ */
+const MAKE_CUE = new RegExp(
+  String.raw`\bmake\s+(?:it|this|that|this\s+one|${KEY})\s+(?:an?\s+)?(${NUM})(?=\s*(?:[.,;:!?)]|$|(?:story\s+)?(?:points?|pts?|sp)\b))`,
+  "gi",
+);
+
+/** ISO dates and times blanked out: they are never points. */
+const withoutDates = (raw: string) =>
+  raw.replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ").replace(/\b\d{1,2}:\d{2}\b/g, " ");
+
+/** Issue keys (any case), ISO dates and times blanked out. */
+const withoutKeysAndDates = (raw: string) =>
+  withoutDates(raw).replace(new RegExp(String.raw`\b${KEY}\b`, "g"), " ");
+
+const numberOf = (n: string) => {
+  const v = n.toLowerCase();
+  return WORDS[v] ?? Number(v);
+};
+
+/**
+ * The numbers a text gives as story points: digits or English number words next
+ * to a points cue ("a 3-pointer", "5 points", "estimate of 8", "more like a 5",
+ * "make PAY-12 a 5"), every number of a list ("3, 5 or 8 points"). Numbers
+ * without a cue ("send me two reports"), issue keys (any case), ISO dates and
+ * times do not count, so stated points can be told from a model's invention.
+ * This is the whole rule for pasted input; the user's own words use
+ * `ownStatedNumbers`.
  */
 export function statedNumbers(texts: readonly string[]): Set<number> {
   const out = new Set<number>();
   for (const raw of texts) {
-    const text = raw
-      .replace(/\b[A-Za-z][A-Za-z0-9_]*-\d+\b/g, " ")
-      .replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ")
-      .replace(/\b\d{1,2}:\d{2}\b/g, " ");
+    const text = withoutKeysAndDates(raw);
     for (const re of [BEFORE_CUE, AFTER_CUE])
       for (const m of text.matchAll(re))
-        for (const n of (m[1] ?? "").matchAll(new RegExp(NUM, "gi"))) {
-          const v = n[0].toLowerCase();
-          out.add(WORDS[v] ?? Number(v));
-        }
+        for (const n of (m[1] ?? "").matchAll(new RegExp(NUM, "gi"))) out.add(numberOf(n[0]));
+    for (const m of withoutDates(raw).matchAll(MAKE_CUE)) if (m[1]) out.add(numberOf(m[1]));
+  }
+  return out;
+}
+
+const ANY_NUM = new RegExp(String.raw`\b${NUM}\b`, "gi");
+
+/**
+ * Typed text without its «…» spans: values pasted inline (D56), which are not the
+ * user's own words. An unclosed « runs to the end. Unchanged when there are none.
+ */
+export const withoutInlineValues = (text: string) => text.replace(/«[^»]*(?:»|$)/g, " ");
+
+/**
+ * Every number in a text, cue or not. Issue keys, ISO dates and times do not
+ * count, nor digits inside a word ("Q3", "v2").
+ */
+export function ownNumbers(texts: readonly string[]): Set<number> {
+  const out = new Set<number>();
+  for (const raw of texts)
+    for (const n of withoutKeysAndDates(raw).matchAll(ANY_NUM)) out.add(numberOf(n[0]));
+  return out;
+}
+
+/** Words that put story points on the table: points, story points, SP, estimate, "-pointer". */
+const POINTS_TOPIC = /\b(?:story\s*points?|points?|pts|sp|(?:re-?)?estimat\w*|pointers?)\b/i;
+
+/** The text (without «…» values) is about story points or an estimate. */
+export const aboutPoints = (text: string) => POINTS_TOPIC.test(withoutInlineValues(text));
+
+/**
+ * A message that is only a number ("1", "3 points") or a short "set it to 3",
+ * "make it a 5", "make PAY-12 a 5": points are its topic by its form.
+ */
+const SHORT_SET = new RegExp(
+  String.raw`^\s*(?:(?:please\s+)?(?:set|make|change)\s+(?:it|this|that|this\s+one|them|${KEY})\s+(?:to\s+)?(?:an?\s+)?)?${NUM}(?:\s*(?:story\s+)?(?:points?|pts?|sp))?\s*(?:,?\s*please)?\s*[.!]?\s*$`,
+  "i",
+);
+
+/**
+ * The numbers the user's own words (input they typed, their instructions and
+ * answers) state as points (D55 answers): cued numbers anywhere, «…» values
+ * included, as for pasted text; and, outside «…» values, any number when points
+ * are the topic: the message is just a number or a short "set it to 3" / "make
+ * PAY-12 a 5", or `topic` holds (the thread's own words, or a question the model
+ * asked about the item, mention points or an estimate). So "1" answering "how
+ * many points?" states 1, while "send 2 reports to PAY-12" or "move PAY-12 to
+ * sprint 24" state nothing.
+ */
+export function ownStatedNumbers(texts: readonly string[], topic: boolean): Set<number> {
+  const out = statedNumbers(texts);
+  for (const raw of texts) {
+    const own = withoutInlineValues(raw);
+    if (topic || SHORT_SET.test(own)) for (const n of ownNumbers([own])) out.add(n);
   }
   return out;
 }
@@ -133,9 +208,16 @@ export type PointsContext = {
   /** The ticket's points now, for an update; undefined when not known. */
   current?: number | null;
   scale: readonly number[];
-  /** Numbers the input and the user's instructions give as points (`statedNumbers`). */
+  /**
+   * Numbers that count as stated: the ones the input gives as points
+   * (`statedNumbers`) and the ones the user's own words give (`ownStatedNumbers`):
+   * input they typed, their instructions and answers.
+   */
   stated: ReadonlySet<number>;
-  /** Of those, the ones in the user's own instructions. */
+  /**
+   * The ones the user's newest instruction or answer gives: only these end a
+   * clear, so an older message's number cannot undo a clear made after it.
+   */
   instructed: ReadonlySet<number>;
   /** What the pending proposal this one revises carries, if any. */
   kept?: KeptPoints;
@@ -163,19 +245,21 @@ export function pointsProblems(c: PointsContext): string[] {
   if (c.epic) return ["an Epic does not get story points; leave storyPoints empty."];
   if (c.kept?.cleared && !(source === "stated" && c.instructed.has(points)))
     return [
-      "the user cleared this ticket's story points; leave storyPoints empty unless their instructions give a number.",
+      "the user cleared this ticket's story points; leave storyPoints empty unless their newest instruction gives a number.",
     ];
   const kept = c.kept?.points === points;
   if (c.kind === "update_issue") {
     if (source !== "stated")
       return [
-        "never estimate an existing ticket: set its storyPoints only to a number the input gives as its points, with pointsSource stated, or leave them out.",
+        "never estimate an existing ticket: set its storyPoints only to a number the input or the user gives as its points, with pointsSource stated, or leave them out; when the user wants them set but gave no number, ask for it in question.",
       ];
     if (c.current === points) return [`the ticket already has ${points} points; leave them out.`];
   }
   if (source === "stated" && !c.stated.has(points) && !kept)
     return [
-      `storyPoints ${points} is not given as story points in the input; use pointsSource estimated with a value from the story point scale, or leave it empty.`,
+      c.kind === "update_issue"
+        ? `storyPoints ${points} is not given as story points in the input or the user's words; never estimate an existing ticket: leave storyPoints empty, or ask the user for the number in question.`
+        : `storyPoints ${points} is not given as story points in the input or the user's words; use pointsSource estimated with a value from the story point scale, or leave it empty.`,
     ];
   if (source === "estimated") {
     if (!c.scale.length)

@@ -26,15 +26,19 @@ import type { Reason } from "@/services/retrieval/ranking";
 import { sameWaitSubject } from "@/services/retrieval/waits";
 import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small-asks/home";
 import type { PromptSprint } from "@/services/sprints/calendar";
+import { commentAudienceProblem } from "./comment-audience";
 import { HARD_RULES, untrusted } from "./common";
 import {
+  aboutPoints,
   createPoints,
   keptPoints,
+  ownStatedNumbers,
   parsePoints,
   pointSources,
   pointsKey,
   pointsProblems,
   statedNumbers,
+  withoutInlineValues,
 } from "./points";
 
 export const CLASSIFY_PROMPT_VERSION = 12;
@@ -126,6 +130,12 @@ export type ThreadContext = {
    * "that ticket" can be resolved (prompt version 6). Context only; untrusted.
    */
   others?: { summary: string | null; quote: string }[];
+  /**
+   * The questions the model asked about this item in the thread, oldest first,
+   * answered or not (D55 answers). Data for the checks only: a question about
+   * points or an estimate makes the user's numbers points.
+   */
+  questions?: string[];
 };
 
 /**
@@ -169,6 +179,11 @@ export type ItemSnapshot = {
   source: string;
   sender: { id: string; displayName: string; title: string | null; team: string | null } | null;
   quote: string;
+  /**
+   * The input is the user's own words: they typed it (source typed), and the chat
+   * did not write it for them (D55 answers). Absent in older snapshots: untrusted.
+   */
+  ownInput?: boolean;
   /**
    * The user's answer to an earlier question (trusted). Only in snapshots made
    * before threads (prompt version < 4); kept so they replay as they ran.
@@ -336,10 +351,10 @@ export function buildItemSchema(s: ItemSnapshot) {
   const pointsFields = scale
     ? {
         storyPoints: nullableText(
-          `Story points as a number, e.g. 3: as the input states them, or for a new ticket a value from the story point scale. ${uses("create_issue", "update_issue")}`,
+          `Story points as a number, e.g. 3: as the input states them or the user's own words give them, or for a new ticket a value from the story point scale. ${uses("create_issue", "update_issue")}`,
         ),
         pointsSource: nullableEnum(pointSources(scale)).describe(
-          `stated: the input gives this number as the ticket's story points; estimated: your suggestion for a new ticket. ${uses("create_issue", "update_issue")}`,
+          `stated: the input gives this number as the ticket's story points, or the user's own words give it (input they typed, their instructions and answers; an answer "1" to your question about points is stated); estimated: your suggestion for a new ticket. ${uses("create_issue", "update_issue")}`,
         ),
       }
     : {};
@@ -381,7 +396,9 @@ export function buildItemSchema(s: ItemSnapshot) {
     ...pointsFields,
     ...smallAskFields,
     // add_comment
-    body: nullableText(`Comment text in Markdown. ${uses("add_comment")}`),
+    body: nullableText(
+      `Comment text in Markdown${s.promptVersion >= 12 ? ", for the people who read the ticket; never a reply to the user" : ""}. ${uses("add_comment")}`,
+    ),
     // transition_issue
     toStatus: (statuses.length > 0 ? nullableEnum(statuses) : nullableText()).describe(
       uses("transition_issue"),
@@ -827,13 +844,22 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   const knownUsers = new Set(s.jiraUsers.map((u) => u.username));
   const isEpic = (ref: string) =>
     candidates.get(ref)?.issueType === "Epic" || created.get(ref)?.issueType === "Epic";
-  // Numbers the input and the user's own words give as points, and what each
-  // pending proposal carries (the user's edits, a default, a clear), for D55.
-  const instructed = statedNumbers([
-    ...(s.thread?.instructions ?? []),
-    ...(s.clarification ? [s.clarification] : []),
+  // Story points (D55): numbers the input gives next to a points cue (pasted text
+  // and the chat's words are untrusted); numbers the user's own words give (input
+  // they typed, instructions, answers), cue or not while points are the topic,
+  // «…» values (D56) excepted; and what each pending proposal carries (the user's
+  // edits, a default, a clear). Only the newest instruction or answer ends a clear:
+  // the typed input and older messages stay the same across turns.
+  const words = [...(s.thread?.instructions ?? []), ...(s.clarification ? [s.clarification] : [])];
+  const typed = s.ownInput ? [s.quote] : [];
+  const topic = [...typed, ...words, ...(s.thread?.questions ?? [])].some(aboutPoints);
+  const instructed = ownStatedNumbers(words.slice(-1), topic);
+  const stated = new Set([
+    ...statedNumbers([s.quote]),
+    ...ownStatedNumbers([...typed, ...words], topic),
   ]);
-  const stated = new Set([...statedNumbers([s.quote]), ...instructed]);
+  // What the user wrote themselves: a comment may repeat their phrases.
+  const ownWords = [...typed, ...words].map(withoutInlineValues);
   const kept = keptPoints(s.thread?.pending);
   const keptOf = (p: Record<string, unknown>) => {
     const key = pointsKey(p);
@@ -951,6 +977,9 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
     if (p.kind === "draft_message" && !p.recipientPersonId && !p.recipientTeamId)
       errors.push(`${at}: draft_message needs a recipient person or team.`);
     if (p.kind === "add_comment" && !str(p.body)) errors.push(`${at}: comment body is empty.`);
+    // A comment is for the ticket's readers, never a reply to the user.
+    const toUser = p.kind === "add_comment" ? commentAudienceProblem(p.body, ownWords) : null;
+    if (toUser) errors.push(`${at}: ${toUser}`);
     if (p.kind === "link_issues") errors.push(...validateLink(p, i, out, s, at));
     if (p.kind === "update_dependency") errors.push(...validateWaitUpdate(p, i, out, s, at));
     if (p.kind === "link_dependency") {
@@ -1145,7 +1174,12 @@ ${HARD_RULES}
 - Every proposal has the same fields. Choose its kind, fill the fields that kind needs, and leave the rest empty ("", "${NONE}" or []).
 - When the input asks to cancel, close, drop or stop a ticket, propose a transition_issue to the project's status for that: a cancel-like status (Cancelled, Won't Do, Rejected, Obsolete) if the project lists one, otherwise its done or closed status. A comment alone does not close a ticket.
 - When you move an issue to a closing status (cancelled, won't do, rejected, duplicate, obsolete, done or closed) for a reason in the input, also add an add_comment on the same issue that says why, in one or two sentences drawn from the input, so people reading the ticket know. When the closing status is a done status but the work was not done, the comment says the ticket was closed without being done. A cancellation always gets that comment.
-- Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
+${
+  s.promptVersion >= 12
+    ? `- An add_comment is text for the people who read the ticket in Jira, about the work. It is never a reply to the user, a question to the user, an acknowledgement of their request, or a note about what you can or cannot do. When you cannot do what was asked, or need a value from the user (such as the points to set), ask in question. When nothing should change on the ticket, propose nothing for it.
+`
+    : ""
+}- Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
 ${
   s.waits?.length
     ? `- Open waits lists what the user already waits on. When the input answers or moves one of them, propose update_dependency with its dependencyId: resolve when what was waited for arrived or is no longer needed ("Bob sent the numbers"); log_reply when they answered but it is not done yet, with what they said in reply and expectedAt when they give a date; reschedule when only the date changes (expectedAt, or nextFollowupAt for when to ask again). Never propose link_dependency for a wait that list already has; update it instead.
@@ -1176,13 +1210,13 @@ ${
     : ""
 }${
   s.pointScale
-    ? `- Story points: when the input states the points of a ticket ("a 3-pointer", "5 points"), set storyPoints to that number with pointsSource stated. ${
+    ? `- Story points: when the input states the points of a ticket ("a 3-pointer", "5 points"), or the user's own words give a number for them (input they typed, their instructions and answers: "make PAY-12 a 5", "set it to 3", or "1" answering your question about points), set storyPoints to that number with pointsSource stated. ${
         s.pointScale.length
           ? "For a new ticket (create_issue) whose points the input does not state, suggest points: a value from the Story point scale, sized against the candidate issues' points, with pointsSource estimated."
           : "There is no story point scale yet, so do not estimate: set points only when the input states them."
-      } Never estimate an existing ticket: propose update_issue with storyPoints only when the input asks to change its points or states a new estimate ("PAY-12 is more like a 5"), with pointsSource stated. An Epic gets no points.${
+      } Never estimate an existing ticket: propose update_issue with storyPoints only when the input or the user asks to change its points or gives a new estimate ("PAY-12 is more like a 5"), with pointsSource stated. When the user wants an existing ticket's points set but gives no number, ask for it in question. An Epic gets no points.${
         s.thread?.pending.some((p) => p.pointsCleared === true)
-          ? " A current proposal with pointsCleared true had its points removed by the user: keep storyPoints empty for it unless their instructions give a number."
+          ? " A current proposal with pointsCleared true had its points removed by the user: keep storyPoints empty for it unless their newest instruction gives a number."
           : ""
       }
 `
