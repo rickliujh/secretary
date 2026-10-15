@@ -115,8 +115,12 @@ export function useDecisions() {
         p.track(i.ids, i.edits),
     ),
   );
+  /** Keeps a row change on a pending proposal, so any approve uses it (D44). */
+  const saveEdit = useDecisionMutation(
+    withProposals((p, i: { id: string; edited: ProposalPayload }) => p.saveEdit(i.id, i.edited)),
+  );
   const retriage = useDecisionMutation((inboxItemId: string) =>
     Effect.flatMap(Intake, (i) => i.retriage(inboxItemId)),
   );
-  return { approve, reject, approveAll, track, dismiss, retriage };
+  return { approve, reject, approveAll, track, saveEdit, dismiss, retriage };
 }

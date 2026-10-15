@@ -503,6 +503,82 @@ describe("Proposals", () => {
     );
   });
 
+  test("a row change saved before approval is what its card's Approve runs (D44)", async () => {
+    const { layer, seen } = setup();
+    const ask = { ...create, epic: null, labels: ["small-ask"], smallAsk: true };
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const { ids, inboxItemId } = yield* seed([ask]);
+          const svc = yield* Proposals;
+          const id = ids[0] ?? "";
+          yield* svc.saveEdit(
+            id,
+            ProposalPayloadSchema.parse({ ...ask, issueType: "Bug", epic: "PAY-1" }),
+          );
+          const saved = (yield* rowsOf(inboxItemId))[0];
+          const memsBefore = yield* query((d) => d.select().from(memories).all());
+          // The card's Approve sends no edit of its own.
+          const result = yield* svc.approve(id);
+          return {
+            saved,
+            memsBefore,
+            result,
+            mems: yield* query((d) => d.select().from(memories).all()),
+          };
+        }),
+        layer,
+      ),
+    );
+    expect(r.saved?.status).toBe("pending");
+    expect(r.saved?.editedPayload).toMatchObject({ issueType: "Bug", epic: "PAY-1" });
+    // Saving records nothing; the approval records the change once.
+    expect(r.memsBefore).toHaveLength(0);
+    expect(r.result.status).toBe("executed");
+    expect(r.mems.filter((m) => m.kind === "example")).toHaveLength(1);
+    const post = seen.find((x) => x.method === "POST" && x.url.endsWith("/rest/api/2/issue"));
+    const fields = (post?.body as { fields?: Record<string, unknown> } | undefined)?.fields;
+    expect(fields).toMatchObject({ customfield_10100: "PAY-1" });
+    expect((fields?.issuetype as { id?: string } | undefined)?.id).toBe(
+      issueTypes.values.find((t) => t.name === "Bug")?.id,
+    );
+  });
+
+  test("Track after a saved change records it once; saving the original clears it", async () => {
+    const { layer } = setup();
+    const ask = { ...create, epic: null, labels: ["small-ask"], smallAsk: true };
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const { ids, inboxItemId } = yield* seed([ask, ask]);
+          const svc = yield* Proposals;
+          const [a = "", b = ""] = ids;
+          const edited = ProposalPayloadSchema.parse({ ...ask, epic: "PAY-1" });
+          // The row saves the change, then Track sends the same change again.
+          yield* svc.saveEdit(a, edited);
+          yield* svc.track([a], { [a]: edited });
+          // Picking a change and then going back to the proposal leaves no edit.
+          yield* svc.saveEdit(b, edited);
+          yield* svc.saveEdit(b, ProposalPayloadSchema.parse(ask));
+          const cleared = (yield* rowsOf(inboxItemId))[1];
+          yield* svc.approve(b);
+          const refused = yield* Effect.flip(svc.saveEdit(b, edited));
+          return {
+            cleared,
+            refused,
+            mems: yield* query((d) => d.select().from(memories).all()),
+          };
+        }),
+        layer,
+      ),
+    );
+    expect(r.cleared?.editedPayload).toBeNull();
+    expect(r.mems.filter((m) => m.kind === "example")).toHaveLength(1);
+    expect((r.refused as ProposalError).kind).toBe("decided");
+  });
+
   test("Track stops when the create fails, leaving what hangs on it pending", async () => {
     const { layer } = setup({ createStatus: 400 });
     const r = await Effect.runPromise(

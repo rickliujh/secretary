@@ -125,6 +125,37 @@ const make = Effect.gen(function* () {
         );
     });
 
+  /** An edit of a proposal, validated as a payload of the same kind. */
+  const parseEdit = (row: Row, edited: ProposalPayload) =>
+    Effect.gen(function* () {
+      const parsed = ProposalPayloadSchema.safeParse(edited);
+      if (parsed.success && parsed.data.kind === row.kind) return parsed.data;
+      return yield* new ProposalError({
+        kind: "invalid",
+        message: parsed.success
+          ? "An edit cannot change the proposal kind."
+          : parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
+      });
+    });
+
+  const saveEdit = (id: string, edited: ProposalPayload) =>
+    Effect.gen(function* () {
+      const row = yield* load(id);
+      if (row.status !== "pending") {
+        return yield* new ProposalError({
+          kind: "decided",
+          message: `This proposal is already ${row.status}.`,
+        });
+      }
+      const payload = yield* parseEdit(row, edited);
+      yield* q((d) =>
+        d
+          .update(proposals)
+          .set({ editedPayload: same(payload, parsePayload(row.payload)) ? null : payload })
+          .where(and(eq(proposals.id, id), eq(proposals.status, "pending"))),
+      );
+    });
+
   const approve = (id: string, edited?: ProposalPayload) =>
     Effect.gen(function* () {
       const row = yield* load(id);
@@ -140,25 +171,16 @@ const make = Effect.gen(function* () {
           message: "Answer the question instead of approving it.",
         });
       }
-      // A retry of a failed proposal keeps the edit it was first approved with.
+      // A retry of a failed proposal keeps the edit it was first approved with; a
+      // pending one carries the edit saved from its row, if any (saveEdit).
       let payload = effectivePayload(row);
       // Compared after parsing, so defaults of newer fields do not count as an edit.
       const original = parsePayload(row.payload);
-      if (edited) {
-        const parsed = ProposalPayloadSchema.safeParse(edited);
-        if (!parsed.success || parsed.data.kind !== row.kind) {
-          return yield* new ProposalError({
-            kind: "invalid",
-            message: parsed.success
-              ? "An edit cannot change the proposal kind."
-              : parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
-          });
-        }
-        // An edit already recorded on an earlier attempt is not recorded again.
-        if (!same(parsed.data, original) && !same(parsed.data, payload))
-          yield* captureCorrection(row, parsed.data);
-        payload = parsed.data;
-      }
+      // What earlier approvals already recorded: nothing for a pending proposal.
+      const recorded = row.status === "failed" ? payload : original;
+      if (edited) payload = yield* parseEdit(row, edited);
+      if (!same(payload, original) && !same(payload, recorded))
+        yield* captureCorrection(row, payload);
       yield* q((d) =>
         d
           .update(proposals)
@@ -260,7 +282,7 @@ const make = Effect.gen(function* () {
       );
     });
 
-  return Proposals.of({ approve, reject, approveAll, track, dismiss });
+  return Proposals.of({ approve, reject, approveAll, track, saveEdit, dismiss });
 });
 
 export const ProposalsLive = Layer.effect(Proposals, make);

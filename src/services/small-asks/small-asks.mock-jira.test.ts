@@ -167,4 +167,45 @@ describe("small asks against the mock Jira (FR-10 AC)", () => {
       [r.key, "Finance export of Q3 totals"],
     ]);
   });
+
+  test("the type and epic changed on the row are what Jira gets, even approved from the card", async () => {
+    const { issues, layer } = setup();
+    const epic = [...issues.values()].find((i) => i.project === "PAY" && i.type === "Epic");
+    if (!epic) throw new Error("fixture");
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const dana = yield* createPerson({ displayName: "Dana Reyes", title: "Finance lead" });
+          const turn = yield* (yield* Intake).triage({
+            text: "can you send me the Q3 numbers by Friday?",
+            source: "teams",
+            senderPersonId: dana,
+            today: "2026-10-05",
+          });
+          const detail = yield* inboxDetail(turn.inboxItemId);
+          const row = groupSmallAsks(detail?.proposals ?? [])[0];
+          if (row?.type !== "track") throw new Error("expected one Track row");
+          const payload = (row.create.editedPayload ?? row.create.payload) as Record<
+            string,
+            unknown
+          >;
+          // The row saves the change at once (small-ask-row.tsx); the user then
+          // approves the create from its card under Details, which sends no edit.
+          const svc = yield* Proposals;
+          yield* svc.saveEdit(row.create.id, {
+            ...payload,
+            issueType: "Bug",
+            epic: epic.key,
+          } as never);
+          const results = [yield* svc.approve(row.create.id)];
+          return { results, key: results[0]?.issueKey ?? "", defaultType: payload.issueType };
+        }),
+        layer,
+      ),
+    );
+    expect(r.results[0]?.status).toBe("executed");
+    expect(r.defaultType).toBe("Task");
+    expect(issues.get(r.key)).toMatchObject({ type: "Bug", epic: epic.key });
+  });
 });

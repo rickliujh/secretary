@@ -1191,3 +1191,15 @@ Review fixes
   user cannot see is isolated and skipped. The watermark is unchanged.
 - The epic picker falls back to the summary when the Epic Name is blank.
 
+## Small asks: row changes reach every approve (2026-10-15)
+
+- A type or epic changed on a small-ask row was kept only in the row, and only
+  Track sent it. Approving the create from its card under Details, or with Approve
+  all, created the ticket with the default type and epic.
+- The row now saves the change on the pending create as soon as it is picked
+  (`Proposals.saveEdit`, design.md D44). The card under Details shows it as edited,
+  and every approve path uses it. Saving records nothing; the approval records the
+  change as one correction, also when Track sends the same change again. Picking
+  the original values again clears the edit.
+- A failed create still sends its row changes with Retry.
+

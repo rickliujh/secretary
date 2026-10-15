@@ -43,7 +43,7 @@ export function SmallAskRow({
   members: ProposalView[];
   lookups: Lookups;
 }) {
-  const { track, reject } = useDecisions();
+  const { track, reject, saveEdit } = useDecisions();
   const home = useQuery({
     queryKey: SMALL_ASK_KEYS.home,
     queryFn: ({ signal }) => run(smallAskHome, signal),
@@ -64,7 +64,7 @@ export function SmallAskRow({
   const ids = trackOrder(create, members);
   const createOpen = create.status === "pending" || create.status === "failed";
   const pendingIds = [create, ...members].filter((p) => p.status === "pending").map((p) => p.id);
-  const busy = track.isPending || rejecting;
+  const busy = track.isPending || saveEdit.isPending || rejecting;
   const result = create.result as Result;
   const failed = [create, ...members].filter((p) => p.status === "failed");
   const warnings = [create, ...members]
@@ -80,6 +80,25 @@ export function SmallAskRow({
     ? (lookups.person.get(payload.requesterPersonId)?.displayName ?? null)
     : null;
 
+  // A change is saved on the pending create at once, so its card, Approve all and
+  // Track all use it (D44). A failed create sends its changes with Retry instead.
+  const change = (next: { issueType: string; epic: string }) => {
+    setIssueType(next.issueType);
+    setEpic(next.epic);
+    if (create.status !== "pending") return;
+    saveEdit.mutate(
+      {
+        id: create.id,
+        edited: { ...payload, issueType: next.issueType, epic: next.epic || null },
+      },
+      {
+        onError: () => {
+          setIssueType(payload.issueType);
+          setEpic(payload.epic ?? "");
+        },
+      },
+    );
+  };
   const onTrack = () => {
     const changed = issueType !== payload.issueType || (epic || null) !== payload.epic;
     // Row changes are an edit of the create, recorded like any other (FR-7.2).
@@ -132,7 +151,11 @@ export function SmallAskRow({
               {payload.parent && <span className="ml-1 font-mono">{payload.parent}</span>}
             </Badge>
           ) : (
-            <Select value={issueType} onValueChange={setIssueType} disabled={busy}>
+            <Select
+              value={issueType}
+              onValueChange={(t) => change({ issueType: t, epic })}
+              disabled={busy}
+            >
               <SelectTrigger size="sm" className="w-32" aria-label="Issue type">
                 <SelectValue />
               </SelectTrigger>
@@ -149,7 +172,7 @@ export function SmallAskRow({
             <div className="w-64">
               <IssueCombobox
                 value={epic}
-                onChange={setEpic}
+                onChange={(e) => change({ issueType, epic: e })}
                 options={issueOptions(lookups.tickets, "epic", payload.projectKey)}
                 placeholder="No epic"
                 noneLabel="No epic"

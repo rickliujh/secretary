@@ -39,6 +39,15 @@ export interface ProposalsShape {
     ids: readonly string[],
     edits?: Readonly<Record<string, ProposalPayload>>,
   ) => Effect.Effect<DecisionResult[], ProposalError | DbError>;
+  /**
+   * Keeps an edit on a pending proposal without approving it, so every way of
+   * approving it later (its card, Approve all, Track) uses the edit (D44). An edit
+   * equal to the proposal clears it. The correction is recorded at approval.
+   */
+  readonly saveEdit: (
+    id: string,
+    edited: ProposalPayload,
+  ) => Effect.Effect<void, ProposalError | DbError>;
   /** Marks the inbox item dismissed and rejects its pending proposals without recording corrections. */
   readonly dismiss: (inboxItemId: string) => Effect.Effect<void, DbError>;
 }
