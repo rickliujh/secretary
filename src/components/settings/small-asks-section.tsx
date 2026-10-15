@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { type AppSettings, JiraLabel } from "@/services/settings/schema";
+import { type AppSettings, JiraLabel, SmallAsksSettingsSchema } from "@/services/settings/schema";
 import { checkHome, type HomeCheck, syncedProjectKeys } from "@/services/small-asks/queries";
 
 const NONE = "__none__";
@@ -37,6 +37,14 @@ const Form = z.object({
   projectKey: z.string(),
   label: JiraLabel,
   joinActiveSprint: z.boolean(),
+  /** Empty: no default, the secretary's suggestion stays (D55). */
+  defaultPoints: z
+    .string()
+    .trim()
+    .refine(
+      (v) => v === "" || SmallAsksSettingsSchema.shape.defaultPoints.safeParse(Number(v)).success,
+      { message: "A number from 0 to 1000, or empty" },
+    ),
 });
 type Values = z.infer<typeof Form>;
 
@@ -44,6 +52,7 @@ const toValues = (s: AppSettings): Values => ({
   projectKey: s.smallAsks.projectKey,
   label: s.smallAsks.label,
   joinActiveSprint: s.smallAsks.joinActiveSprint,
+  defaultPoints: s.smallAsks.defaultPoints === null ? "" : String(s.smallAsks.defaultPoints),
 });
 
 function CheckResult({ check }: { check: HomeCheck }) {
@@ -110,7 +119,12 @@ export function SmallAsksSection() {
   });
   const form = useForm<Values>({
     resolver: zodResolver(Form),
-    defaultValues: { projectKey: "", label: "small-ask", joinActiveSprint: true },
+    defaultValues: {
+      projectKey: "",
+      label: "small-ask",
+      joinActiveSprint: true,
+      defaultPoints: "",
+    },
   });
   useEffect(() => {
     if (settings) form.reset(toValues(settings));
@@ -126,6 +140,7 @@ export function SmallAsksSection() {
           projectKey: v.projectKey,
           label: v.label,
           joinActiveSprint: v.joinActiveSprint,
+          defaultPoints: v.defaultPoints === "" ? null : Number(v.defaultPoints),
         },
       }),
       {
@@ -198,6 +213,24 @@ export function SmallAsksSection() {
                 Every small ask gets this label, so you can find them.
               </FieldDescription>
               <FieldError errors={[errors.label]} />
+            </Field>
+            <Field data-invalid={!!errors.defaultPoints}>
+              <FieldLabel htmlFor="small-asks-points">Default story points</FieldLabel>
+              <Input
+                id="small-asks-points"
+                type="number"
+                min={0}
+                step="any"
+                inputMode="decimal"
+                placeholder="None"
+                className="w-32"
+                {...form.register("defaultPoints")}
+              />
+              <FieldDescription>
+                Points a small ask gets when the message states none. Empty: the secretary suggests
+                points from the values your tickets use.
+              </FieldDescription>
+              <FieldError errors={[errors.defaultPoints]} />
             </Field>
             <Controller
               control={form.control}

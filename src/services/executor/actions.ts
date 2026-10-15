@@ -3,7 +3,7 @@
  * view, and approved proposals mapped onto the same shapes.
  */
 import { z } from "zod";
-import { IsoDate, IssueKey } from "@/services/proposals/schema";
+import { IsoDate, IssueKey, StoryPoints } from "@/services/proposals/schema";
 
 export const JiraActionSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -22,19 +22,28 @@ export const JiraActionSchema = z.discriminatedUnion("kind", [
     transitionId: z.string().min(1),
     transitionName: z.string().optional(),
   }),
-  z.object({
-    kind: z.literal("update_fields"),
-    issueKey: IssueKey,
-    fields: z
-      .object({
-        summary: z.string().trim().min(1).optional(),
-        /** Wiki markup; edited as-is to avoid lossy round trips (design.md section 5). */
-        descriptionWiki: z.string().nullable().optional(),
-        priority: z.string().min(1).optional(),
-        dueDate: IsoDate.nullable().optional(),
-      })
-      .refine((f) => Object.keys(f).length > 0, "Nothing to update"),
-  }),
+  z
+    .object({
+      kind: z.literal("update_fields"),
+      issueKey: IssueKey,
+      fields: z
+        .object({
+          summary: z.string().trim().min(1).optional(),
+          /** Wiki markup; edited as-is to avoid lossy round trips (design.md section 5). */
+          descriptionWiki: z.string().nullable().optional(),
+          priority: z.string().min(1).optional(),
+          dueDate: IsoDate.nullable().optional(),
+          /** Written to `pointsField`; null clears them (D55). */
+          storyPoints: StoryPoints.nullable().optional(),
+        })
+        .refine((f) => Object.keys(f).length > 0, "Nothing to update"),
+      /** The story point field on the issue's edit screen, chosen by the Executor (D55). */
+      pointsField: z.string().min(1).optional(),
+    })
+    .refine((a) => a.fields.storyPoints === undefined || !!a.pointsField, {
+      message: "Story points need the story point field to write",
+      path: ["pointsField"],
+    }),
   z.object({
     kind: z.literal("assign"),
     issueKey: IssueKey,
@@ -74,6 +83,16 @@ export const JiraActionSchema = z.discriminatedUnion("kind", [
     issueKey: IssueKey,
     linkId: z.string().regex(/^\d+$/, "Invalid link id"),
   }),
+  /** Deletes an issue (revoking a create, D54); Jira refuses one with sub-tasks. */
+  z.object({ kind: z.literal("delete_issue"), issueKey: IssueKey }),
+  /** Deletes one comment by its id (revoking a comment, D54). */
+  z.object({
+    kind: z.literal("delete_comment"),
+    issueKey: IssueKey,
+    commentId: z.string().regex(/^\d+$/, "Invalid comment id"),
+  }),
+  /** Moves the issue out of its sprint into the backlog through the Agile API (D54). */
+  z.object({ kind: z.literal("move_to_backlog"), issueKey: IssueKey }),
   /** Moves the issue into a sprint through the Agile API (D30). */
   z.object({
     kind: z.literal("move_to_sprint"),
@@ -108,5 +127,11 @@ export function describeAction(a: JiraAction): string {
       return `Mark ${a.issueKey} blocked by ${a.blockerKey}`;
     case "delete_issue_link":
       return `Remove link ${a.linkId} from ${a.issueKey}`;
+    case "delete_issue":
+      return `Delete ${a.issueKey}`;
+    case "delete_comment":
+      return `Delete comment ${a.commentId} on ${a.issueKey}`;
+    case "move_to_backlog":
+      return `Move ${a.issueKey} to the backlog`;
   }
 }

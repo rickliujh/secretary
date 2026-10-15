@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import type { Lookups } from "@/app/queries";
 import { IssueCombobox } from "@/components/tickets/issue-combobox";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +31,7 @@ import {
 import {
   FIELD_SPECS,
   fieldName,
+  formName,
   fromFormValues,
   isEditable,
   issueOptions,
@@ -44,6 +46,8 @@ export function ProposalEditDialog({
   open,
   onOpenChange,
   onApprove,
+  sprint,
+  busy,
 }: {
   payload: ProposalPayload;
   lookups: Lookups;
@@ -51,17 +55,27 @@ export function ProposalEditDialog({
   onOpenChange: (o: boolean) => void;
   /** Approves with the edited payload. */
   onApprove: (edited: ProposalPayload) => void;
+  /** A create's sprint switch (D57); it saves at once, apart from the form. */
+  sprint?: ReactNode;
+  /** A save of the proposal is running; approving waits for it. */
+  busy?: boolean;
 }) {
   const form = useForm<Record<string, string>>({ defaultValues: toFormValues(payload) });
   const [errors, setErrors] = useState<string[]>([]);
+  // The form starts from the proposal each time the dialog opens. A save while
+  // it is open (the sprint switch) must not reset what the user typed.
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpen.current) {
       form.reset(toFormValues(payload));
       setErrors([]);
     }
+    wasOpen.current = open;
   }, [open, payload, form]);
   if (!isEditable(payload)) return null;
   const specs = FIELD_SPECS[payload.kind];
+  // Every value, so a field can hide while others make it meaningless (an Epic's points).
+  const values = form.watch();
 
   const submit = form.handleSubmit((values) => {
     const parsed = ProposalPayloadSchema.safeParse(fromFormValues(payload, values));
@@ -85,10 +99,29 @@ export function ProposalEditDialog({
           </DialogHeader>
           <FieldGroup>
             {specs.map((spec) => {
-              const name = fieldName(spec.path);
+              const name = formName(spec);
               const id = `edit-${name}`;
+              if (spec.hidden?.(values)) return null;
+              if (spec.type === "clear")
+                return (
+                  <Controller
+                    key={name}
+                    control={form.control}
+                    name={name}
+                    render={({ field }) => (
+                      <Field orientation="horizontal">
+                        <Checkbox
+                          id={id}
+                          checked={field.value === "true"}
+                          onCheckedChange={(c) => field.onChange(c === true ? "true" : "")}
+                        />
+                        <FieldLabel htmlFor={id}>{spec.label}</FieldLabel>
+                      </Field>
+                    )}
+                  />
+                );
               return (
-                <Field key={spec.path}>
+                <Field key={name}>
                   <FieldLabel htmlFor={id}>{spec.label}</FieldLabel>
                   {spec.type === "textarea" ? (
                     <Textarea id={id} rows={5} {...form.register(name)} />
@@ -140,14 +173,25 @@ export function ProposalEditDialog({
                   ) : (
                     <Input
                       id={id}
-                      type={spec.type === "date" ? "date" : "text"}
-                      className={cn(spec.mono && "font-mono")}
+                      type={
+                        spec.type === "date" ? "date" : spec.type === "number" ? "number" : "text"
+                      }
+                      {...(spec.type === "number"
+                        ? {
+                            min: 0,
+                            step: "any",
+                            inputMode: "decimal" as const,
+                            placeholder: spec.optionalChange ? "No change" : "None",
+                          }
+                        : {})}
+                      className={cn(spec.mono && "font-mono", spec.type === "number" && "w-32")}
                       {...form.register(name)}
                     />
                   )}
                 </Field>
               );
             })}
+            {sprint}
           </FieldGroup>
           {errors.length > 0 && (
             <ul className="mt-4 list-disc pl-5 text-sm text-destructive">
@@ -160,7 +204,9 @@ export function ProposalEditDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Approve with changes</Button>
+            <Button type="submit" disabled={busy}>
+              Approve with changes
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

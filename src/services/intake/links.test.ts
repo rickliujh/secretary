@@ -49,6 +49,7 @@ const home = {
     label: "small-ask",
     joinActiveSprint: true,
     hintDismissed: false,
+    defaultPoints: null,
   },
 };
 const e = {

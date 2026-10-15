@@ -223,6 +223,8 @@ describe("Executor", () => {
       issueKey: "PAY-2",
       warning:
         "In the comment, 1 remote image became a link and the mention of jsmith became plain text (not a Jira user Secretary knows).",
+      // The new comment's id, for revoking it (D54).
+      undo: { kind: "add_comment", issueKey: "PAY-2", commentId: "50004" },
     });
     // The user's own comment goes out as typed.
     expect(posted[1]).toBe("Ask [~jsmith], [~ana.b], [~rliu] and [~carl.d] !https://x.io/p.png!");
@@ -309,7 +311,18 @@ describe("Executor", () => {
       ),
     );
     expect(r.before).toEqual({ sprint: "Payments 15", points: 5 });
-    expect(r.first).toEqual({ message: "Moved PAY-2 to sprint Payments 16", issueKey: "PAY-2" });
+    expect(r.first).toEqual({
+      message: "Moved PAY-2 to sprint Payments 16",
+      issueKey: "PAY-2",
+      // The open sprint it left, read from Jira just before the move (D54).
+      undo: {
+        kind: "move_to_sprint",
+        issueKey: "PAY-2",
+        moved: true,
+        sprintId: 44,
+        previous: { id: 42, name: "Payments 15" },
+      },
+    });
     expect(r.after?.sprint).toBe("Payments 16");
     const posts = seen.filter((x) => x.url.includes("/rest/agile/1.0/sprint/"));
     expect(posts).toHaveLength(1);
@@ -322,6 +335,7 @@ describe("Executor", () => {
     expect(r.again).toEqual({
       message: "PAY-2 is already in sprint Payments 16",
       issueKey: "PAY-2",
+      undo: { kind: "move_to_sprint", issueKey: "PAY-2", moved: false, sprintId: 44 },
     });
     expect(r.log.map((l) => [l.action, l.target, l.ok, l.proposalId])).toEqual([
       ["move_to_sprint", "PAY-2", true, "move1"],

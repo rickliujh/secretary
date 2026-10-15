@@ -1215,6 +1215,336 @@ Review fixes
   and the sync buttons keep their labels while a sync runs (PR #23).
 
 
+## Phase 17: Revoke an approval (2026-10-15)
+
+Built
+- Undo data (D54 (1)): the Executor records `undo` in a proposal's result, read
+  from Jira just before it writes: the replaced values of an update (priority and
+  assignee as names and user ids), the status a move left, the open sprint a sprint
+  move left (null for the backlog), the new comment's id, the id of the link it
+  made, a wait's state before and after with the timeline entry it added, and the
+  changed columns of a contact or team before and after. Creates, waits, memories
+  and drafts use the ids their results already held.
+- Reverse writes: `delete_issue`, `delete_comment` and `move_to_backlog` Jira
+  actions; `JiraClient.myPermissions` and `getComment`; `Executor.reverse` runs a
+  Jira action through `run` (logged with the proposal id) or a local change (delete
+  or restore a wait, put back a contact or team, forget a memory, delete a draft).
+  A deleted issue leaves the cache with its comments and `issue_meta`.
+- `jira/cancel.ts` `revokeTransition`: the first transition into a status named
+  like cancelled or canceled, won't do, rejected, declined (in that order), else
+  one into a done-category status.
+- `proposals/revoke.ts` plans in pure code: `revokeBlock` (what stored data rules
+  out), `cascadeOf` (the executed proposals of the thread that act on a created
+  ticket, by `$new` ref or key, recursively, newest first), and `planEntry` /
+  `planRevoke` per kind over facts that `revoke-facts.ts` reads fresh.
+- `Proposals.revokePlan` and `Proposals.revoke`. Status `revoked`; the result keeps
+  the original fields and gains `revoked: {at, message, warning?}`. A failed step
+  stops the run, leaves the proposal executed with `revokeError: {at, message,
+  undone}`, and Revoke can be pressed again: each step checks current state, so the
+  comment is not posted twice and a deleted thing is not deleted again.
+- Inbox: Revoke on executed cards (compact ones too) and on a tracked small-ask
+  row, which revokes the bundle through its create. An AlertDialog lists every step
+  per proposal, with notes (already undone, closed instead of deleted) and
+  warnings (changed since); confirming sends the step texts it showed. A revoked
+  card shows the badge, what the approval did struck through, and what the revoke
+  did. Old approvals show a disabled Revoke with the reason.
+- Mock Jira: `DELETE /issue/{key}` (refused with sub-tasks; 403 with `canDelete:
+  false` or `--no-delete`), `GET /mypermissions`, `GET` and `DELETE
+  /issue/{key}/comment/{id}`, `POST /rest/agile/1.0/backlog/issue`, a `subtasks`
+  field, and a done-category Cancelled status with `cancelStatus` or
+  `--cancel-status`.
+- Tests: the FR-14 AC against the mock with and without delete permission, a
+  failed transition finished by a second Revoke, each Jira kind against the mock
+  (a priority changed in Jira since is kept and named), each local kind against
+  the database, the planner per kind and the cascade, and the undo data per kind.
+
+Decisions and defaults
+- Recorded in D54's Built note: what "changed since" compares for each kind, a
+  cascaded proposal that cannot be undone is left and named instead of blocking
+  the revoke, drafts that only mention the ticket stay, the revoke refuses to run
+  when the fresh steps differ from the confirmed ones, and a revoked proposal
+  counts as rejected in the thread context of later turns.
+- The cancel status is opt-in in the mock, so the Today tests that close a ticket
+  as Done keep their workflow.
+- The new `revoked` value of `proposals.status` needs no migration (a text
+  column); `db:generate` produced none.
+
+Review fixes
+- The cascade is planned end to end: entries are planned newest first, each
+  against the facts as the steps before it leave them (a status moved back,
+  values and assignee put back, a sprint, sub-tasks deleted, waits, contact and
+  team columns). A ticket moved to Done in a later turn now goes back to To Do
+  and then to the cancel status instead of staying in To Do; a sub-task the
+  cascade deletes no longer keeps its parent from being deleted; two changes of
+  one field or status go back to the first value.
+- Steps name targets, not ids: a status move is `transition_to` a status, and
+  `Executor.reverse` picks the transition available when it runs. The cancel
+  status of a ticket the cascade moves first comes from the project's statuses
+  for its issue type (`revokeStatus`). The confirmed-steps guard still compares
+  the described steps.
+- `proposals/revoke-run.ts`: right before a delete its sub-tasks are read again;
+  a ticket that still has some, or whose delete Jira refuses (400 or 403), is
+  closed in the same run (the comment unless present, then the cancel
+  transition available then) with a warning. An assign Jira refuses is skipped
+  with a warning instead of failing the revoke.
+- The confirmation and warnings name users by display name: recorded at approval
+  in the undo data (`names`), else from the fresh read, the cache or contacts;
+  the user id only when nothing else is known.
+- A retried update_issue or update_dependency keeps the undo data its first
+  attempt recorded before writing (the earliest value per field), kept on the
+  failed result.
+- Deleting a mirrored wait treats a 404 on its remote link as gone, and the
+  remote-link writes of a revoke or wait update are logged with the proposal id.
+- `Proposals.revoke` holds every proposal its cascade covers; a second revoke of
+  any of them fails with `busy`. The inbox disables Revoke across the thread
+  while one runs.
+- A revoked create rejects the still-pending proposals of its thread that act on
+  the ticket (no correction recorded) and files the thread.
+- FR-14.5 on the card: a sent or copied draft and a sprint move whose earlier
+  sprint has closed show a disabled Revoke with the reason before the dialog
+  opens (`localRevokeBlock`, `ProposalView.revokeBlocked`).
+- Mock Jira: transitions follow a workflow (which are available depends on the
+  issue's status, and `POST /transitions` refuses others), deleting a missing
+  remote link answers 404, and tests can refuse one issue's delete and one
+  user's assignment.
+- Tests: the planner over each scenario above, and against the mock a ticket
+  moved to Done, two moves, two priority changes, a sub-task, a refused delete
+  and assign, a retried update, a mirrored wait whose link is gone, two
+  concurrent revokes, and pending members rejected.
+
+Thread context (FR-14.6)
+- Later turns of a thread no longer fold a revoked proposal into the rejections:
+  "Already decided" shows it as approved, then revoked, with what the revoke did
+  (the ticket deleted, or closed and moved to its status; other kinds the stored
+  revoke message), and a pending proposal dropped because its ticket was revoked
+  as dropped with that reason (`intake/decided.ts`). A revoke that changed
+  nothing back says so instead of "Undone", with what was left as it is; a
+  ticket closed before the revoke reads as closed in its status. `$new` refs
+  there name the created key.
+- The `revoked` record keeps `ticket` (deleted, or closed with its status and
+  whether the revoke moved it), written from what the run did, and `unchanged`
+  when nothing was changed back; older records are read from their message
+  (`revokedTicket`).
+- Classify prompt version 11: when something was revoked, a rule says a revoked
+  action is undone, a deleted ticket no longer exists and a closed one stays
+  closed unless the user asks to reopen it, and neither is proposed again unless
+  the user's newest instruction asks to redo it; the input asking for it does
+  not count. The "Already decided" header carries the same exception. Older
+  snapshots replay as they ran (the rule follows the stored context).
+- A ticket a revoke deleted is no longer read, named as a reference or offered by
+  any retrieval source (`exclude` on the snapshot request). A ticket already gone
+  from Jira when it is revoked (or whose DELETE answers 404) leaves the cache
+  like one the revoke deletes (`forget_issue` reverse op). One the revoke closed
+  stays a candidate in its new status. A dropped card shows its reason.
+- Tests: the prompt lines, header and rule, the thread outcomes from stored and
+  older records, retrieval exclusion, and against the mock a tracked ask revoked
+  (deleted, deleted in Jira first, and closed) followed by another turn.
+
+Across threads (FR-14.6, 2026-10-15)
+- A ticket a revoke deletes (or finds gone) gets a tombstone in the new
+  `deleted_issues` table, written before its cache rows go; the rows go by key
+  and by Jira id, so a moved copy goes too. Sync drops it from every page (Cloud's
+  eventually consistent search may still return it) and from `refreshIssue`,
+  skips it as a parent epic, and sweeps any copy a racing write left after each
+  run and refresh. Retrieval never offers it from any source in any thread and
+  drops it from references and open waits; validation says it was deleted when
+  the user revoked it; approving a proposal that acts on it in Jira is refused (a
+  draft that mentions it and a wait update are not).
+- A ticket a revoke closes gets `issue_meta.revoked_at`, cleared when sync or a
+  refresh sees it reopened. While closed it is offered only when named (the
+  `mentioned` source), never by search, recency, sender, tracking or as an epic;
+  its candidate line reads "created by mistake and revoked by the user in this
+  conversation" or "in another conversation" (closed), with a rule not to act on,
+  ask about or mention it unless reopening it when asked or when named (in the
+  revoking thread only an instruction counts).
+- `validateItemOutput` rejects a question, summary or proposal text that names a
+  ticket a revoke deleted or closed unless the user's own words name it.
+- Correction examples from a thread whose create was revoked are left out of
+  retrieval; the others are labelled as past examples from other inputs, never
+  something the user said in this conversation (prompt version 11 only).
+- Migration 0014 adds the table and column and backfills them from revoked
+  records. The mock's `laggingSearch` keeps returning deleted issues from search.
+- Tests: two threads against the mock (deleted with a lagging search; closed,
+  then named in a third thread, then reopened) through a full and an incremental
+  sync; sync runs, a refresh and a parent epic under a trigger that refuses any
+  write of a tombstoned row; the tombstone module, forgetting by id, clearing on
+  reopen and the backfill; the prompt lines and the validation messages.
+
+Known limits
+- The revoke comment is matched among the newest 100 comments of the ticket.
+- Deleting a ticket leaves waits created outside its thread pointing at the
+  deleted key (D54 revokes only what the thread did).
+
+## Phase 18: Story points on proposals (2026-10-15)
+
+Built
+- Payloads (D55): create_issue gains `storyPoints` (number 0 to 1000, or null) and
+  `storyPointsEstimated`; update_issue `changes` gains `storyPoints` (null clears).
+  Both default, so stored proposals still parse. `describePayload` shows "N points",
+  "(suggested)" while estimated. Settings > Jira > Small asks has a default
+  (`smallAsks.defaultPoints`, empty by default).
+- Scale: `retrieval/points.ts` counts the cache's point values per project (Epics,
+  sub-tasks and stale tickets left out) and keeps the 8 most frequent of the
+  candidates' projects and the small-asks home, else of every project, sorted
+  ascending. The snapshot stores it as `pointScale`, and candidates carry their
+  points.
+- Classify prompt version 12 (11 is taken by a parallel fix): `storyPoints` (text,
+  parsed in code, since the portable schema cannot leave a number empty) and
+  `pointsSource` (`stated`, `estimated`; only `stated` while the scale is empty),
+  the rule (use stated points, estimate only new tickets from the scale, never
+  re-estimate an existing ticket, no points on an Epic), the scale under Projects
+  and each candidate's points. Snapshots without `pointScale` (older versions)
+  get none of this, so they replay as they ran.
+- `prompts/points.ts` checks in code and the repair prompt says why: a number from
+  0 to 1000; a source with the number; `estimated` only on create_issue and only a
+  scale value; `stated` only when the input or the user's instructions give the
+  number next to a points cue (points, pts, SP, "-pointer", estimate, "like a 5"),
+  every number of a list counting, issue keys in any case, dates and times not;
+  update_issue points only `stated` and not the value the ticket has; no points
+  on an Epic. In a revision the pending proposal it revises (a create by ref, an
+  update by target) may keep the user's points, never an estimate. A small ask's
+  estimate is not checked when the default replaces it. Payload building gives a
+  small ask without stated points the default when one is set, and an Epic none.
+- Cleared points stay cleared: emptying a create's points sets
+  `storyPointsCleared`; the revision's pending shape carries `pointsCleared`, and
+  no estimate or default comes back unless the user's instructions give a number.
+  An update's clear (`storyPoints: null`) survives a revision the same way.
+- Executor: a create writes the first effective story point field (D35) that the
+  create screen lists (`pointsFieldOn`); a screen without one creates without
+  points and the result warns. An update reads the issue's story point fields and
+  `GET /issue/{key}/editmeta`, writes the on-screen field that holds its points,
+  else the first on the screen (`pointsFieldForIssue`), fails (`invalid`) naming
+  the reason when the screen has none, and records the previous points and the
+  field in its undo data; a retry keeps the field the first attempt chose.
+  `update_fields` carries the points with their field (`pointsField`).
+- Revoke puts the previous points back in the same field under the changed-since
+  rule; points that were empty before are cleared.
+- UI: a Story points field in the edit dialog (hidden for an Epic; changing the
+  type to Epic drops the points), a "Clear story points on the ticket" checkbox
+  for update_issue (FR-15.3), the points on the small-ask row next to type and
+  epic (saved on blur or Enter, like the row's other fields), and a Points row on
+  cards with a "suggested" badge. A changed or cleared value is the user's, no
+  longer a suggestion.
+- Mock Jira: Story Points on the create and edit screens of standard types (not
+  Epic or Sub-task); `noPointsOnCreate` drops it from a project's create screens;
+  with `--cloud` "Story point estimate" too, empty until written. Like Jira, a
+  create or edit that sets a field its screen lacks, or points that are not a
+  number, gets 400; the edit screens list summary, description, priority, due
+  date and labels.
+- Tests: the scale and its SQL, the stated-number check, every validation rule,
+  per-proposal kept points, cleared points across a revision, payload building
+  with and without the small-ask default, the field choice from create and edit
+  metadata (both Cloud fields on screen), the create and update mappings,
+  describePayload and the edit form; against the mock Jira the FR-15 AC (3
+  stated, a suggestion, the small-ask default, "is more like a 5" and its revoke,
+  a create screen without the field, an update without it), the Cloud two-field
+  path end to end, and the mock's 400s. Three live eval cases.
+- Fixed (2026-10-15): in the user's own words (typed input, instructions,
+  answers) an un-cued number states points while points are the topic: a bare
+  number or a short "set it to 3" / "make PAY-12 a 5", or points named in their
+  words or the model's question (`ownStatedNumbers`), so a bare "1" answering
+  the points question sets 1. Pasted input and the chat's requests still need a
+  cue; "make it (a) N" is one now; «…» values are not the user's words; only the
+  newest instruction ends a clear; each item keeps its own source across
+  revisions. A comment is for the ticket's readers: a classify rule, and a
+  best-effort check (`prompts/comment-audience.ts`) that sends a comment about
+  points telling the user what cannot be done or asking them for a value to
+  repair, telling the model to ask in its question. A fourth live eval case
+  answers the question with "3".
+- Fixed (2026-10-15, live eval): `storyPoints` text ignores stray punctuation
+  and whitespace at its ends (": 2" is 2); empty, punctuation, "(none)", "null",
+  "none" and "n/a" are no points, and other text that is not a number drops the
+  points instead of failing the item; only a number out of range or off the
+  scale is repaired. An update_issue drops the fields the ticket already has; one
+  left with nothing is repaired to be left out. The rule proposes a teammate's
+  new estimate without asking, and an answered question is acted on, not
+  confirmed.
+
+Known limits
+- On update_issue an empty points field means "no change"; clearing uses the
+  checkbox.
+
+## Phase 20: New tickets and the sprint (2026-10-15)
+
+Built
+- Payload (D57): create_issue gains `joinSprintChosen` (default false). Payload
+  building sets `joinSprint` for every create: a small ask from Settings as
+  before; any other create on when its due date is on or before the end of the
+  sprint it would join; Epics and sub-tasks never. The snapshot carries the
+  user's active sprints (`userSprints`) and a revision's `thread.sprintChoices`,
+  neither shown to the model: the classify prompt and its version (12) are
+  unchanged. A chosen value survives revisions and re-triage; an unchosen one is
+  recomputed.
+- One sprint pick everywhere (`joinSprintFor`): the Executor at approval, the
+  cards and payload defaults. The Executor never moves an Epic and records the
+  sprint on its result.
+- `sprints/fit.ts` (pure): working days left (Monday to Friday, today in full,
+  0 once ended), the user's open load in the sprint (as sprint points count
+  it), the rate (Settings, else the working days of the last three closed
+  sprints on the board over the points the user finished, else none), the
+  verdict (fits within 85 percent of the days left, tight within all of them,
+  over above; unknown without a rate or, while the sprint has room, for a ticket
+  without points), a headline with "plus N unestimated", and detail lines.
+  Creates assigned to someone else are shown and not counted.
+- `sprints/fit-query.ts`: the fit of a thread's open creates (with its other
+  pending creates that join the same sprint) and the user's sprint load, read
+  per thread with TanStack Query under the "tickets" key, so sync and every
+  decision, edits included, refresh them; the rate setting is part of the key.
+- Settings > General: "Sprint: one story point is about [ ] working days"
+  (`sprint.daysPerPoint`, 0.05 to 10, empty by default), with the derived rate
+  as placeholder and text when empty.
+- UI: the create card's Sprint row is a switch "Add to <sprint>" with "ends Fri
+  17 Oct, 3 working days left", the verdict line (fits and unknown muted, tight
+  amber, over destructive) and a Details popover (your open tickets there, the
+  other new tickets here, this ticket, the rate and its source, a Settings
+  link); a board that does not show the project is called out; without an active
+  sprint "No active sprint; it goes to the backlog". Executed cards say where the
+  ticket went. The small-ask row has a "Sprint" toggle chip with a verdict dot
+  and the same details; the edit dialog has the switch. The switch saves at once
+  through `Proposals.saveEdit` and marks the value chosen.
+- Corrections: `joinSprint` and `joinSprintChosen` are left out of correction
+  and revision examples, an approval that changed only them records none, and
+  `payloadChanges` ignores them.
+- Today's Sprint work header shows the user's sprint, its days left and the load
+  in days with its verdict. The chat's `sprint_points` adds `workingDaysLeft`,
+  `daysPerPoint` with its source, `remainingDays`, and for the user's own tickets
+  the verdict and its headline.
+- Mock Jira: an issue the app creates stays in the backlog until it is moved
+  into a sprint, as in Jira.
+- Tests: fit (today is the last day, the end has passed, no rate, unestimated
+  tickets, a ticket without points, another assignee, other creates of the
+  thread joining, velocity rate), payload defaults and the chosen value through
+  a revision, the unchanged prompt, corrections without the switch, the chat
+  tool's new fields, and the FR-16 AC against the mock Jira (fits at 2 of 3
+  days, over at 3.5 of 3, on joins the sprint after a re-triage, off stays in
+  the backlog).
+- Review fixes: a sprint with nothing open fits even once it has ended; days
+  are rounded up to the half day without contradicting the verdict; an end time
+  before 12:00 local leaves the end day out (sync keeps Jira's end timestamp);
+  "not closed yet" and the chat's verdict only for an active sprint; other
+  assignees by name; Approve, Approve all and the dialog wait for a switch save
+  and the dialog keeps the switch's value; the switch and chip lock during a
+  reply or re-triage; the "edited" badge ignores the switch; while the fit loads
+  the card shows the stored choice, and when it fails the switch still works;
+  Today names the end date once; the rate field takes "0,5"; fits refresh on a
+  new day.
+- Toggling the switch no longer makes the page flicker: a save reads again only
+  the Inbox and the sprint fits, and approvals wait for it instead of being
+  disabled while it runs.
+- A sprint's last day is the user's choice: Settings > General > "A sprint's
+  last day" (`sprint.lastDay`): follow Jira's end time (default; the option shows
+  the active sprint's end time when known), count it as a working day, or not
+  count it (the sprint ends that morning; on that day it ends today with 0 days
+  left). Every day count uses it: cards, the chip, Today, chat, and the derived
+  rate's sprint days.
+
+Known limits
+- Days off, public holidays, partial days and Jira's remaining estimates are not
+  counted; in-progress tickets count in full.
+- A revision keeps the switch by the create's `$new` ref, so one that
+  renumbers it loses the choice; revoking a create that was closed (not
+  deleted) leaves it in the sprint.
+
 ## Backlog tickets stay out of Sprint work (2026-10-15)
 
 - While your work is in an active sprint, a backlog ticket is at risk only for its

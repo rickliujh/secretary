@@ -11,10 +11,18 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
 import { compactLine, isCompact } from "@/services/proposals/compact";
-import { NEW_REF_RE, PROPOSAL_LABELS, type ProposalPayload } from "@/services/proposals/schema";
+import {
+  NEW_REF_RE,
+  PROPOSAL_LABELS,
+  type ProposalPayload,
+  pointsLabel,
+  withoutCodeFields,
+} from "@/services/proposals/schema";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
 import { isEditable, viewPayload } from "./proposal-fields";
-import { useDecisions } from "./use-inbox";
+import { RevokeControl, RevokeOutcome } from "./revoke-control";
+import { SprintSwitch, sprintOutcome } from "./sprint-choice";
+import { useDecisions, usePendingEdit } from "./use-inbox";
 
 const STATUS_TONE: Record<string, string> = {
   pending: TONE.warning,
@@ -22,6 +30,7 @@ const STATUS_TONE: Record<string, string> = {
   failed: TONE.danger,
   rejected: TONE.neutral,
   approved: TONE.info,
+  revoked: TONE.neutral,
 };
 
 function IssueRef({ value, lookups }: { value: string; lookups: Lookups }) {
@@ -47,8 +56,19 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** Kind-specific view of the concrete payload (FR-2.3). */
-function PayloadView({ p, lookups }: { p: ProposalPayload; lookups: Lookups }) {
+/**
+ * Kind-specific view of the concrete payload (FR-2.3). `sprint` replaces a
+ * create's Sprint row (D57): the switch while open, the outcome once executed.
+ */
+function PayloadView({
+  p,
+  lookups,
+  sprint,
+}: {
+  p: ProposalPayload;
+  lookups: Lookups;
+  sprint?: ReactNode;
+}) {
   const person = (id: string | null) => (id ? (lookups.person.get(id)?.displayName ?? id) : null);
   const team = (id: string | null) => (id ? (lookups.team.get(id)?.name ?? id) : null);
   switch (p.kind) {
@@ -66,9 +86,21 @@ function PayloadView({ p, lookups }: { p: ProposalPayload; lookups: Lookups }) {
           <Row label="Priority">{p.priority}</Row>
           <Row label="Assignee">{p.assignee}</Row>
           <Row label="Due">{p.dueDate}</Row>
+          <Row label="Points">
+            {typeof p.storyPoints === "number" && !/^epic$/i.test(p.issueType) && (
+              <span className="inline-flex items-center gap-1.5">
+                {pointsLabel(p.storyPoints)}
+                {p.storyPointsEstimated && <Badge variant="outline">suggested</Badge>}
+              </span>
+            )}
+          </Row>
           <Row label="Labels">{p.labels.length > 0 && p.labels.join(", ")}</Row>
           <Row label="Asked by">{person(p.requesterPersonId)}</Row>
-          <Row label="Sprint">{p.joinSprint && "Joins your active sprint"}</Row>
+          {sprint !== undefined ? (
+            sprint
+          ) : (
+            <Row label="Sprint">{p.joinSprint && "Joins your active sprint"}</Row>
+          )}
           <Row label="Description">{p.descriptionMd && <Markdown>{p.descriptionMd}</Markdown>}</Row>
         </dl>
       );
@@ -83,6 +115,11 @@ function PayloadView({ p, lookups }: { p: ProposalPayload; lookups: Lookups }) {
           <Row label="Due">{p.changes.dueDate === null ? "clear" : p.changes.dueDate}</Row>
           <Row label="Assignee">
             {p.changes.assignee === null ? "unassign" : p.changes.assignee}
+          </Row>
+          <Row label="Points">
+            {p.changes.storyPoints === null
+              ? "clear"
+              : typeof p.changes.storyPoints === "number" && pointsLabel(p.changes.storyPoints)}
           </Row>
         </dl>
       );
@@ -236,11 +273,20 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
     issueKey?: string;
     communicationId?: string;
     warning?: string;
+    /** Why it was dropped without the user deciding it (a revoked ticket, D54). */
+    reason?: string;
   } | null;
   const drafts = useDraftPanel();
   const draftId = result?.communicationId;
   const pending = proposal.status === "pending";
+  // Approve waits for a save of this proposal (the sprint switch, a row field) to land (D57).
+  const pendingEdit = usePendingEdit(proposal.id);
   const busy = approve.isPending || reject.isPending;
+  // The sprint switch alone is code's field, not an edit of the proposal (D57).
+  const edited =
+    !!proposal.editedPayload &&
+    JSON.stringify(withoutCodeFields(proposal.editedPayload)) !==
+      JSON.stringify(withoutCodeFields(proposal.payload));
   const canApprove = pending || proposal.status === "failed";
   const canEdit = canApprove && isEditable(payload);
   // Dependency proposals are one line with one approve button (D46).
@@ -279,8 +325,23 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
       {proposal.status === "failed" && result?.error && (
         <p className="text-sm text-destructive">{result.error}</p>
       )}
+      {proposal.status === "rejected" && result?.reason && (
+        <p className="text-sm text-muted-foreground">{result.reason}</p>
+      )}
+      {proposal.status === "revoked" && result?.message && (
+        <p className="text-sm text-muted-foreground line-through">{result.message}</p>
+      )}
+      <RevokeOutcome result={proposal.result} />
     </>
   );
+  const revokeControl = <RevokeControl proposal={proposal} />;
+  // A create's Sprint row (D57): the switch while it can run, what happened once it ran.
+  const sprintRow =
+    payload.kind !== "create_issue" ? undefined : canApprove ? (
+      <SprintSwitch proposal={proposal} layout="card" />
+    ) : proposal.status === "executed" && !payload.parent && !/^epic$/i.test(payload.issueType) ? (
+      <Row label="Sprint">{sprintOutcome(proposal.result)}</Row>
+    ) : undefined;
   const approveButton = (
     <Button size="sm" disabled={busy} onClick={() => approve.mutate({ id: proposal.id })}>
       {approve.isPending ? (
@@ -339,8 +400,9 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
               {proposal.status}
             </Badge>
           )}
-          {proposal.editedPayload && <Badge variant="outline">edited</Badge>}
+          {edited && <Badge variant="outline">edited</Badge>}
           {canApprove && approveButton}
+          {revokeControl}
           {expandButton}
         </div>
         {outcome}
@@ -372,12 +434,12 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
         >
           {proposal.status}
         </Badge>
-        {proposal.editedPayload && <Badge variant="outline">edited</Badge>}
+        {edited && <Badge variant="outline">edited</Badge>}
         <span className="ml-auto" />
         <Confidence value={proposal.confidence} />
         {expandButton}
       </header>
-      <PayloadView p={viewPayload(payload)} lookups={lookups} />
+      <PayloadView p={viewPayload(payload)} lookups={lookups} sprint={sprintRow} />
       {proposal.rationale && <p className="text-xs text-muted-foreground">{proposal.rationale}</p>}
       {proposal.evidence && (
         <blockquote className="border-l-2 pl-2 text-xs text-muted-foreground italic">
@@ -385,6 +447,9 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
         </blockquote>
       )}
       {outcome}
+      {proposal.status === "executed" && proposal.payload.kind !== "needs_clarification" && (
+        <footer className="flex gap-2">{revokeControl}</footer>
+      )}
       {canApprove && (
         <footer className="flex gap-2">
           {approveButton}
@@ -408,9 +473,29 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
       <ProposalEditDialog
         payload={payload}
         lookups={lookups}
+        sprint={
+          payload.kind === "create_issue" && pending ? (
+            <SprintSwitch proposal={proposal} layout="dialog" />
+          ) : undefined
+        }
         open={editing}
         onOpenChange={setEditing}
-        onApprove={(edited) => approve.mutate({ id: proposal.id, edited })}
+        busy={busy}
+        onApprove={(changed) => {
+          // The dialog's form does not hold the sprint switch; carry its current value.
+          const current = pendingEdit ?? payload;
+          approve.mutate({
+            id: proposal.id,
+            edited:
+              changed.kind === "create_issue" && current.kind === "create_issue"
+                ? {
+                    ...changed,
+                    joinSprint: current.joinSprint,
+                    joinSprintChosen: current.joinSprintChosen,
+                  }
+                : changed,
+          });
+        }}
       />
     </article>
   );

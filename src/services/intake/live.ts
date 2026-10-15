@@ -37,10 +37,16 @@ import {
 } from "@/prompts/segment";
 import { bindDb, Db } from "@/services/db";
 import { Llm } from "@/services/llm";
-import { describePayload, effectivePayload, issueRefs } from "@/services/proposals/schema";
+import {
+  describePayload,
+  effectivePayload,
+  issueRefs,
+  withoutCodeFields,
+} from "@/services/proposals/schema";
 import { Retrieval } from "@/services/retrieval";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sync } from "@/services/sync";
+import { deletedKeys } from "@/services/sync/deleted";
 import {
   Intake,
   IntakeError,
@@ -49,6 +55,7 @@ import {
   type TriageInput,
   type TriageResult,
 } from ".";
+import { threadOutcomes } from "./decided";
 import { mergeItemProposals } from "./merge";
 import {
   cleanInput,
@@ -61,13 +68,10 @@ import { partsOf, splitMessage, UserContentSchema, withLinkedItems } from "./thr
 
 const UNSURE_QUESTION =
   "I am not sure what should happen here. What would you like me to do with this?";
+const FAILED_QUESTION = "I could not turn this into reliable actions";
 
-const DECIDED = {
-  executed: "done",
-  approved: "done",
-  failed: "done",
-  rejected: "rejected",
-} as const;
+/** A question code asks, not the model: it quotes the input, so it says nothing of the topic. */
+const codeQuestion = (q: string) => q === UNSURE_QUESTION || q.startsWith(FAILED_QUESTION);
 
 type ProposalRow = typeof proposals.$inferSelect;
 type ItemRow = typeof intakeItems.$inferSelect;
@@ -85,6 +89,12 @@ type Job = {
   revising: ProposalRow[];
   /** The day the item first arrived, for a revision (D44: "Asked ... on" keeps it). */
   askedOn?: string;
+  /** Where the item's own input came from; a revision keeps it. Default: the turn's. */
+  source?: string;
+  /** The input is the user's own typed words, not pasted and not the chat's (D55). */
+  ownInput: boolean;
+  /** The questions the model asked about this item so far (D55 answers). */
+  questions?: string[];
 };
 
 type Classified = {
@@ -109,7 +119,7 @@ const make = Effect.gen(function* () {
   const retrieval = yield* Retrieval;
   const sync = yield* Sync;
   const settingsSvc = yield* Settings;
-  const { q } = bindDb(yield* Db);
+  const { q, withDb } = bindDb(yield* Db);
 
   /**
    * Keys Jira answered for in this session (found, 404 or 403), so each is read
@@ -220,16 +230,26 @@ const make = Effect.gen(function* () {
         if (!c.success) return [];
         return splitMessage(c.data.parts, i === 0).instruction ?? [];
       });
-      const decided = rows
-        .filter((r) => r.kind !== "needs_clarification" && r.status in DECIDED)
-        .map((r) => ({
-          outcome: DECIDED[r.status as keyof typeof DECIDED],
-          description: describePayload(effectivePayload(r)),
-        }));
-      const createdKeys = rows
-        .filter((r) => r.kind === "create_issue" && r.status === "executed")
+      // A ticket a revoke closed without moving it shows its status as cached now.
+      const revokedKeys = rows
+        .filter((r) => r.kind === "create_issue" && r.status === "revoked")
         .map((r) => (r.result as { issueKey?: string } | null)?.issueKey)
         .filter((k): k is string => !!k);
+      const cachedStatus = new Map(
+        revokedKeys.length
+          ? (yield* q((d) =>
+              d
+                .select({ key: jiraIssues.key, status: jiraIssues.status })
+                .from(jiraIssues)
+                .where(inArray(jiraIssues.key, revokedKeys))
+                .all(),
+            )).map((r) => [r.key, r.status] as const)
+          : [],
+      );
+      const { decided, createdKeys, deletedKeys } = threadOutcomes(
+        rows,
+        (key) => cachedStatus.get(key) ?? null,
+      );
       const pendingByIdx = new Map<number, ProposalRow[]>();
       for (const r of rows) {
         if (r.status !== "pending" || !r.intakeItemId) continue;
@@ -237,6 +257,18 @@ const make = Effect.gen(function* () {
         if (idx === undefined) continue;
         pendingByIdx.set(idx, [...(pendingByIdx.get(idx) ?? []), r]);
       }
+      // The model's questions per item, answered or not; code's own fallbacks left out.
+      const questionsByIdx = new Map<number, string[]>();
+      for (const r of rows) {
+        if (r.kind !== "needs_clarification" || !r.intakeItemId) continue;
+        const idx = idxOf.get(r.intakeItemId);
+        const question = (r.payload as { question?: string }).question ?? "";
+        if (idx === undefined || !question || codeQuestion(question)) continue;
+        questionsByIdx.set(idx, [...(questionsByIdx.get(idx) ?? []), question]);
+      }
+      // The chat wrote the first message for the user (propose_actions): not their words.
+      const first = UserContentSchema.safeParse(userMessages[0]?.content);
+      const chatAuthored = first.success && first.data.author === "chat";
       return {
         item,
         messages,
@@ -246,7 +278,11 @@ const make = Effect.gen(function* () {
         instructions,
         decided,
         createdKeys,
+        deletedKeys,
+        revokedKeys,
         pendingByIdx,
+        questionsByIdx,
+        chatAuthored,
       };
     });
   type Thread = Effect.Effect.Success<ReturnType<typeof loadThread>>;
@@ -265,6 +301,14 @@ const make = Effect.gen(function* () {
         const p = effectivePayload(r);
         if (p.kind === "create_issue" && !local.has(p.ref))
           local.set(p.ref, `$new:${local.size + 1}`);
+      }
+      // The sprint switch the user set stays through the revision (D57); code's, never the model's.
+      const sprintChoices: Record<string, boolean> = {};
+      for (const r of job.revising) {
+        const p = effectivePayload(r);
+        const ref = p.kind === "create_issue" ? local.get(p.ref) : undefined;
+        if (p.kind === "create_issue" && p.joinSprintChosen && ref)
+          sprintChoices[ref] = p.joinSprint;
       }
       const pending = job.revising.flatMap((r) => {
         if (r.kind === "needs_clarification") return [];
@@ -288,12 +332,24 @@ const make = Effect.gen(function* () {
           summary: row.summary ?? null,
           quote: row.quote.slice(0, OTHER_QUOTE_CHARS),
         }));
+      const questions = job.questions ?? [];
       const thread: ThreadContext | null =
-        job.instructions.length || pending.length || ctx.thread.decided.length || others.length
-          ? { instructions: job.instructions, decided: ctx.thread.decided, pending, others }
+        job.instructions.length ||
+        pending.length ||
+        ctx.thread.decided.length ||
+        others.length ||
+        questions.length
+          ? {
+              instructions: job.instructions,
+              decided: ctx.thread.decided,
+              pending,
+              others,
+              ...(questions.length ? { questions } : {}),
+              ...(Object.keys(sprintChoices).length ? { sprintChoices } : {}),
+            }
           : null;
       const site = { jiraHost: jiraHost((yield* settingsOrDefault(settingsSvc)).jira.baseUrl) };
-      const references = [
+      const named = [
         extractReferences(job.quote, contacts, site),
         extractReferences(job.instructions.join("\n"), contacts, site),
         // Tickets named anywhere earlier in the thread stay candidates for this item.
@@ -306,16 +362,32 @@ const make = Effect.gen(function* () {
           ],
         },
       ].reduce(mergeRefs);
+      // A ticket a revoke deleted, in this thread or any other, no longer exists
+      // (FR-14.6): not read, not named as a reference, and retrieval leaves it out
+      // however it would find it.
+      const deleted = new Set([...ctx.thread.deletedKeys, ...(yield* withDb(deletedKeys))]);
+      const references = {
+        ...named,
+        issueKeys: named.issueKeys.filter((k) => !deleted.has(k)),
+      };
+      const exclude = [
+        ...new Set([...ctx.thread.deletedKeys, ...named.issueKeys.filter((k) => deleted.has(k))]),
+      ];
       yield* readMissingKeys(references.issueKeys);
-      const snapshot = yield* retrieval.snapshot({
-        quote: job.quote,
-        source: ctx.source,
-        senderPersonId: ctx.senderPersonId,
-        references,
-        today: ctx.today,
-        ...(job.askedOn ? { askedOn: job.askedOn } : {}),
-        thread,
-      });
+      const snapshot: ItemSnapshot = {
+        ...(yield* retrieval.snapshot({
+          quote: job.quote,
+          source: job.source ?? ctx.source,
+          senderPersonId: ctx.senderPersonId,
+          references,
+          today: ctx.today,
+          ...(job.askedOn ? { askedOn: job.askedOn } : {}),
+          thread,
+          exclude,
+          revokedHere: ctx.thread.revokedKeys,
+        })),
+        ownInput: job.ownInput,
+      };
       const result = yield* Effect.either(
         llm.object<ItemOutput>("classify_item", {
           schema: buildItemSchema(snapshot) as never,
@@ -346,7 +418,7 @@ const make = Effect.gen(function* () {
         return {
           itemId,
           mapped: [],
-          question: `I could not turn this into reliable actions: "${job.quote.slice(0, 200)}". What should happen?`,
+          question: `${FAILED_QUESTION}: "${job.quote.slice(0, 200)}". What should happen?`,
           summary: null,
         } satisfies Classified;
       }
@@ -462,11 +534,12 @@ const make = Effect.gen(function* () {
         );
       }
       // FR-7.2: a requested change is a correction worth learning from.
+      // The sprint switch is code's field, so it is no part of the example (D57).
       const before = opts.supersede
         .filter((r) => r.kind !== "needs_clarification")
-        .map(effectivePayload);
+        .map((r) => withoutCodeFields(effectivePayload(r)));
       if (opts.instruction && before.length) {
-        const after = merged.map((m) => m.payload);
+        const after = merged.map((m) => withoutCodeFields(m.payload));
         yield* q((d) =>
           d.insert(memories).values({
             id: newId(),
@@ -539,17 +612,22 @@ const make = Effect.gen(function* () {
     today: today ?? localDate(),
   });
 
+  /** The thread's first input is the user's own typed words: not pasted, not the chat's (D55). */
+  const typedByUser = (thread: Thread) => thread.item.source === "typed" && !thread.chatAuthored;
+
   /** The first turn: split the input and classify every item with the instruction sent with it. */
   const runFirst = (inboxItemId: string, today: string | undefined, progress: Progress) =>
     Effect.gen(function* () {
       const thread = yield* loadThread(inboxItemId);
       const cleaned = cleanInput(thread.item.rawText) || thread.item.rawText.trim();
       const quotes = yield* segment(cleaned, thread.item.source, progress);
+      const ownInput = typedByUser(thread);
       const jobs = quotes.map((quote, idx) => ({
         idx,
         quote,
         instructions: thread.instructions,
         revising: [],
+        ownInput,
       }));
       const results = yield* classifyAll(
         inboxItemId,
@@ -627,12 +705,19 @@ const make = Effect.gen(function* () {
             return p.kind === "create_issue" && used.has(p.ref);
           });
         const snapshot = thread.current.get(idx)?.snapshot as Partial<ItemSnapshot> | null;
+        // Each item keeps where its input came from: a paste in a typed thread stays
+        // a paste (D55). Older snapshots without the flag fall back to the thread's
+        // source for the first item only.
+        const first = idx === 0 && typedByUser(thread);
         return {
           idx,
           quote: thread.current.get(idx)?.quote ?? "",
           instructions: thread.instructions,
           revising: [...borrowed, ...own],
           askedOn: snapshot?.askedOn ?? snapshot?.today,
+          source: snapshot?.source ?? (idx === 0 ? thread.item.source : "other"),
+          ownInput: snapshot?.ownInput ?? first,
+          questions: thread.questionsByIdx.get(idx) ?? [],
         };
       });
       const results = yield* classifyAll(
@@ -663,7 +748,9 @@ const make = Effect.gen(function* () {
       const { input, instruction } = splitMessage(content.parts, false);
       if (input) {
         // New input joins the thread as new items, instructed by this message only.
-        const source = content.source ?? thread.item.source;
+        // Pasted text is never the user's own words, whatever source it was given.
+        const named = content.source ?? thread.item.source;
+        const source = named === "typed" ? "other" : named;
         const cleaned = cleanInput(input) || input.trim();
         const quotes = yield* segment(cleaned, source, progress);
         const start = Math.max(-1, ...thread.current.keys()) + 1;
@@ -672,6 +759,8 @@ const make = Effect.gen(function* () {
           quote,
           instructions: instruction ? [instruction] : [],
           revising: [],
+          source,
+          ownInput: false,
         }));
         const results = yield* classifyAll(
           inboxItemId,
@@ -712,6 +801,7 @@ const make = Effect.gen(function* () {
           content: {
             parts: partsOf(input.text, input.instruction ?? null, input.source === "typed"),
             source: input.source,
+            ...(input.author ? { author: input.author } : {}),
           },
           createdAt: now,
         }),
@@ -746,6 +836,10 @@ const make = Effect.gen(function* () {
         return yield* new IntakeError({ kind: "empty", message: "Type or paste something first." });
       const thread = yield* loadThread(input.inboxItemId);
       yield* refuseFeatureThread(thread);
+      // Pasted text is never "typed": only the user's own words state points without
+      // a cue (D55 answers), so a paste that would be "typed" is "other".
+      const named = input.source ?? (thread.item.source as Source);
+      const replySource: Source = text && named === "typed" ? "other" : named;
       const now = nowIso();
       const messageId = newId();
       yield* q((d) =>
@@ -756,7 +850,7 @@ const make = Effect.gen(function* () {
           role: "user",
           content: {
             parts: partsOf(text, instruction, false),
-            source: input.source ?? (thread.item.source as Source),
+            source: replySource,
             answers: input.answers ?? null,
           },
           createdAt: now,

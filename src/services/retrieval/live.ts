@@ -7,12 +7,14 @@ import {
   jiraIssues,
   memories,
   people,
+  proposals,
   teams,
 } from "@/db/schema";
 import { nowIso } from "@/lib/ids";
 import {
   type CandidateIssue,
   CLASSIFY_PROMPT_VERSION,
+  ISSUE_KEY_SCAN,
   type ItemSnapshot,
 } from "@/prompts/classify";
 import { takeWithinBudget } from "@/prompts/common";
@@ -26,9 +28,12 @@ import { parseIssueLinks } from "@/services/jira/schemas";
 import { describeCorrection, describeStoredPayload } from "@/services/proposals/schema";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { defaultSmallAskType, smallAskTypes } from "@/services/small-asks/home";
+import { userActiveSprints } from "@/services/sprints/active";
 import { promptSprints } from "@/services/sprints/calendar";
+import { deletedKeys, stillRevoked } from "@/services/sync/deleted";
 import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { BUDGETS, CANDIDATE_LIMIT, Retrieval, type SnapshotRequest } from ".";
+import { pointScale, pointUses } from "./points";
 import {
   mergeCandidates,
   orderPriorities,
@@ -122,14 +127,50 @@ const make = Effect.gen(function* () {
           .all(),
       )).map((r) => r.key);
 
+      // Tickets a revoke deleted, in this thread or any other, are never offered,
+      // whichever source finds them (FR-14.6).
+      const tombstoned = yield* withDb(deletedKeys);
+      const excluded = new Set([...(req.exclude ?? []), ...tombstoned]);
+      // Tickets a revoke closed, while they stay closed: offered only when the
+      // user's words or the thread name them, never found by search, recency,
+      // sender, tracking or as an epic (FR-14.6).
+      const closedByRevoke = new Set(
+        (yield* q((d) =>
+          d
+            .select({
+              key: jiraIssues.key,
+              status: jiraIssues.status,
+              statusCategory: jiraIssues.statusCategory,
+            })
+            .from(jiraIssues)
+            .innerJoin(issueMeta, eq(issueMeta.issueKey, jiraIssues.key))
+            .where(isNotNull(issueMeta.revokedAt))
+            .all(),
+        ))
+          .filter(stillRevoked)
+          .map((r) => r.key),
+      );
+      const sources: [Reason, string[]][] = [
+        ["mentioned", mentioned],
+        ["search", searched],
+        ["sender", senderIssues],
+        ["recent", [...viewed, ...updated]],
+        ["tracked", tracked],
+      ];
+      const found = [...(req.exclude ?? []), ...sources.flatMap(([, keys]) => keys)];
+      /** Deleted tickets this item could reach: validation says why they are no target. */
+      const reached = new Set(found.filter((k) => excluded.has(k)));
+      /** Closed-by-revoke tickets this item could reach but is not offered. */
+      const reachedClosed = new Set(
+        found.filter((k) => closedByRevoke.has(k) && !mentioned.includes(k)),
+      );
       const merged = mergeCandidates(
-        [
-          ["mentioned", mentioned],
-          ["search", searched],
-          ["sender", senderIssues],
-          ["recent", [...viewed, ...updated]],
-          ["tracked", tracked],
-        ],
+        sources.map(([reason, keys]): [Reason, string[]] => [
+          reason,
+          keys.filter(
+            (k) => !excluded.has(k) && (reason === "mentioned" || !closedByRevoke.has(k)),
+          ),
+        ]),
         CANDIDATE_LIMIT,
       );
       const rowsFor = (keys: string[]) =>
@@ -139,11 +180,21 @@ const make = Effect.gen(function* () {
       let rows = yield* rowsFor([...merged.keys()]);
       // Epics of candidates, so the model can file new work under them.
       const epicKeys = [
-        ...new Set(rows.map((r) => r.epicKey).filter((k): k is string => !!k && !merged.has(k))),
+        ...new Set(
+          rows
+            .map((r) => r.epicKey)
+            .filter(
+              (k): k is string =>
+                !!k && !merged.has(k) && !excluded.has(k) && !closedByRevoke.has(k),
+            ),
+        ),
       ];
       for (const k of epicKeys) merged.set(k, ["epic" as Reason]);
       rows = [...rows, ...(yield* rowsFor(epicKeys))];
       const byKey = new Map(rows.map((r) => [r.key, r]));
+      // A ticket the user revoked and the revoke closed says so while it stays closed,
+      // and whether that was in this thread.
+      const revokedHere = new Set(req.revokedHere ?? []);
       const candidates: CandidateIssue[] = takeWithinBudget(
         [...merged]
           .map(([key, reasons]) => ({ row: byKey.get(key), reasons }))
@@ -160,6 +211,7 @@ const make = Effect.gen(function* () {
             assignee: row.assignee,
             priority: row.priority,
             dueDate: row.dueDate,
+            storyPoints: row.storyPoints,
             updated: row.updated,
             reasons,
             // Existing "blocked by" links, so the model does not propose them again (D45).
@@ -168,6 +220,9 @@ const make = Effect.gen(function* () {
             )
               .filter((l) => l.direction === "blockedBy")
               .map((l) => l.key),
+            ...(closedByRevoke.has(row.key)
+              ? { revoked: revokedHere.has(row.key) ? ("here" as const) : ("elsewhere" as const) }
+              : {}),
           })),
         (c) => `${c.key} ${c.summary} ${c.status} ${c.issueType}`,
         BUDGETS.candidates,
@@ -209,6 +264,7 @@ const make = Effect.gen(function* () {
             joinSprint: settings.smallAsks.joinActiveSprint,
             issueTypes: smallAskTypes(homeTypes, homeSubtasks).sort(),
             defaultType: defaultSmallAskType([...homeTypes].sort(), homeSubtasks),
+            defaultPoints: settings.smallAsks.defaultPoints,
           }
         : null;
       const priorities = orderPriorities(
@@ -301,23 +357,26 @@ const make = Effect.gen(function* () {
       // --- open waits update_dependency may pick (D46) ------------------------
       const personTeam = new Map(allPeople.map((p) => [p.id, p.teamId]));
       const waits = pickWaits(
-        (yield* withDb(listDependencies())).map((d) => ({
-          id: d.id,
-          issueKey: d.issueKey,
-          label: d.label,
-          kind: d.kind,
-          externalRef: d.externalRef,
-          status: d.status,
-          ownerPersonId: d.ownerPersonId,
-          ownerTeamId: d.ownerTeamId,
-          owner: d.owner.type === "none" ? null : d.owner.name,
-          ownerPersonTeamId: d.ownerPersonId ? (personTeam.get(d.ownerPersonId) ?? null) : null,
-          ownerAwayUntil: d.ownerAway?.awayUntil ?? null,
-          requestedAt: d.requestedAt,
-          expectedAt: d.expectedAt,
-          nextFollowupAt: d.nextFollowupAt,
-          issueSummary: d.issueSummary,
-        })),
+        (yield* withDb(listDependencies()))
+          // A wait made outside the thread may still point at a deleted ticket.
+          .filter((d) => !excluded.has(d.issueKey))
+          .map((d) => ({
+            id: d.id,
+            issueKey: d.issueKey,
+            label: d.label,
+            kind: d.kind,
+            externalRef: d.externalRef,
+            status: d.status,
+            ownerPersonId: d.ownerPersonId,
+            ownerTeamId: d.ownerTeamId,
+            owner: d.owner.type === "none" ? null : d.owner.name,
+            ownerPersonTeamId: d.ownerPersonId ? (personTeam.get(d.ownerPersonId) ?? null) : null,
+            ownerAwayUntil: d.ownerAway?.awayUntil ?? null,
+            requestedAt: d.requestedAt,
+            expectedAt: d.expectedAt,
+            nextFollowupAt: d.nextFollowupAt,
+            issueSummary: d.issueSummary,
+          })),
         {
           senderPersonId: sender?.id ?? null,
           senderTeamId: sender?.teamId ?? null,
@@ -330,8 +389,22 @@ const make = Effect.gen(function* () {
       );
 
       // --- memories and correction examples (D26) ---------------------------
-      const memoryRows = yield* q((d) =>
+      // A correction from a thread whose created ticket was then revoked is not
+      // learning material: it corrected a mistake the user undid (FR-14.6).
+      const revokedThreads = new Set(
+        (yield* q((d) =>
+          d
+            .selectDistinct({ id: proposals.inboxItemId })
+            .from(proposals)
+            .where(and(eq(proposals.kind, "create_issue"), eq(proposals.status, "revoked")))
+            .all(),
+        )).map((r) => r.id),
+      );
+      const memoryRows = (yield* q((d) =>
         d.select().from(memories).where(eq(memories.confirmed, true)).all(),
+      )).filter(
+        (m) =>
+          m.kind !== "example" || !m.sourceInboxItemId || !revokedThreads.has(m.sourceInboxItemId),
       );
       const about = new Set([
         ...candidates.map((c) => `issue:${c.key}`),
@@ -369,6 +442,15 @@ const make = Effect.gen(function* () {
         proposed: describeStoredPayload(m.exampleBefore),
         corrected: m.exampleAfter ? describeCorrection(m.exampleBefore, m.exampleAfter) : null,
       }));
+      // A deleted ticket a past example or rule names: validation says why it is no target.
+      for (const text of [
+        ...rules.map((m) => m.content),
+        ...examples.flatMap((x) => [x.input, x.proposed, x.corrected ?? ""]),
+      ])
+        for (const k of text.match(ISSUE_KEY_SCAN) ?? []) {
+          if (excluded.has(k)) reached.add(k);
+          else if (closedByRevoke.has(k) && !mentioned.includes(k)) reachedClosed.add(k);
+        }
       const used = [...pickedRules, ...pickedExamples].map((m) => m.id);
       if (used.length)
         yield* q((d) =>
@@ -429,6 +511,31 @@ const make = Effect.gen(function* () {
         projects: [...projects.keys()],
       });
 
+      // --- the user's active sprints (D57): code's default for joinSprint, not shown to the model ---
+      const mine = me
+        ? yield* q((d) =>
+            d
+              .select({
+                assignee: jiraIssues.assignee,
+                sprint: jiraIssues.sprint,
+                statusCategory: jiraIssues.statusCategory,
+              })
+              .from(jiraIssues)
+              .where(and(eq(jiraIssues.assignee, me), eq(jiraIssues.stale, false)))
+              .all(),
+          )
+        : [];
+      const userSprints = userActiveSprints(sprintState.sprints, mine, me ?? null).map((s) => ({
+        name: s.name,
+        end: s.end,
+        projects: s.boardId === null ? [] : (sprintState.boardProjects[String(s.boardId)] ?? []),
+      }));
+
+      // --- story point scale (D55): the candidates' projects and the home first ---
+      const pointScaleValues = pointScale(yield* withDb(pointUses), [
+        ...new Set([...candidates.map((c) => c.projectKey), ...(homeKey ? [homeKey] : [])]),
+      ]);
+
       return {
         promptVersion: CLASSIFY_PROMPT_VERSION,
         today: req.today,
@@ -447,7 +554,7 @@ const make = Effect.gen(function* () {
         quote: req.quote,
         thread: req.thread ?? null,
         references: {
-          issueKeys: req.references.issueKeys,
+          issueKeys: req.references.issueKeys.filter((k) => !excluded.has(k)),
           tickets: req.references.tickets,
           urls: req.references.urls,
           contactIds: req.references.contactIds,
@@ -482,9 +589,13 @@ const make = Effect.gen(function* () {
         examples,
         notes,
         sprints,
+        userSprints,
+        pointScale: pointScaleValues,
         smallAsks,
         blockLinkType:
           parseLinkTypes(yield* withDb(getState(SYNC_KEYS.linkTypes))).blocks?.name ?? null,
+        ...(reached.size ? { deleted: [...reached].sort() } : {}),
+        ...(reachedClosed.size ? { revokedClosed: [...reachedClosed].sort() } : {}),
       } satisfies ItemSnapshot;
     });
 

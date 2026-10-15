@@ -216,6 +216,98 @@ describe("Intake threads (D22)", () => {
     });
   });
 
+  test("a paste in a typed thread is not typed, so its numbers need a points cue (D55)", async () => {
+    const { layer } = intakeTestLayer({
+      "std-m": [out(answer([transition])), out(answer([transition], "PAY-2"))],
+    });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const intake = yield* Intake;
+          const first = yield* intake.triage({
+            text,
+            source: "typed",
+            senderPersonId: null,
+            today: TODAY,
+          });
+          yield* intake.reply({
+            inboxItemId: first.inboxItemId,
+            text: "Ana: make PAY-2 a 5",
+            today: TODAY,
+          });
+          return yield* readThread(first.inboxItemId);
+        }),
+        layer,
+      ),
+    );
+    expect(r.messages[2]?.content).toMatchObject({ source: "other" });
+    const snapshots = r.items
+      .sort((a, b) => a.idx - b.idx)
+      .map((i) => (i.snapshot as { source: string }).source);
+    expect(snapshots).toEqual(["typed", "other"]);
+  });
+
+  test("a revision keeps each item's source: a paste in a typed thread stays a paste (D55)", async () => {
+    const points = {
+      kind: "update_issue",
+      target: "PAY-2",
+      storyPoints: "8",
+      pointsSource: "stated",
+      ...e,
+    };
+    const { layer, models } = intakeTestLayer({
+      "std-m": [
+        out(answer([transition])),
+        out(answer([transition], "PAY-2")),
+        // Re-triage revises both items; the paste's un-cued 8 goes to repair.
+        out(answer([transition])),
+        out(answer([points], "PAY-2")),
+        out(answer([transition], "PAY-2")),
+      ],
+    });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const intake = yield* Intake;
+          const first = yield* intake.triage({
+            text,
+            source: "typed",
+            senderPersonId: null,
+            today: TODAY,
+          });
+          yield* intake.reply({
+            inboxItemId: first.inboxItemId,
+            text: "Ana: PAY-2 needs 8 more days of work.",
+            source: "teams",
+            today: TODAY,
+          });
+          yield* intake.retriage(first.inboxItemId);
+          return yield* readThread(first.inboxItemId);
+        }),
+        layer,
+      ),
+    );
+    const revised = [...r.items]
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .slice(-2)
+      .sort((a, b) => a.idx - b.idx)
+      .map((i) => {
+        const s = i.snapshot as { source: string; ownInput?: boolean };
+        return [i.idx, s.source, s.ownInput];
+      });
+    expect(revised).toEqual([
+      [0, "typed", true],
+      [1, "teams", false],
+    ]);
+    expect(models.calls).toHaveLength(5);
+    expect(promptOf(models.calls, 4)).toContain("storyPoints 8 is not given as story points");
+    expect(r.props.filter((p) => p.status === "pending").map((p) => p.kind)).not.toContain(
+      "update_issue",
+    );
+  });
+
   test("a later paste that says 'it' sees the thread's earlier items and their tickets", async () => {
     const cancel = { kind: "transition_issue", target: "PAY-2", toStatus: "Done", ...e };
     const why = {

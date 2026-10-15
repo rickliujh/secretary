@@ -98,6 +98,10 @@ describe("proposal payloads", () => {
     expect(payloadChanges(before, { ...before, ref: "$new:2", assignee: "ana.b" })).toEqual([
       "assignee: (none) -> ana.b",
     ]);
+    // The sprint switch is code's field: never a correction (D57).
+    expect(payloadChanges(before, { ...before, joinSprint: true, joinSprintChosen: true })).toEqual(
+      [],
+    );
     const update = UpdateIssue.parse({
       kind: "update_issue",
       target: "PAY-4",
@@ -152,6 +156,45 @@ describe("move_to_sprint (D30)", () => {
   });
 });
 
+describe("story points (D55)", () => {
+  const create = {
+    kind: "create_issue" as const,
+    ref: "$new:1",
+    projectKey: "PAY",
+    issueType: "Story",
+    summary: "Export credit notes",
+  };
+
+  test("describePayload shows the points, marked while suggested", () => {
+    const p = (extra: object) => ProposalPayloadSchema.parse({ ...create, ...extra });
+    expect(describePayload(p({}))).toBe("Create Story in PAY: Export credit notes");
+    expect(describePayload(p({ storyPoints: 3 }))).toBe(
+      "Create Story in PAY: Export credit notes, 3 points",
+    );
+    expect(describePayload(p({ storyPoints: 5, storyPointsEstimated: true }))).toBe(
+      "Create Story in PAY: Export credit notes, 5 points (suggested)",
+    );
+    expect(describePayload(p({ storyPoints: 1 }))).toBe(
+      "Create Story in PAY: Export credit notes, 1 point",
+    );
+    const update = (changes: object) =>
+      describePayload(
+        ProposalPayloadSchema.parse({ kind: "update_issue", target: "PAY-12", changes }),
+      );
+    expect(update({ storyPoints: 5 })).toBe("Update PAY-12: 5 points");
+    expect(update({ summary: "x", storyPoints: null })).toBe(
+      "Update PAY-12: summary, clear story points",
+    );
+  });
+
+  test("points are a number from 0 to 1000; a stored create without them reads as none", () => {
+    expect(ProposalPayloadSchema.safeParse({ ...create, storyPoints: -1 }).success).toBe(false);
+    expect(ProposalPayloadSchema.safeParse({ ...create, storyPoints: 1001 }).success).toBe(false);
+    expect(ProposalPayloadSchema.safeParse({ ...create, storyPoints: "3" }).success).toBe(false);
+    expect(parsePayload(create)).toMatchObject({ storyPoints: null, storyPointsEstimated: false });
+  });
+});
+
 describe("parsePayload", () => {
   test("a create_issue stored before small asks gets the new fields' defaults (D44)", () => {
     const stored = {
@@ -173,6 +216,10 @@ describe("parsePayload", () => {
       smallAsk: false,
       requesterPersonId: null,
       joinSprint: false,
+      joinSprintChosen: false,
+      storyPoints: null,
+      storyPointsEstimated: false,
+      storyPointsCleared: false,
     });
     expect(effectivePayload({ payload: stored, editedPayload: null })).toMatchObject({
       labels: [],

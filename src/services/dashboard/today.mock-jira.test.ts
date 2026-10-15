@@ -56,6 +56,7 @@ function setup(count: number, asks: number, wrap: (f: FetchFn) => FetchFn = (f) 
             label: "small-ask",
             joinActiveSprint: true,
             hintDismissed: false,
+            defaultPoints: null,
           },
         },
       ),

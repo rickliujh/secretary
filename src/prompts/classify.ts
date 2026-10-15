@@ -19,15 +19,29 @@ import {
   NEW_REF_RE,
   type ProposalPayload,
   ProposalPayloadSchema,
+  pointsLabel,
   WAIT_ACTIONS,
 } from "@/services/proposals/schema";
 import type { Reason } from "@/services/retrieval/ranking";
 import { sameWaitSubject } from "@/services/retrieval/waits";
 import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small-asks/home";
 import type { PromptSprint } from "@/services/sprints/calendar";
+import { commentAudienceProblem } from "./comment-audience";
 import { HARD_RULES, untrusted } from "./common";
+import {
+  aboutPoints,
+  createPoints,
+  keptPoints,
+  ownStatedNumbers,
+  parsePoints,
+  pointSources,
+  pointsKey,
+  pointsProblems,
+  statedNumbers,
+  withoutInlineValues,
+} from "./points";
 
-export const CLASSIFY_PROMPT_VERSION = 10;
+export const CLASSIFY_PROMPT_VERSION = 12;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -48,6 +62,14 @@ export type CandidateIssue = {
   reasons: Reason[];
   /** Issues it is already blocked by in Jira, whatever their status (prompt version 8, D45). */
   blockedBy?: string[];
+  /** Its story points as cached (prompt version 12, D55); null when unestimated. */
+  storyPoints?: number | null;
+  /**
+   * Created by mistake and revoked by the user, who could not delete it, so the
+   * revoke closed it, in this thread or another (prompt version 11, FR-14.6); set
+   * while it stays closed. Such a ticket is a candidate only when named.
+   */
+  revoked?: "here" | "elsewhere";
 };
 
 /** Why retrieval offered an open dependency (D46). */
@@ -78,6 +100,25 @@ export type WaitCandidate = {
   reasons: WaitReason[];
 };
 
+/** A proposal of the thread that is no longer open (D22). */
+export type DecidedProposal = {
+  /**
+   * done: approved; rejected: by the user. From prompt version 11 (FR-14.6):
+   * revoked: approved and then undone by the user; dropped: closed without the
+   * user deciding it, for `reason`.
+   */
+  outcome: "done" | "rejected" | "revoked" | "dropped";
+  description: string;
+  /** revoked: what the revoke did, such as the ticket deleted or closed. */
+  undone?: string;
+  /** revoked: nothing was changed back (already as it was, or refused); `undone` says why. */
+  unchanged?: boolean;
+  /** revoked: what was left as it is (changed since, or refused). */
+  kept?: string;
+  /** dropped: why, such as the ticket it acts on was revoked. */
+  reason?: string;
+};
+
 /**
  * A thread's context for one item (design.md D22). Only `instructions` is the
  * user's own words; `decided` and `pending` were derived from the input, so the
@@ -87,7 +128,7 @@ export type ThreadContext = {
   /** The user's typed instructions in this thread, oldest first. */
   instructions: string[];
   /** Proposals already decided in this thread, not to be proposed again. */
-  decided: { outcome: "done" | "rejected"; description: string }[];
+  decided: DecidedProposal[];
   /** This item's undecided proposals in the output shape; empty for a new item. */
   pending: Record<string, unknown>[];
   /**
@@ -95,6 +136,17 @@ export type ThreadContext = {
    * "that ticket" can be resolved (prompt version 6). Context only; untrusted.
    */
   others?: { summary: string | null; quote: string }[];
+  /**
+   * The questions the model asked about this item in the thread, oldest first,
+   * answered or not (D55 answers). Data for the checks only: a question about
+   * points or an estimate makes the user's numbers points.
+   */
+  questions?: string[];
+  /**
+   * The sprint switch the user set on a pending create, by its `$new` ref in
+   * `pending` (D57), so a revision keeps it. Never shown to the model.
+   */
+  sprintChoices?: Record<string, boolean>;
 };
 
 /**
@@ -108,6 +160,8 @@ export type SmallAskHomeSnapshot = {
   /** Types a small ask may take in the home; empty when Jira's metadata is not synced yet. */
   issueTypes: string[];
   defaultType: string | null;
+  /** Points a small ask gets when the input states none (D55); null or absent: none. */
+  defaultPoints?: number | null;
 };
 
 /** Everything the model sees for one item, stored on the item for replay. */
@@ -121,6 +175,18 @@ export type ItemSnapshot = {
   blockLinkType?: string | null;
   /** Sprint calendar around today (D23); absent in snapshots before prompt version 5. */
   sprints?: PromptSprint[];
+  /**
+   * The story point values the synced tickets use, ascending (prompt version 12,
+   * D55); empty when none has points. Absent in older snapshots, which have no
+   * points fields, so they replay as they ran.
+   */
+  pointScale?: number[];
+  /**
+   * The user's active sprints, most of their open work first, each with the
+   * projects its board shows (D57): code's default for a create's `joinSprint`.
+   * Never shown to the model; absent in older snapshots, where creates do not join.
+   */
+  userSprints?: { name: string; end: string | null; projects: string[] }[];
   promptVersion: number;
   today: string;
   /** The day the item's input arrived; a revision keeps it for "Asked ... on" (D44). */
@@ -130,6 +196,11 @@ export type ItemSnapshot = {
   source: string;
   sender: { id: string; displayName: string; title: string | null; team: string | null } | null;
   quote: string;
+  /**
+   * The input is the user's own words: they typed it (source typed), and the chat
+   * did not write it for them (D55 answers). Absent in older snapshots: untrusted.
+   */
+  ownInput?: boolean;
   /**
    * The user's answer to an earlier question (trusted). Only in snapshots made
    * before threads (prompt version < 4); kept so they replay as they ran.
@@ -169,6 +240,17 @@ export type ItemSnapshot = {
   memories: { kind: string; content: string }[];
   examples: { input: string; proposed: string; corrected: string | null }[];
   notes: { about: string; title: string; excerpt: string }[];
+  /**
+   * Tickets a revoke deleted that this item could otherwise reach (named, found
+   * by retrieval, or in a past example), so validation can say why they are no
+   * target (prompt version 11, FR-14.6). Never shown to the model.
+   */
+  deleted?: string[];
+  /**
+   * Tickets a revoke closed that this item reached (search, a past example) but
+   * does not offer; validation rejects text that names them (prompt version 11).
+   */
+  revokedClosed?: string[];
 };
 
 const enumOf = (values: readonly string[]) => z.enum(values as [string, ...string[]]);
@@ -226,6 +308,7 @@ const FIELD_KINDS: Record<string, readonly string[]> = {
   expectedAt: ["link_dependency", "update_dependency"],
   nextFollowupAt: ["update_dependency"],
   assignee: ["create_issue", "update_issue"],
+  storyPoints: ["create_issue", "update_issue"],
 };
 
 /** Fields checked as issue references: a candidate key or a ref created in this answer. */
@@ -290,6 +373,19 @@ export function buildItemSchema(s: ItemSnapshot) {
         ),
       }
     : {};
+  // From prompt version 12 (D55); older snapshots replay without them. Text, not a
+  // number: the portable schema (D21) cannot leave a number empty.
+  const scale = s.pointScale;
+  const pointsFields = scale
+    ? {
+        storyPoints: nullableText(
+          `Story points as a number, e.g. 3: as the input states them or the user's own words give them, or for a new ticket a value from the story point scale. ${uses("create_issue", "update_issue")}`,
+        ),
+        pointsSource: nullableEnum(pointSources(scale)).describe(
+          `stated: the input gives this number as the ticket's story points, or the user's own words give it (input they typed, their instructions and answers; an answer "1" to your question about points is stated); estimated: your suggestion for a new ticket. ${uses("create_issue", "update_issue")}`,
+        ),
+      }
+    : {};
   // Only when the instance has a "blocks" link type (D45).
   const linkFields = offered("link_issues")
     ? {
@@ -325,9 +421,12 @@ export function buildItemSchema(s: ItemSnapshot) {
       `Jira user id from the list. ${uses("create_issue", "update_issue")}`,
     ),
     dueDate: nullableText(`YYYY-MM-DD. ${uses("create_issue", "update_issue")}`),
+    ...pointsFields,
     ...smallAskFields,
     // add_comment
-    body: nullableText(`Comment text in Markdown. ${uses("add_comment")}`),
+    body: nullableText(
+      `Comment text in Markdown${s.promptVersion >= 12 ? ", for the people who read the ticket; never a reply to the user" : ""}. ${uses("add_comment")}`,
+    ),
     // transition_issue
     toStatus: (statuses.length > 0 ? nullableEnum(statuses) : nullableText()).describe(
       uses("transition_issue"),
@@ -427,6 +526,10 @@ function isSubtaskIn(s: ItemSnapshot, type: string): boolean {
   return isSubtaskType(type);
 }
 
+/** A sub-task type, by Jira's flag when the snapshot has it, else by name. */
+const isSubtaskOf = (s: ItemSnapshot | undefined, type: unknown) =>
+  typeof type === "string" && (s ? isSubtaskIn(s, type) : isSubtaskType(type));
+
 /** A create_issue the model marked as a small ask, with a home configured (D44). */
 const isSmallAsk = (p: Record<string, unknown>, s?: ItemSnapshot) =>
   p.kind === "create_issue" && !!s?.smallAsks && p.smallAsk === "yes";
@@ -470,9 +573,97 @@ function smallAskPayload(p: ItemOutput["proposals"][number], s: ItemSnapshot): P
     labels: [home.label],
     smallAsk: true,
     requesterPersonId: requester?.id ?? null,
-    // Sub-tasks follow their parent's sprint.
-    joinSprint: home.joinSprint && !subtask,
+    // Sub-tasks follow their parent's sprint; the user's choice survives a revision (D57).
+    ...sprintChoice(p, s, { never: subtask, byDefault: home.joinSprint }),
+    // Without stated points, the default from Settings when one is set (D55).
+    ...createPoints(p.storyPoints, p.pointsSource, {
+      epic: false,
+      smallAsk: true,
+      defaultPoints: home.defaultPoints,
+      cleared: keptFor(p, s)?.cleared,
+    }),
   });
+}
+
+/**
+ * The sprint a create of `projectKey` would join (D57), from the snapshot: the
+ * user's active sprints in order, a board that shows the project first, the
+ * same pick the Executor makes at approval.
+ */
+function snapshotSprint(s: ItemSnapshot, projectKey: unknown) {
+  const list = s.userSprints ?? [];
+  return (
+    list.find((x) => typeof projectKey === "string" && x.projects.includes(projectKey)) ??
+    list[0] ??
+    null
+  );
+}
+
+/**
+ * A create's `joinSprint` (D57): never for an Epic or a sub-task; the value the
+ * user chose on the pending create this one revises; else `byDefault`.
+ */
+function sprintChoice(
+  p: Record<string, unknown>,
+  s: ItemSnapshot | undefined,
+  opts: { never: boolean; byDefault: boolean },
+): { joinSprint: boolean; joinSprintChosen: boolean } {
+  const chosen = typeof p.ref === "string" ? s?.thread?.sprintChoices?.[p.ref] : undefined;
+  if (opts.never) return { joinSprint: false, joinSprintChosen: chosen !== undefined };
+  if (chosen !== undefined) return { joinSprint: chosen, joinSprintChosen: true };
+  return { joinSprint: opts.byDefault, joinSprintChosen: false };
+}
+
+/** Joins by default when due on or before the end of the sprint it would join (D57). */
+function dueInSprint(p: Record<string, unknown>, s: ItemSnapshot | undefined): boolean {
+  const due = str(p.dueDate);
+  const end = s ? snapshotSprint(s, p.projectKey)?.end : null;
+  return !!due && !!end && due <= end.slice(0, 10);
+}
+
+/** An Epic by type name; it never gets story points (D55). */
+const isEpicType = (type: unknown) => typeof type === "string" && /^epic$/i.test(type.trim());
+
+/** The points of the pending proposal this one revises, in a revision (D55). */
+const keptFor = (p: Record<string, unknown>, s: ItemSnapshot | undefined) => {
+  const key = pointsKey(p);
+  return key ? keptPoints(s?.thread?.pending).get(key) : undefined;
+};
+
+const UPDATE_FIELDS = ["summary", "priority", "dueDate", "assignee", "storyPoints"] as const;
+type UpdateField = (typeof UPDATE_FIELDS)[number];
+
+/**
+ * An update_issue's changes (D55): `given` is what the model set; `changes`
+ * leaves out the fields the ticket already has as cached (`same`), since writing
+ * them changes nothing (eval, 2026-10-15). Only stated points change an existing
+ * ticket; a clear the user chose stays.
+ */
+function updateChanges(p: Record<string, unknown>, s: ItemSnapshot | undefined) {
+  const points = p.pointsSource === "stated" ? parsePoints(p.storyPoints) : null;
+  const cleared = typeof points !== "number" && !!keptFor(p, s)?.cleared;
+  const given: Partial<Record<UpdateField, string | number | null>> = {
+    ...defined({
+      summary: str(p.summary),
+      priority: str(p.priority),
+      dueDate: str(p.dueDate),
+      assignee: str(p.assignee),
+      storyPoints: points,
+    }),
+    ...(cleared ? { storyPoints: null } : {}),
+  };
+  const ticket = s?.candidates.find((c) => c.key === p.target);
+  // Undefined: not known (an older snapshot), so nothing counts as the same. A
+  // clear is kept: the user chose it.
+  const same = ticket
+    ? UPDATE_FIELDS.filter(
+        (f) => given[f] != null && ticket[f] !== undefined && given[f] === ticket[f],
+      )
+    : [];
+  const changes = Object.fromEntries(
+    Object.entries(given).filter(([f]) => !(same as string[]).includes(f)),
+  );
+  return { given, changes, same, ticket };
 }
 
 /** The timeline channel of a reply, from the input's source (D46). */
@@ -499,17 +690,21 @@ function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): Propos
         priority: str(g("priority")),
         assignee: str(g("assignee")),
         dueDate: str(g("dueDate")),
+        ...sprintChoice(p, s, {
+          never: isEpicType(g("issueType")) || isSubtaskOf(s, g("issueType")),
+          byDefault: dueInSprint(p, s),
+        }),
+        ...createPoints(g("storyPoints"), g("pointsSource"), {
+          epic: isEpicType(g("issueType")),
+          smallAsk: false,
+          cleared: keptFor(p, s)?.cleared,
+        }),
       });
     case "update_issue":
       return ProposalPayloadSchema.parse({
         kind: "update_issue",
         target: g("target"),
-        changes: defined({
-          summary: str(g("summary")),
-          priority: str(g("priority")),
-          dueDate: str(g("dueDate")),
-          assignee: str(g("assignee")),
-        }),
+        changes: updateChanges(p, s).changes,
       });
     case "add_comment":
       return ProposalPayloadSchema.parse({
@@ -726,6 +921,56 @@ function coveringWait(p: ItemOutput["proposals"][number], s: ItemSnapshot) {
   );
 }
 
+/** Issue keys inside free text. */
+export const ISSUE_KEY_SCAN = /\b[A-Z][A-Z0-9_]+-\d+\b/g;
+
+/** Why text may not name a ticket the user revoked (FR-14.6). */
+export const revokedMentionError = (at: string, key: string, state: "deleted" | "closed") =>
+  `${at} names ${key}, a ticket the user revoked (${state === "deleted" ? "it was deleted" : "it was closed"}). Do not mention it unless the user names it.`;
+
+/**
+ * Tickets a revoke deleted or closed named in the answer's text (question,
+ * summary, every free-text field of a proposal) that the user's own words do not
+ * name: the input or the user's instructions, except that for a ticket revoked in
+ * this thread only the instructions count. A proposal acting on the ticket may
+ * name it; whether it may act on it is checked by kind.
+ */
+function revokedMentions(out: ItemOutput, s: ItemSnapshot): string[] {
+  const revoked = new Map<string, { state: "deleted" | "closed"; here: boolean }>();
+  for (const k of s.revokedClosed ?? []) revoked.set(k, { state: "closed", here: false });
+  for (const c of s.candidates)
+    if (c.revoked) revoked.set(c.key, { state: "closed", here: c.revoked === "here" });
+  for (const k of s.deleted ?? []) revoked.set(k, { state: "deleted", here: false });
+  if (revoked.size === 0) return [];
+  const instructions = (s.thread?.instructions ?? []).join("\n");
+  const named = (key: string, here: boolean) =>
+    instructions.includes(key) || (!here && s.quote.includes(key));
+  const errors: string[] = [];
+  const scan = (at: string, text: unknown, own: ReadonlySet<string> = new Set()) => {
+    if (typeof text !== "string") return;
+    for (const key of new Set(text.match(ISSUE_KEY_SCAN) ?? [])) {
+      const r = revoked.get(key);
+      if (r && !own.has(key) && !named(key, r.here))
+        errors.push(revokedMentionError(at, key, r.state));
+    }
+  };
+  scan("The question", out.question);
+  scan("The summary", out.summary);
+  out.proposals.forEach((p, i) => {
+    const own = new Set(
+      REF_FIELDS.map((f) => p[f]).filter((v): v is string => typeof v === "string"),
+    );
+    for (const [field, value] of Object.entries(p))
+      if (!(REF_FIELDS as readonly string[]).includes(field))
+        scan(`Proposal ${i + 1} (${p.kind}) ${field}`, value, own);
+  });
+  return errors;
+}
+
+/** Why a proposal may not act on a ticket a revoke deleted (FR-14.6). */
+export const deletedTicketError = (at: string, field: string, key: string) =>
+  `${at}: ${field} ${key} was deleted when the user revoked it, so it no longer exists. Do not target, comment on or link to it.`;
+
 /**
  * Business-rule checks the schema cannot express (design.md 7.0 rule 4).
  * Returns error strings for the repair prompt; empty means valid.
@@ -733,6 +978,7 @@ function coveringWait(p: ItemOutput["proposals"][number], s: ItemSnapshot) {
 export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   const errors: string[] = [];
   const candidates = new Map(s.candidates.map((c) => [c.key, c]));
+  const deleted = new Set(s.deleted ?? []);
   const created = new Map<string, ItemOutput["proposals"][number]>();
   for (const p of out.proposals)
     if (p.kind === "create_issue" && typeof p.ref === "string") {
@@ -744,6 +990,27 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   const knownUsers = new Set(s.jiraUsers.map((u) => u.username));
   const isEpic = (ref: string) =>
     candidates.get(ref)?.issueType === "Epic" || created.get(ref)?.issueType === "Epic";
+  // Story points (D55): numbers the input gives next to a points cue (pasted text
+  // and the chat's words are untrusted); numbers the user's own words give (input
+  // they typed, instructions, answers), cue or not while points are the topic,
+  // «…» values (D56) excepted; and what each pending proposal carries (the user's
+  // edits, a default, a clear). Only the newest instruction or answer ends a clear:
+  // the typed input and older messages stay the same across turns.
+  const words = [...(s.thread?.instructions ?? []), ...(s.clarification ? [s.clarification] : [])];
+  const typed = s.ownInput ? [s.quote] : [];
+  const topic = [...typed, ...words, ...(s.thread?.questions ?? [])].some(aboutPoints);
+  const instructed = ownStatedNumbers(words.slice(-1), topic);
+  const stated = new Set([
+    ...statedNumbers([s.quote]),
+    ...ownStatedNumbers([...typed, ...words], topic),
+  ]);
+  // What the user wrote themselves: a comment may repeat their phrases.
+  const ownWords = [...typed, ...words].map(withoutInlineValues);
+  const kept = keptPoints(s.thread?.pending);
+  const keptOf = (p: Record<string, unknown>) => {
+    const key = pointsKey(p);
+    return key ? kept.get(key) : undefined;
+  };
 
   out.proposals.forEach((p, i) => {
     const at = `Proposal ${i + 1} (${p.kind})`;
@@ -764,7 +1031,9 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       const v = p[field];
       if (typeof v === "string" && NEW_REF_RE.test(v) && !created.has(v))
         errors.push(`${at}: ${field} ${v} is not created by any create_issue in this answer.`);
-      if (typeof v === "string" && !NEW_REF_RE.test(v) && !candidates.has(v))
+      if (typeof v === "string" && !NEW_REF_RE.test(v) && deleted.has(v))
+        errors.push(deletedTicketError(at, field, v));
+      else if (typeof v === "string" && !NEW_REF_RE.test(v) && !candidates.has(v))
         errors.push(`${at}: ${field} ${v} is not one of the candidate issues.`);
     }
     for (const field of ["dueDate", "expectedAt", "nextFollowupAt"].filter(used)) {
@@ -823,16 +1092,47 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       !/^[A-Z]{2,6}\d{7,}$/.test(String(p.externalRef ?? ""))
     )
       errors.push(`${at}: an incident dependency needs externalRef like INC0012345.`);
-    if (
-      p.kind === "update_issue" &&
-      ["summary", "priority", "dueDate", "assignee"].every(
-        (k) => p[k] === null || p[k] === undefined,
-      )
-    )
+    // Fields the ticket already has are dropped; an update left with nothing is
+    // left out, not asked about (eval, 2026-10-15).
+    const update = p.kind === "update_issue" ? updateChanges(p, s) : null;
+    const noChange = !!update && Object.keys(update.changes).length === 0;
+    if (update && noChange && !update.same.length)
       errors.push(`${at}: update_issue must change at least one field.`);
+    if (update && noChange && update.same.length)
+      errors.push(
+        `${at}: ${p.target} already has ${update.same
+          .map((f) => `${f} ${JSON.stringify(update.ticket?.[f])}`)
+          .join(
+            ", ",
+          )}, so this update changes nothing. Leave it out, and do not ask the user to confirm a value the ticket already has. When nothing else is left to do, return no proposals and say in question that ${p.target} already has it.`,
+      );
+    // The small-ask default replaces an estimate, so a wrong one needs no repair.
+    const replaced =
+      small && typeof s.smallAsks?.defaultPoints === "number" && p.pointsSource !== "stated";
+    if (s.pointScale && !replaced && (p.kind === "create_issue" || p.kind === "update_issue")) {
+      const candidate = p.kind === "update_issue" ? candidates.get(String(p.target)) : undefined;
+      for (const problem of pointsProblems({
+        kind: p.kind,
+        storyPoints: p.storyPoints,
+        pointsSource: p.pointsSource,
+        epic:
+          p.kind === "create_issue"
+            ? !small && isEpicType(p.issueType)
+            : isEpicType(candidate?.issueType),
+        current: candidate?.storyPoints,
+        scale: s.pointScale,
+        stated,
+        instructed,
+        kept: keptOf(p),
+      }))
+        errors.push(`${at}: ${problem}`);
+    }
     if (p.kind === "draft_message" && !p.recipientPersonId && !p.recipientTeamId)
       errors.push(`${at}: draft_message needs a recipient person or team.`);
     if (p.kind === "add_comment" && !str(p.body)) errors.push(`${at}: comment body is empty.`);
+    // A comment is for the ticket's readers, never a reply to the user.
+    const toUser = p.kind === "add_comment" ? commentAudienceProblem(p.body, ownWords) : null;
+    if (toUser) errors.push(`${at}: ${toUser}`);
     if (p.kind === "link_issues") errors.push(...validateLink(p, i, out, s, at));
     if (p.kind === "update_dependency") errors.push(...validateWaitUpdate(p, i, out, s, at));
     if (p.kind === "link_dependency") {
@@ -846,19 +1146,31 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       const problem = awayDateProblem(String(str(p.awayUntil)), s.today);
       if (problem) errors.push(`${at}: awayUntil ${problem}.`);
     }
-    // A structurally valid proposal must also map cleanly to a payload.
-    try {
-      toPayload(p, s);
-    } catch (e) {
-      errors.push(
-        `${at}: ${e instanceof z.ZodError ? e.issues.map((x) => `${x.path.join(".")}: ${x.message}`).join("; ") : String(e)}`,
-      );
-    }
+    // A structurally valid proposal must also map cleanly to a payload; an empty
+    // update is reported above.
+    if (!noChange)
+      try {
+        toPayload(p, s);
+      } catch (e) {
+        errors.push(
+          `${at}: ${e instanceof z.ZodError ? e.issues.map((x) => `${x.path.join(".")}: ${x.message}`).join("; ") : String(e)}`,
+        );
+      }
   });
+  errors.push(...revokedMentions(out, s));
   if (out.proposals.length === 0 && !out.question?.trim())
     errors.push("Return at least one proposal, or a question if you are unsure.");
   return errors;
 }
+
+/** Story points in the output shape (D55); left out when there are none. */
+const pointsShape = (points: number | null | undefined, estimated: boolean, cleared: boolean) =>
+  typeof points === "number"
+    ? { storyPoints: String(points), pointsSource: estimated ? "estimated" : "stated" }
+    : // Data for the model and for mapping the revision back: the user cleared them.
+      cleared
+      ? { pointsCleared: true }
+      : {};
 
 /**
  * A stored payload in the model's flat output shape, so a revision can return it
@@ -886,6 +1198,8 @@ export function fromPayload(
         // Code assigns a small ask; the user may not be in this item's list of Jira users.
         assignee: p.smallAsk ? null : p.assignee,
         dueDate: p.dueDate,
+        // Points the user set (or a small-ask default) return as stated (D55).
+        ...pointsShape(p.storyPoints, p.storyPointsEstimated, p.storyPointsCleared),
         ...(p.smallAsk ? { smallAsk: "yes", requesterPersonId: p.requesterPersonId } : {}),
       };
     case "update_issue":
@@ -896,6 +1210,7 @@ export function fromPayload(
         priority: p.changes.priority ?? null,
         dueDate: p.changes.dueDate ?? null,
         assignee: p.changes.assignee ?? null,
+        ...pointsShape(p.changes.storyPoints, false, p.changes.storyPoints === null),
       };
     case "add_comment":
       return { kind: p.kind, target: r(p.target), body: p.bodyMd };
@@ -984,6 +1299,28 @@ export function mapItemOutput(out: ItemOutput, quote = "", s?: ItemSnapshot): Ma
 
 const line = (parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(" | ");
 
+const noStop = (x: string) => x.trim().replace(/\.$/, "");
+
+/** One line of "Already decided"; done and rejected read as before prompt version 11. */
+function decidedLine(d: DecidedProposal): string {
+  switch (d.outcome) {
+    case "done":
+      return `- Approved: ${d.description}`;
+    case "rejected":
+      return `- Rejected by the user: ${d.description}`;
+    case "revoked": {
+      const what = noStop(d.undone || "the action was reversed");
+      return `- Approved, then revoked by the user: ${d.description}. ${
+        d.unchanged ? `Revoked; nothing was changed: ${what}.` : `Undone: ${what}.`
+      }${d.kept ? ` Left as it is: ${noStop(d.kept)}.` : ""}`;
+    }
+    case "dropped": {
+      const why = noStop(d.reason || "it could no longer run");
+      return `- Dropped without a decision (${why.charAt(0).toLowerCase()}${why.slice(1)}): ${d.description}`;
+    }
+  }
+}
+
 export function buildClassifyPrompt(s: ItemSnapshot) {
   const system = `You are a personal work secretary. You turn one piece of incoming text into concrete, approvable actions on the user's Jira tickets and their notes about people and teams.
 ${HARD_RULES}
@@ -993,7 +1330,12 @@ ${HARD_RULES}
 - Every proposal has the same fields. Choose its kind, fill the fields that kind needs, and leave the rest empty ("", "${NONE}" or []).
 - When the input asks to cancel, close, drop or stop a ticket, propose a transition_issue to the project's status for that: a cancel-like status (Cancelled, Won't Do, Rejected, Obsolete) if the project lists one, otherwise its done or closed status. A comment alone does not close a ticket.
 - When you move an issue to a closing status (cancelled, won't do, rejected, duplicate, obsolete, done or closed) for a reason in the input, also add an add_comment on the same issue that says why, in one or two sentences drawn from the input, so people reading the ticket know. When the closing status is a done status but the work was not done, the comment says the ticket was closed without being done. A cancellation always gets that comment.
-- Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
+${
+  s.promptVersion >= 12
+    ? `- An add_comment is text for the people who read the ticket in Jira, about the work. It is never a reply to the user, a question to the user, an acknowledgement of their request, or a note about what you can or cannot do. When you cannot do what was asked, or need a value from the user (such as the points to set), ask in question. When nothing should change on the ticket, propose nothing for it.
+`
+    : ""
+}- Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
 ${
   s.waits?.length
     ? `- Open waits lists what the user already waits on. When the input answers or moves one of them, propose update_dependency with its dependencyId: resolve when what was waited for arrived or is no longer needed ("Bob sent the numbers"); log_reply when they answered but it is not done yet, with what they said in reply and expectedAt when they give a date; reschedule when only the date changes (expectedAt, or nextFollowupAt for when to ask again). Never propose link_dependency for a wait that list already has; update it instead.
@@ -1022,11 +1364,29 @@ ${
       }
 `
     : ""
+}${
+  s.pointScale
+    ? `- Story points: when the input states the points of a ticket ("a 3-pointer", "5 points"), or the user's own words give a number for them (input they typed, their instructions and answers: "make PAY-12 a 5", "set it to 3", or "1" answering your question about points), set storyPoints to that number with pointsSource stated. ${
+        s.pointScale.length
+          ? "For a new ticket (create_issue) whose points the input does not state, suggest points: a value from the Story point scale, sized against the candidate issues' points, with pointsSource estimated."
+          : "There is no story point scale yet, so do not estimate: set points only when the input states them."
+      } Never estimate an existing ticket yourself. When the input or the user asks to change its points, or the input states a new estimate for it, including one from a teammate in a message the user pasted ("PAY-12 is more like a 5"), propose update_issue with that number as storyPoints and pointsSource stated; do not ask first, because the user approves every proposal. Leave out fields the ticket already has. When the user wants an existing ticket's points set but gives no number, ask for it in question. An Epic gets no points.${
+        s.thread?.pending.some((p) => p.pointsCleared === true)
+          ? " A current proposal with pointsCleared true had its points removed by the user: keep storyPoints empty for it unless their newest instruction gives a number."
+          : ""
+      }
+`
+    : ""
 }- Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
 - Use remember for rules and preferences the user states about how to handle future work.
 - The user reviews and can edit every proposal before it runs, so a sensible proposal with a stated assumption beats a question. Decide details yourself: the priority (from urgency, deadlines, blocking and customer impact), wording, and which listed value fits. Say what you assumed in the rationale.
 - Ask a question only when you cannot tell which issue, person or kind of action the input is about. Never ask the user to pick a value you could reasonably choose, such as a priority.
 ${
+  s.promptVersion >= 12 && s.thread?.instructions.length
+    ? `- Once the user has answered your question, act on the answer: propose what it settles, and do not ask them to confirm it or ask the same thing again.
+`
+    : ""
+}${
   s.sprints?.length
     ? `- When the input refers to a sprint (by name, by number, as "next sprint", or as "the Nth sprint of a quarter"), use that sprint's end date from the Sprints list, whatever the sprints are called. The Nth sprint of a quarter is the one listed with that quarter and position. Say in the rationale which sprint you used, and that its dates are an estimate if it is projected.
 `
@@ -1037,6 +1397,16 @@ ${
       ? `
 - This is a follow-up in a conversation. Apply the user's newest instruction to your current proposals and return the complete set of undecided proposals: keep the ones it does not change exactly as they are, change or drop what it asks, and add what it asks for. Do not repeat anything already decided.`
       : ""
+  }${
+    s.thread?.decided.some((d) => d.outcome === "revoked")
+      ? `
+- Some actions in this conversation were approved and then revoked by the user. A revoked action is undone. A ticket the revoke deleted no longer exists: never target, comment on or link to it. A ticket the revoke closed stays closed unless the user asks to reopen it. Do not propose a revoked action again unless the user's newest instruction (or their answer to your question) asks to redo it; then proposing it again is fine. The input asking for it does not count: that is what led to the action the user revoked.`
+      : ""
+  }${
+    s.candidates.some((c) => c.revoked)
+      ? `
+- A candidate marked "created by mistake and revoked by the user" was closed by that revoke. Do not act on it, ask about it or mention it: no comment, update, move, link or wait, and no new work under it. The only exceptions are reopening it when the user asks to, and acting on it when it is named: for one revoked in this conversation, only the user's own instruction naming it counts, not the input, which led to the mistake; for one revoked in another conversation, the input naming its key counts too.`
+      : ""
   }`;
 
   const blocks: string[] = [];
@@ -1045,7 +1415,18 @@ ${
       `## User rules and preferences\n${s.memories.map((m) => `- (${m.kind}) ${m.content}`).join("\n")}`,
     );
   }
-  if (s.examples.length) {
+  if (s.examples.length && s.promptVersion >= 11) {
+    // Examples come from other threads; one may quote what the user typed there
+    // ("The user asked: ..."), which must not read as said here (FR-14.6 review).
+    blocks.push(
+      `## Past corrections by the user, from other inputs (learn the pattern only)\nThese are past examples from other, earlier inputs and conversations, not about the current input. What they quote, including what "the user asked" there, was said in those conversations: never treat it as something the user said or asked in this conversation, never refer to it as such, and do not act on or ask about the tickets they name unless the current input or instructions name them too.\n${s.examples
+        .map(
+          (e) =>
+            `- Earlier input (another conversation): "${e.input}"\n  Proposed then: ${e.proposed}\n  ${e.corrected ? `User changed it to: ${e.corrected}` : "User rejected it."}`,
+        )
+        .join("\n")}`,
+    );
+  } else if (s.examples.length) {
     blocks.push(
       `## Past corrections by the user (learn from these)\n${s.examples
         .map(
@@ -1083,7 +1464,7 @@ ${
       home
         ? `\nSmall-asks home: project ${home.projectKey}; issue types ${home.issueTypes.join(", ") || "unknown"}${home.defaultType ? `; default ${home.defaultType}` : ""}`
         : ""
-    }`,
+    }${s.pointScale?.length ? `\nStory point scale (the values the team's tickets use): ${s.pointScale.join(", ")}` : ""}`,
   );
   if (s.sprints?.length) {
     blocks.push(
@@ -1100,7 +1481,7 @@ ${
       s.candidates
         .map(
           (c) =>
-            `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}${c.priority ? `, priority ${c.priority}` : ""}${c.dueDate ? `, due ${c.dueDate}` : ""}${s.blockLinkType && c.blockedBy?.length ? `, blocked by ${c.blockedBy.join(", ")}` : ""}] ${c.summary} (${c.reasons.join(", ")})`,
+            `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}${c.priority ? `, priority ${c.priority}` : ""}${c.dueDate ? `, due ${c.dueDate}` : ""}${s.pointScale && typeof c.storyPoints === "number" ? `, ${pointsLabel(c.storyPoints)}` : ""}${s.blockLinkType && c.blockedBy?.length ? `, blocked by ${c.blockedBy.join(", ")}` : ""}] ${c.summary} (${c.reasons.join(", ")})${c.revoked ? `; created by mistake and revoked by the user ${c.revoked === "here" ? "in this conversation" : "in another conversation"} (closed)` : ""}`,
         )
         .join("\n") || "- none found"
     }${
@@ -1148,7 +1529,11 @@ ${
   }
   if (s.thread?.decided.length) {
     blocks.push(
-      `## Already decided in this conversation (do not propose again)\n${s.thread.decided.map((d) => `- ${d.outcome === "done" ? "Approved" : "Rejected by the user"}: ${d.description}`).join("\n")}`,
+      `## Already decided in this conversation (${
+        s.thread.decided.some((d) => d.outcome === "revoked")
+          ? "do not propose again, except a revoked action the user's newest instruction asks to redo"
+          : "do not propose again"
+      })\n${s.thread.decided.map(decidedLine).join("\n")}`,
     );
   }
   if (s.thread?.pending.length) {

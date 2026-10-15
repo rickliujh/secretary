@@ -6,7 +6,8 @@ import { markdownToWiki } from "@/lib/wiki";
 import { balanceBlockMarkers, sanitiseProposalWiki, type WikiSafety } from "@/lib/wiki-safe";
 import type { Deployment } from "@/services/atlassian/deployment";
 import type { EditMeta, JiraWrite } from "@/services/jira";
-import type { FieldIds } from "@/services/jira/fields";
+import { type FieldIds, pointsFieldOn } from "@/services/jira/fields";
+import { pointsLabel } from "@/services/proposals/schema";
 import { literalWiki, provenanceLineWiki, splitProvenance } from "@/services/small-asks/home";
 import type { JiraAction } from "./actions";
 
@@ -67,6 +68,11 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
       if (f.descriptionWiki !== undefined) fields.description = f.descriptionWiki;
       if (f.priority !== undefined) fields.priority = { name: f.priority };
       if (f.dueDate !== undefined) fields.duedate = f.dueDate;
+      if (f.storyPoints !== undefined) {
+        if (!action.pointsField)
+          throw new MappingError(`No story point field to write on ${action.issueKey}.`);
+        fields[action.pointsField] = f.storyPoints;
+      }
       return { method: "PUT", path: issuePath(action.issueKey), body: { fields } };
     }
     case "assign":
@@ -148,6 +154,21 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
     }
     case "delete_issue_link":
       return { method: "DELETE", path: `issueLink/${encodeURIComponent(action.linkId)}` };
+    case "delete_issue":
+      // No deleteSubtasks: a ticket with sub-tasks is closed instead (D54).
+      return { method: "DELETE", path: issuePath(action.issueKey) };
+    case "delete_comment":
+      return {
+        method: "DELETE",
+        path: issuePath(action.issueKey, `/comment/${encodeURIComponent(action.commentId)}`),
+      };
+    case "move_to_backlog":
+      return {
+        method: "POST",
+        api: "agile",
+        path: "backlog/issue",
+        body: { issues: [action.issueKey] },
+      };
   }
 }
 
@@ -171,6 +192,8 @@ export type CreateIssueInput = {
   dueDate: string | null;
   /** Sent when the create screen has a Labels field (D44). */
   labels?: readonly string[];
+  /** Written to the first story point field on the create screen (D55); never on an Epic. */
+  storyPoints?: number | null;
 };
 
 export type CreateContext = {
@@ -192,6 +215,8 @@ export type DroppedFields = {
   labels: string[];
   assignee: string | null;
   description: boolean;
+  /** Story points the create screen had no story point field for (D55). */
+  storyPoints?: number | null;
 };
 
 export type CreatePlan = {
@@ -216,6 +241,8 @@ export function droppedFieldsWarning(
   if (d.labels.length) parts.push(["Labels", `the label ${d.labels.join(", ")} was not set`]);
   if (d.assignee) parts.push(["Assignee", `it was not assigned to ${d.assignee}`]);
   if (d.description) parts.push(["Description", "the description (with who asked) was not sent"]);
+  if (typeof d.storyPoints === "number")
+    parts.push(["Story Points", `it was created without its ${pointsLabel(d.storyPoints)}`]);
   if (!parts.length) return null;
   const names = parts.map(([n]) => n);
   const fields =
@@ -292,6 +319,12 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
   if (input.dueDate) set("duedate", input.dueDate);
   const labels = [...new Set(input.labels ?? [])];
   if (labels.length && !set("labels", labels)) dropped.labels = labels;
+  // An Epic never gets points (D55); otherwise the first story point field on the screen.
+  if (typeof input.storyPoints === "number" && !/^epic$/i.test(input.issueTypeName)) {
+    const field = pointsFieldOn(ctx.fieldIds, allowed);
+    if (field) fields[field] = input.storyPoints;
+    else dropped.storyPoints = input.storyPoints;
+  }
 
   const isSubtask = input.subtask ?? /sub-?task/i.test(input.issueTypeName);
   if (isSubtask) {

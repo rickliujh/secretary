@@ -9,6 +9,7 @@ import { TONE } from "@/components/tone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -18,16 +19,29 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
-import type { PayloadOf, ProposalPayload } from "@/services/proposals/schema";
+import { type PayloadOf, type ProposalPayload, StoryPoints } from "@/services/proposals/schema";
 import { bundleLine, trackOrder } from "@/services/small-asks/bundle";
 import { isSubtaskType } from "@/services/small-asks/home";
 import { smallAskHome } from "@/services/small-asks/queries";
 import { ProposalCard } from "./proposal-card";
-import { issueOptions } from "./proposal-fields";
+import { editedPoints, issueOptions } from "./proposal-fields";
+import { RevokeControl, RevokeOutcome } from "./revoke-control";
 import { SMALL_ASK_KEYS } from "./small-ask-keys";
-import { useDecisions } from "./use-inbox";
+import { SprintChip } from "./sprint-choice";
+import { useDecisions, useTurnRunning } from "./use-inbox";
+import { useThreadSprintFits } from "./use-sprint-fit";
 
 type Result = { message?: string; error?: string; issueKey?: string; warning?: string } | null;
+
+const pointsText = (n: number | null) => (n === null ? "" : String(n));
+
+/** The points field's text: null when empty, undefined when it is not a valid number of points. */
+function parsePointsInput(text: string): number | null | undefined {
+  const t = text.trim();
+  if (!t) return null;
+  const r = StoryPoints.safeParse(Number(t));
+  return r.success ? r.data : undefined;
+}
 
 /**
  * A small ask as one compact row (FR-10.3, D44): summary, type and epic (both
@@ -49,22 +63,30 @@ export function SmallAskRow({
     queryFn: ({ signal }) => run(smallAskHome, signal),
   });
   const payload = (create.editedPayload ?? create.payload) as PayloadOf<"create_issue">;
+  const storedPoints = typeof payload.storyPoints === "number" ? payload.storyPoints : null;
   const [issueType, setIssueType] = useState(payload.issueType);
   const [epic, setEpic] = useState(payload.epic ?? "");
+  const [points, setPoints] = useState(pointsText(storedPoints));
+  const [join, setJoin] = useState(payload.joinSprint);
   const [open, setOpen] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   // A reply in the thread can replace the proposal; start again from the new one.
   useEffect(() => {
     setIssueType(payload.issueType);
     setEpic(payload.epic ?? "");
-  }, [payload.issueType, payload.epic]);
+    setPoints(pointsText(storedPoints));
+    setJoin(payload.joinSprint);
+  }, [payload.issueType, payload.epic, storedPoints, payload.joinSprint]);
 
   const subtask = isSubtaskType(payload.issueType, home.data?.home?.subtaskTypes);
+  const fits = useThreadSprintFits(create.inboxItemId);
   const types = [...new Set([...(home.data?.home?.issueTypes ?? []), payload.issueType])];
   const ids = trackOrder(create, members);
   const createOpen = create.status === "pending" || create.status === "failed";
   const pendingIds = [create, ...members].filter((p) => p.status === "pending").map((p) => p.id);
-  const busy = track.isPending || saveEdit.isPending || rejecting;
+  // Track waits for saves of the row's fields and switch (D57); a running turn locks the chip.
+  const turn = useTurnRunning(create.inboxItemId);
+  const busy = track.isPending || rejecting;
   const result = create.result as Result;
   const failed = [create, ...members].filter((p) => p.status === "failed");
   const warnings = [create, ...members]
@@ -80,30 +102,59 @@ export function SmallAskRow({
     ? (lookups.person.get(payload.requesterPersonId)?.displayName ?? null)
     : null;
 
+  type RowValues = { issueType: string; epic: string; points: number | null; join: boolean };
+  const current = (): RowValues => {
+    const typed = parsePointsInput(points);
+    return { issueType, epic, points: typed === undefined ? storedPoints : typed, join };
+  };
+  /** The create with the row's values; points the user changed are no longer a suggestion (D55). */
+  const edited = (v: RowValues): ProposalPayload => ({
+    ...payload,
+    issueType: v.issueType,
+    epic: v.epic || null,
+    // The sprint switch the user set is kept through revisions (D57).
+    ...(v.join !== payload.joinSprint ? { joinSprint: v.join, joinSprintChosen: true } : {}),
+    ...(editedPoints(payload, { issueType: v.issueType, storyPoints: v.points }) as {
+      storyPoints: number | null;
+      storyPointsEstimated: boolean;
+      storyPointsCleared: boolean;
+    }),
+  });
+  const reset = () => {
+    setIssueType(payload.issueType);
+    setEpic(payload.epic ?? "");
+    setPoints(pointsText(storedPoints));
+    setJoin(payload.joinSprint);
+  };
   // A change is saved on the pending create at once, so its card, Approve all and
   // Track all use it (D44). A failed create sends its changes with Retry instead.
-  const change = (next: { issueType: string; epic: string }) => {
+  const change = (next: RowValues) => {
     setIssueType(next.issueType);
     setEpic(next.epic);
+    setPoints(pointsText(next.points));
+    setJoin(next.join);
     if (create.status !== "pending") return;
     saveEdit.mutate(
-      {
-        id: create.id,
-        edited: { ...payload, issueType: next.issueType, epic: next.epic || null },
-      },
-      {
-        onError: () => {
-          setIssueType(payload.issueType);
-          setEpic(payload.epic ?? "");
-        },
-      },
+      { id: create.id, inboxItemId: create.inboxItemId, edited: edited(next) },
+      { onError: reset },
     );
   };
+  /** The points field saves when it is left or Enter is pressed; text that is no number is undone. */
+  const commitPoints = () => {
+    const parsed = parsePointsInput(points);
+    if (parsed === undefined) return setPoints(pointsText(storedPoints));
+    if (parsed !== storedPoints) change({ ...current(), points: parsed });
+  };
   const onTrack = () => {
-    const changed = issueType !== payload.issueType || (epic || null) !== payload.epic;
+    const v = current();
+    const changed =
+      v.issueType !== payload.issueType ||
+      (v.epic || null) !== payload.epic ||
+      v.points !== storedPoints ||
+      v.join !== payload.joinSprint;
     // Row changes are an edit of the create, recorded like any other (FR-7.2).
     const edits: Record<string, ProposalPayload> =
-      changed && createOpen ? { [create.id]: { ...payload, issueType, epic: epic || null } } : {};
+      changed && createOpen ? { [create.id]: edited(v) } : {};
     track.mutate({ ids, edits });
   };
   const onReject = async () => {
@@ -121,7 +172,7 @@ export function SmallAskRow({
       aria-label={`Small ask: ${payload.summary}, ${create.status}`}
       className={cn(
         "flex flex-col gap-2 rounded-lg border p-3",
-        create.status === "rejected" && "opacity-75",
+        (create.status === "rejected" || create.status === "revoked") && "opacity-75",
       )}
     >
       <header className="flex min-w-0 items-center gap-2">
@@ -153,7 +204,7 @@ export function SmallAskRow({
           ) : (
             <Select
               value={issueType}
-              onValueChange={(t) => change({ issueType: t, epic })}
+              onValueChange={(t) => change({ ...current(), issueType: t })}
               disabled={busy}
             >
               <SelectTrigger size="sm" className="w-32" aria-label="Issue type">
@@ -172,12 +223,44 @@ export function SmallAskRow({
             <div className="w-64">
               <IssueCombobox
                 value={epic}
-                onChange={(e) => change({ issueType, epic: e })}
+                onChange={(e) => change({ ...current(), epic: e })}
                 options={issueOptions(lookups.tickets, "epic", payload.projectKey)}
                 placeholder="No epic"
                 noneLabel="No epic"
               />
             </div>
+          )}
+          <Input
+            type="number"
+            min={0}
+            step="any"
+            inputMode="decimal"
+            className="h-8 w-20"
+            aria-label="Story points"
+            placeholder="Points"
+            value={points}
+            disabled={busy}
+            onChange={(e) => setPoints(e.target.value)}
+            onBlur={commitPoints}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitPoints();
+              }
+            }}
+          />
+          {payload.storyPointsEstimated && storedPoints !== null && (
+            <span className="text-xs text-muted-foreground">suggested</span>
+          )}
+          {!subtask && (
+            <SprintChip
+              choice={fits.data?.[create.id]}
+              loading={fits.isPending && fits.fetchStatus !== "idle"}
+              failed={fits.isError}
+              checked={join}
+              disabled={busy || turn}
+              onChange={(j) => change({ ...current(), join: j })}
+            />
           )}
           <span className="text-xs text-muted-foreground">in {payload.projectKey}</span>
           <span className="ml-auto" />
@@ -215,7 +298,21 @@ export function SmallAskRow({
               Run the rest
             </Button>
           )}
+          <span className="ml-auto" />
+          {/* Revoking the ticket revokes what hangs on it first: the bundle goes as one (D54). */}
+          <RevokeControl proposal={create} />
         </p>
+      )}
+      {create.status === "revoked" && (
+        <p className="flex flex-wrap items-center gap-2 text-sm">
+          <Badge variant="secondary" className={cn("border-transparent", TONE.neutral)}>
+            revoked
+          </Badge>
+          {result?.issueKey && <span className="font-mono text-xs">{result.issueKey}</span>}
+        </p>
+      )}
+      {(create.status === "executed" || create.status === "revoked") && (
+        <RevokeOutcome result={create.result} />
       )}
       {create.status === "rejected" && <p className="text-sm text-muted-foreground">Rejected</p>}
       {warnings.map((w) => (

@@ -6,6 +6,7 @@ import type {
   CreateMetaIssueType,
   EditMeta,
   IssueLinkType,
+  JiraComment,
   JiraField,
   JiraUser,
   Priority,
@@ -91,6 +92,16 @@ export interface JiraClientShape {
     opts: { fields: readonly string[]; expand?: readonly string[] },
   ) => Effect.Effect<RawIssue, JiraError>;
   readonly getComments: (key: string, startAt: number) => Effect.Effect<CommentPage, JiraError>;
+  /** One comment by id; fails with status 404 when it (or the issue) is gone. */
+  readonly getComment: (key: string, id: string) => Effect.Effect<JiraComment, JiraError>;
+  /**
+   * `GET /mypermissions` for one issue: which of `permissions` (such as
+   * `DELETE_ISSUES`) the user holds there. A permission Jira does not list is false.
+   */
+  readonly myPermissions: (
+    issueKey: string,
+    permissions: readonly string[],
+  ) => Effect.Effect<Record<string, boolean>, JiraError>;
   readonly getTransitions: (key: string) => Effect.Effect<readonly Transition[], JiraError>;
   readonly getEditMeta: (key: string) => Effect.Effect<EditMeta, JiraError>;
   readonly priorities: Effect.Effect<readonly Priority[], JiraError>;

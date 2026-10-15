@@ -174,12 +174,16 @@ export const getDependency = (id: string) =>
 const notFound = () =>
   new ExecutorError({ kind: "invalid", message: "That dependency no longer exists." });
 
+/** The approval a Jira write belongs to, so the action log names it (D54 (4)). */
+type LogOption = { proposalId?: string };
+
 /**
  * Turns Jira mirroring on or off for one dependency (FR-3.4). `"refresh"` pushes
  * the current state of a mirrored dependency to its remote link and does nothing
- * for one that is not mirrored.
+ * for one that is not mirrored. Turning it off when Jira no longer has the link
+ * (404) counts as done.
  */
-export const mirror = (id: string, on: boolean | "refresh") =>
+export const mirror = (id: string, on: boolean | "refresh", opts: LogOption = {}) =>
   Effect.gen(function* () {
     const executor = yield* Executor;
     const dep = yield* query((d) =>
@@ -189,11 +193,21 @@ export const mirror = (id: string, on: boolean | "refresh") =>
     if (!dep) return yield* notFound();
     if (!on) {
       if (dep.mirrorRemoteLinkId) {
-        yield* executor.run({
-          kind: "delete_remote_link",
-          issueKey: dep.issueKey,
-          globalId: mirrorGlobalId(dep.id),
-        });
+        yield* executor
+          .run(
+            {
+              kind: "delete_remote_link",
+              issueKey: dep.issueKey,
+              globalId: mirrorGlobalId(dep.id),
+            },
+            opts,
+          )
+          .pipe(
+            Effect.catchIf(
+              (e) => e._tag === "JiraError" && e.status === 404,
+              () => Effect.void,
+            ),
+          );
       }
       yield* query((d) =>
         d.update(dependencies).set({ mirrorRemoteLinkId: null }).where(eq(dependencies.id, id)),
@@ -227,21 +241,24 @@ export const mirror = (id: string, on: boolean | "refresh") =>
       });
     }
     const owner = person?.displayName ?? team?.name;
-    const result = yield* executor.run({
-      kind: "upsert_remote_link",
-      issueKey: dep.issueKey,
-      globalId: mirrorGlobalId(dep.id),
-      url,
-      title: `Waiting on ${dep.label}${dep.externalRef ? ` (${dep.externalRef})` : ""}`,
-      summary: [
-        owner && `Owner: ${owner}`,
-        dep.expectedAt && `Expected ${dep.expectedAt}`,
-        `Status: ${dep.status}`,
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      resolved: dep.status === "resolved",
-    });
+    const result = yield* executor.run(
+      {
+        kind: "upsert_remote_link",
+        issueKey: dep.issueKey,
+        globalId: mirrorGlobalId(dep.id),
+        url,
+        title: `Waiting on ${dep.label}${dep.externalRef ? ` (${dep.externalRef})` : ""}`,
+        summary: [
+          owner && `Owner: ${owner}`,
+          dep.expectedAt && `Expected ${dep.expectedAt}`,
+          `Status: ${dep.status}`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        resolved: dep.status === "resolved",
+      },
+      opts,
+    );
     const linkId = (result.response as { id?: number | string } | null)?.id;
     yield* query((d) =>
       d
@@ -324,9 +341,14 @@ export const setStatus = (id: string, status: DependencyStatus, opts: MirrorOpti
     if (opts.mirror !== false) yield* mirror(id, "refresh");
   });
 
-export const deleteDependency = (id: string) =>
+/**
+ * Deletes a dependency and the remote link that mirrors it. A link Jira refuses
+ * to remove (other than gone) leaves the dependency; `proposalId` logs the
+ * delete with a revoke (D54).
+ */
+export const deleteDependency = (id: string, opts: LogOption = {}) =>
   Effect.gen(function* () {
-    yield* mirror(id, false).pipe(
+    yield* mirror(id, false, opts).pipe(
       Effect.catchIf(
         (e) => e._tag === "ExecutorError",
         () => Effect.void,

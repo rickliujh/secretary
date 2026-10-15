@@ -21,14 +21,24 @@ export type IssueFilter = "epic" | "parent" | "any";
 export type FieldSpec = {
   path: string;
   label: string;
-  type: "text" | "textarea" | "date" | "select" | "list" | "issue";
+  /** `clear`: a checkbox that sets the field at `path` to null when ticked. */
+  type: "text" | "textarea" | "date" | "number" | "select" | "list" | "issue" | "clear";
   /** For `issue` fields. */
   issues?: IssueFilter;
   options?: (l: Lookups) => { value: string; label: string }[];
   mono?: boolean;
   /** Inside `changes`: empty means "do not change" rather than "clear". */
   optionalChange?: boolean;
+  /** Left out of the form while the other values make it meaningless. */
+  hidden?: (values: Readonly<Record<string, string>>) => boolean;
 };
+
+/** An Epic by type name; it never gets story points (D55). */
+const isEpicType = (type: unknown) => typeof type === "string" && /^epic$/i.test(type.trim());
+
+/** The form value name of a field; a `clear` checkbox shares its field's path. */
+export const formName = (spec: Pick<FieldSpec, "path" | "type">) =>
+  fieldName(spec.path) + (spec.type === "clear" ? "__clear" : "");
 
 const opts = (values: readonly string[]) => () =>
   values.map((v) => ({ value: v, label: v.replace(/_/g, " ") }));
@@ -97,6 +107,12 @@ export const FIELD_SPECS: Record<EditableKind, FieldSpec[]> = {
     { path: "priority", label: "Priority", type: "text" },
     { path: "assignee", label: "Assignee (Jira user)", type: "text", mono: true },
     { path: "dueDate", label: "Due", type: "date" },
+    {
+      path: "storyPoints",
+      label: "Story points",
+      type: "number",
+      hidden: (v) => isEpicType(v.issueType),
+    },
     { path: "labels", label: "Labels (comma separated)", type: "list", mono: true },
     { path: "requesterPersonId", label: "Asked by", type: "select", options: peopleOpts },
   ],
@@ -112,6 +128,15 @@ export const FIELD_SPECS: Record<EditableKind, FieldSpec[]> = {
       mono: true,
       optionalChange: true,
     },
+    {
+      path: "changes.storyPoints",
+      label: "Story points",
+      type: "number",
+      optionalChange: true,
+      hidden: (v) => v.changes__storyPoints__clear === "true",
+    },
+    // FR-15.3: an empty points field means "no change", so clearing is explicit.
+    { path: "changes.storyPoints", label: "Clear story points on the ticket", type: "clear" },
   ],
   add_comment: [target, { path: "bodyMd", label: "Comment (Markdown)", type: "textarea" }],
   transition_issue: [target, { path: "toStatus", label: "Move to status", type: "text" }],
@@ -239,13 +264,47 @@ export function toFormValues(payload: ProposalPayload): Record<string, string> {
   const out: Record<string, string> = {};
   for (const spec of FIELD_SPECS[payload.kind]) {
     const v = get(payload, spec.path);
-    out[fieldName(spec.path)] = Array.isArray(v)
-      ? v.join(", ")
-      : v === null || v === undefined
-        ? ""
-        : String(v);
+    out[formName(spec)] =
+      spec.type === "clear"
+        ? v === null
+          ? "true"
+          : ""
+        : Array.isArray(v)
+          ? v.join(", ")
+          : v === null || v === undefined
+            ? ""
+            : String(v);
   }
   return out;
+}
+
+/**
+ * A create's points after the user edited it (D55), also used by the small-ask
+ * row: an Epic gets none; points the user set or changed are theirs, no longer a
+ * suggestion; points the user emptied stay cleared on a revision.
+ */
+export function editedPoints(
+  original: {
+    storyPoints?: number | null;
+    storyPointsEstimated?: boolean;
+    storyPointsCleared?: boolean;
+  },
+  edited: { issueType?: unknown; storyPoints?: unknown },
+): { storyPoints: unknown; storyPointsEstimated: boolean; storyPointsCleared: boolean } {
+  const before = original.storyPoints ?? null;
+  const after = isEpicType(edited.issueType) ? null : (edited.storyPoints ?? null);
+  if (after === before)
+    return {
+      storyPoints: after,
+      storyPointsEstimated: original.storyPointsEstimated ?? false,
+      storyPointsCleared: original.storyPointsCleared ?? false,
+    };
+  return {
+    storyPoints: after,
+    storyPointsEstimated: false,
+    // Changing the type to Epic is not the user clearing the points.
+    storyPointsCleared: after === null && !isEpicType(edited.issueType),
+  };
 }
 
 /** Rebuilds a payload from form values on top of the original (unlisted fields are kept). */
@@ -253,13 +312,21 @@ export function fromFormValues(original: ProposalPayload, values: Record<string,
   if (!isEditable(original)) return original;
   const out = structuredClone(original) as Record<string, unknown>;
   for (const spec of FIELD_SPECS[original.kind]) {
-    const raw = (values[fieldName(spec.path)] ?? "").trim();
+    const raw = (values[formName(spec)] ?? "").trim();
+    // A ticked clear box wins over its field, listed before it.
+    if (spec.type === "clear") {
+      if (raw === "true") set(out, spec.path, null);
+      continue;
+    }
     let value: unknown;
     if (spec.type === "list") value = raw ? raw.split(/[\s,]+/).filter(Boolean) : [];
     else if (raw === "") value = spec.optionalChange ? undefined : null;
+    // Not a number: kept as text, so validation names the field.
+    else if (spec.type === "number") value = Number.isFinite(Number(raw)) ? Number(raw) : raw;
     else value = raw;
     set(out, spec.path, value);
   }
+  if (original.kind === "create_issue") Object.assign(out, editedPoints(original, out));
   // An emptied profile object means "no profile change".
   const changes = out.changes as Record<string, unknown> | undefined;
   if (changes?.profile && Object.keys(changes.profile as object).length === 0)
@@ -279,7 +346,13 @@ export function viewPayload(p: ProposalPayload): ProposalPayload {
   const obj = (x: unknown) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
   switch (p.kind) {
     case "create_issue":
-      return { ...p, labels: arr(v.labels) };
+      return {
+        ...p,
+        labels: arr(v.labels),
+        storyPoints: typeof v.storyPoints === "number" ? v.storyPoints : null,
+        storyPointsEstimated: v.storyPointsEstimated === true,
+        storyPointsCleared: v.storyPointsCleared === true,
+      };
     case "draft_message":
       return { ...p, issueKeys: arr(v.issueKeys) };
     case "update_issue":

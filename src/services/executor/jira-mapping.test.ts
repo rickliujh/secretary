@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { EditMetaSchema } from "@/services/jira";
 import { withProvenance } from "@/services/small-asks/home";
 import editmeta from "@/test/fixtures/jira/editmeta-PAY-2.json";
+import { JiraActionSchema } from "./actions";
 import {
   buildCreateIssue,
   buildJiraWrite,
@@ -275,6 +276,93 @@ describe("buildCreateIssue", () => {
     const plan = buildCreateIssue(input, { fieldIds: {}, fields: [...screen, field("labels")] });
     expect((plan.request.body as { fields: object }).fields).not.toHaveProperty("labels");
   });
+
+  describe("story points (D55)", () => {
+    // A Cloud site with both fields; this project's screen has only "Story Points".
+    const ids = { storyPoints: "customfield_10016", storyPointsAlt: ["customfield_10026"] };
+    const fieldsOf = (plan: ReturnType<typeof buildCreateIssue>) =>
+      (plan.request.body as { fields: Record<string, unknown> }).fields;
+
+    test("go to the first story point field on the create screen, as a number", () => {
+      const plan = buildCreateIssue(
+        { ...input, storyPoints: 3 },
+        { fieldIds: ids, fields: [...screen, field("customfield_10026")] },
+      );
+      expect(fieldsOf(plan).customfield_10026).toBe(3);
+      expect(fieldsOf(plan)).not.toHaveProperty("customfield_10016");
+      expect(plan.dropped.storyPoints).toBeUndefined();
+      const both = buildCreateIssue(
+        { ...input, storyPoints: 0.5 },
+        {
+          fieldIds: ids,
+          fields: [...screen, field("customfield_10026"), field("customfield_10016")],
+        },
+      );
+      expect(fieldsOf(both).customfield_10016).toBe(0.5);
+      expect(fieldsOf(both)).not.toHaveProperty("customfield_10026");
+    });
+
+    test("a screen without one creates without points and says so", () => {
+      const plan = buildCreateIssue(
+        { ...input, storyPoints: 3 },
+        { fieldIds: ids, fields: screen },
+      );
+      expect(fieldsOf(plan)).not.toHaveProperty("customfield_10016");
+      expect(plan.dropped.storyPoints).toBe(3);
+      expect(droppedFieldsWarning(plan.dropped, "Task", "ASK")).toBe(
+        "The Task create screen in ASK has no Story Points field, so it was created without its 3 points.",
+      );
+    });
+
+    test("an Epic and a create without points send none and warn of nothing", () => {
+      const fields = [...screen, field("customfield_10016"), field("customfield_10102")];
+      const epic = buildCreateIssue(
+        { ...input, issueTypeName: "Epic", storyPoints: 8 },
+        { fieldIds: ids, fields },
+      );
+      expect(fieldsOf(epic)).not.toHaveProperty("customfield_10016");
+      expect(epic.dropped.storyPoints).toBeUndefined();
+      const none = buildCreateIssue({ ...input, storyPoints: null }, { fieldIds: ids, fields });
+      expect(fieldsOf(none)).not.toHaveProperty("customfield_10016");
+    });
+  });
+});
+
+describe("update_fields with story points (D55)", () => {
+  test("writes the field the Executor chose; null clears it", () => {
+    const write = (storyPoints: number | null) =>
+      buildJiraWrite(
+        {
+          kind: "update_fields",
+          issueKey: "PAY-12",
+          fields: { storyPoints },
+          pointsField: "customfield_10106",
+        },
+        { fieldIds },
+      );
+    expect(write(5)).toEqual({
+      method: "PUT",
+      path: "issue/PAY-12",
+      body: { fields: { customfield_10106: 5 } },
+    });
+    expect(write(null).body).toEqual({ fields: { customfield_10106: null } });
+  });
+
+  test("points without a field are refused", () => {
+    expect(
+      JiraActionSchema.safeParse({
+        kind: "update_fields",
+        issueKey: "PAY-12",
+        fields: { storyPoints: 5 },
+      }).success,
+    ).toBe(false);
+    expect(() =>
+      buildJiraWrite(
+        { kind: "update_fields", issueKey: "PAY-12", fields: { storyPoints: 5 } },
+        { fieldIds },
+      ),
+    ).toThrow("No story point field");
+  });
 });
 
 describe("pasted text in a small ask's description (D44)", () => {
@@ -482,5 +570,26 @@ describe("proposal text bound for Jira (D51)", () => {
     expect(w("[https://x/p.png]")).toEqual({ body: "[https://x/p.png]" });
     // The user's own comment from the ticket view is theirs (D51).
     expect(w()).toEqual({ body: "!https://x/p.png!" });
+  });
+});
+
+describe("reverse writes (D54)", () => {
+  test("delete an issue without its sub-tasks, delete a comment, move to the backlog", () => {
+    expect(buildJiraWrite({ kind: "delete_issue", issueKey: "PAY-12" }, { fieldIds })).toEqual({
+      method: "DELETE",
+      path: "issue/PAY-12",
+    });
+    expect(
+      buildJiraWrite(
+        { kind: "delete_comment", issueKey: "PAY-12", commentId: "50004" },
+        { fieldIds },
+      ),
+    ).toEqual({ method: "DELETE", path: "issue/PAY-12/comment/50004" });
+    expect(buildJiraWrite({ kind: "move_to_backlog", issueKey: "PAY-12" }, { fieldIds })).toEqual({
+      method: "POST",
+      api: "agile",
+      path: "backlog/issue",
+      body: { issues: ["PAY-12"] },
+    });
   });
 });

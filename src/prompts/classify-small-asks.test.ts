@@ -97,6 +97,10 @@ describe("mapping a small ask (code sets the home)", () => {
       // The sender asked.
       requesterPersonId: "p-ana",
       joinSprint: true,
+      joinSprintChosen: false,
+      storyPoints: null,
+      storyPointsEstimated: false,
+      storyPointsCleared: false,
     });
   });
 
@@ -120,6 +124,7 @@ describe("mapping a small ask (code sets the home)", () => {
       issueType: "Sub-task",
       parent: "PAY-2",
       joinSprint: false,
+      joinSprintChosen: false,
       labels: ["small-ask"],
       smallAsk: true,
     });
@@ -143,6 +148,7 @@ describe("mapping a small ask (code sets the home)", () => {
       issueType: "Action",
       parent: "PAY-2",
       joinSprint: false,
+      joinSprintChosen: false,
     });
   });
 
@@ -163,6 +169,7 @@ describe("mapping a small ask (code sets the home)", () => {
       labels: [],
       smallAsk: false,
       joinSprint: false,
+      joinSprintChosen: false,
       descriptionMd: "Pull the Q3 totals from the ledger.",
     });
   });

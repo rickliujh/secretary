@@ -323,6 +323,88 @@ unchanged.
 - FR-13.3 (Must) Settings group model routing, ranking weights and evaluation
   replay under Advanced.
 
+### FR-14 Revoke an approval (D54)
+
+- FR-14.1 (Must) An executed proposal can be revoked from its card, and a tracked
+  small ask from its row (the whole bundle). Revoke opens a confirmation that lists
+  each step it will take in Jira and in Secretary; confirming is the approval of
+  those steps, and they run through the Executor like any other write.
+- FR-14.2 (Must) Each kind is undone the reverse way: a created ticket is deleted
+  when the user may delete issues, otherwise moved to a cancelled status (a status
+  named like Cancelled, Won't Do, Rejected or Declined, else any done status) with
+  a comment; a comment is deleted; field updates, assignee, status, sprint, waits,
+  contacts and teams get their previous values back; a blocked-by link Secretary made
+  is removed; a wait, a memory or an unsent draft is deleted.
+- FR-14.3 (Must) Revoking never overwrites a later change: a field changed by
+  someone else since the approval is left as it is and named in a warning.
+- FR-14.4 (Must) Revoking a ticket created in a thread first revokes the executed
+  proposals of that thread that act on it, newest first.
+- FR-14.5 (Must) A step that fails stops the revoke and says what was undone; Revoke
+  can be pressed again to finish. A proposal that cannot be undone (a sent draft, a
+  sprint that has closed, an approval from before undo data was recorded) says why
+  instead of offering Revoke.
+- FR-14.6 (Must) Later turns in the same thread know what was revoked: the model
+  sees each revoked proposal as approved and then revoked (and whether its ticket was
+  deleted or closed), does not treat a deleted ticket as existing, and does not
+  propose a revoked action again unless the user asks to redo it. Every other
+  thread knows too: a deleted ticket is never synced, offered, named or targeted
+  again, and a closed one is offered only when named and then shown as created by
+  mistake and revoked by the user. The model does not mention either unless the
+  user names it.
+- AC: a small ask tracked with a wait and a comment, revoked in the mock Jira as a
+  user without delete permission, leaves the ticket in a cancelled status with a
+  comment, the Secretary comment deleted, the wait gone and the row marked revoked;
+  with delete permission the ticket is gone.
+
+### FR-15 Story points on proposals (D55)
+
+- FR-15.1 (Must) A proposed ticket can carry story points. A number stated in the
+  input ("it's a 3-pointer") is used as stated. Otherwise the model suggests one
+  from the point values the user's synced tickets use, shown as a suggestion; with
+  no point history nothing is suggested.
+- FR-15.2 (Must) A small ask without stated points gets the default from Settings >
+  Jira > Small asks when one is set (empty by default), instead of a suggestion.
+- FR-15.3 (Must) Story points can be edited, or cleared, in the edit dialog and on
+  the small-ask row before approving.
+- FR-15.4 (Must) Intake can change the story points of an existing ticket when the
+  input asks for it or states a new estimate ("PAY-12 is more like a 5"); it never
+  re-estimates an existing ticket on its own. Revoking it puts the old value back.
+- FR-15.5 (Must) Points are written to the story point field on the ticket's create
+  or edit screen. When that screen has none, a create goes ahead without points and
+  says so on the card; an update fails with the reason.
+- AC: against the mock Jira, a pasted ask that states 3 points creates a ticket with
+  3 points; one that states none gets a suggestion from the scale (or the small-ask
+  default when set); "PAY-12 is more like a 5" proposes an update that sets 5, and
+  revoking it restores the previous value.
+
+### FR-16 New tickets and the sprint (D57)
+
+- FR-16.1 (Must) Every proposed ticket that can join a sprint (not an Epic, not a
+  sub-task) offers a choice on its card, its small-ask row and its edit dialog: add
+  it to the user's active sprint, or leave it in the backlog. The sprint is named
+  with its end and the working days left. The choice starts on for a small ask when
+  Settings says so (D44) and for a ticket due on or before the sprint ends, else
+  off. Changing it is saved at once and kept by revisions and re-triage. Approve
+  stays one click.
+- FR-16.2 (Must) Next to the choice the app says whether the sprint has room: the
+  user's open work in the sprint, the other new tickets of the same thread that will
+  join it, and this ticket, in points and in working days, against the working days
+  left: fits, tight or over, with the details one click away. Unestimated tickets
+  are counted and named as such; a ticket without points says it cannot be sized.
+- FR-16.3 (Must) Settings say what a story point means in working days (for
+  example 1 point = 0.5 days). Left empty, the app uses the rate of the user's last
+  three closed sprints on that board and says so; with neither, it shows points and
+  days without a verdict and links to the setting. Settings also say whether a
+  sprint's last day counts.
+- FR-16.4 (Should) Today's Sprint work shows the same sprint load in its header,
+  and the chat's sprint points answer includes the working days left and the load in
+  days.
+- AC: with the mock Jira, a sprint with three working days left, two open tickets
+  of the user's at 1 point each and 1 point = 0.5 days, a new 2-point ticket shows
+  "fits" (2 of 3 days); with a third open ticket of 3 points it shows "over" (3.5 of
+  3 days). Its switch on adds it to that sprint on approval; off leaves it in the
+  backlog.
+
 ## 5. Non-functional requirements
 
 - NFR-1 Works offline for browsing cached data, drafting from cache and editing
