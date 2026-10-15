@@ -648,3 +648,15 @@ Built
   is not synced, or a new issue from the same thread ("$new:1"), can still be typed.
 - Live eval: two new cases (a cancellation with its reason, a later paste referring
   to an earlier ticket) pass with GLM 5.3 Flash.
+
+## Parent epics outside the sync scope (2026-10-15)
+
+- An epic that synced tickets sit under, but that the sync JQL and tracked epics
+  leave out, was never stored. The ticket's epic picker showed it as a bare key, and
+  intake could not offer it. Adding an Epic Name in Jira or running a full resync
+  did not help, because a full resync only re-reads the scope.
+- Sync now reads those parent epics by key after the sub-task pass (design.md D53).
+  A full run refreshes them all; an incremental run reads only new ones. A key the
+  user cannot see is isolated and skipped. The watermark is unchanged.
+- The epic picker falls back to the summary when the Epic Name is blank.
+
