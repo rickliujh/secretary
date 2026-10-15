@@ -32,7 +32,7 @@ import { describePayload, type ProposalPayload } from "@/services/proposals/sche
 import { retrievalFtsQuery, tokens } from "@/services/retrieval/ranking";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sources } from "@/services/sources";
-import { halfDays, workingDaysLeft } from "@/services/sprints/fit";
+import { halfDaysUp, workingDaysLeft } from "@/services/sprints/fit";
 import { fitData, loadFit, rateOn } from "@/services/sprints/fit-query";
 import { getState, parseFieldIds, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { searchTicketKeys, ticketDetail } from "@/services/tickets/queries";
@@ -424,7 +424,9 @@ export function chatTools(
             const data = yield* fitData;
             const today = localDate();
             const { rate } = rateOn(data, picked.boardId);
-            const mine = who === "me" && me ? loadFit(data, picked, today) : null;
+            // Room is a question for an active sprint only; a closed one has none left to give.
+            const mine =
+              who === "me" && me && picked.state === "active" ? loadFit(data, picked, today) : null;
             const notes = [
               r.tickets.length > 0 && r.estimated === 0
                 ? "None of these tickets has an estimate in Jira."
@@ -451,7 +453,7 @@ export function chatTools(
                         : `the user's last ${rate.sprints ?? 0} closed sprints`,
                   }
                 : null,
-              remainingDays: rate ? halfDays(r.remaining * rate.daysPerPoint) : null,
+              remainingDays: rate ? halfDaysUp(r.remaining * rate.daysPerPoint) : null,
               ...(mine ? { verdict: mine.verdict, room: mine.headline } : {}),
               note: notes.length ? notes.join(" ") : undefined,
             };

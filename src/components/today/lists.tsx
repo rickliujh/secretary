@@ -516,8 +516,11 @@ function SprintLoad() {
   if (!sprint || !fit) return null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-2">
+      {/* The description above already names the sprint and its end date. */}
       <span>
-        {sprint.name}: {sprint.when}.
+        {sprint.ended
+          ? "Ended, not closed yet."
+          : `${sprint.daysLeft} working ${sprint.daysLeft === 1 ? "day" : "days"} left.`}
       </span>
       <VerdictLine fit={fit} sprint={sprint} />
     </div>

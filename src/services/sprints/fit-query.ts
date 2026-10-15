@@ -3,7 +3,7 @@
  * the cache, settings and a thread's pending proposals. The decisions are in
  * `fit.ts`; the sprint pick is the Executor's (`joinSprintFor`).
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { Effect } from "effect";
 import { jiraIssues, proposals } from "@/db/schema";
 import { localDate } from "@/lib/dates";
@@ -87,7 +87,8 @@ const viewOf = (s: SprintInfo, today: string): SprintView => ({
   end: s.end,
   when: sprintWhen(s, today),
   daysLeft: workingDaysLeft(s, today),
-  ended: !!s.end && s.end.slice(0, 10) < today,
+  // Past its end while Jira still has it active: "ended, not closed yet".
+  ended: s.state === "active" && !!s.end && s.end.slice(0, 10) < today,
 });
 
 /** The user's load in a sprint, with or without new tickets (D57). */
@@ -152,10 +153,28 @@ export const threadSprintFits = (inboxItemId: string, today = localDate()) =>
       isSubtaskType(p.issueType, data.projectMeta[p.projectKey]?.subtaskTypes ?? null);
     const sprintOf = (p: Create) =>
       joinSprintFor(data.state.sprints, data.mine, data.me, p.projectKey, data.state.boardProjects);
+    // Names for assignees other than the user: a Cloud account id means nothing to read.
+    const others = [
+      ...new Set(open.map((o) => o.p.assignee).filter((a): a is string => !!a && a !== data.me)),
+    ];
+    const names = new Map(
+      others.length
+        ? (yield* query((d) =>
+            d
+              .selectDistinct({ id: jiraIssues.assignee, name: jiraIssues.assigneeDisplay })
+              .from(jiraIssues)
+              .where(
+                and(inArray(jiraIssues.assignee, others), isNotNull(jiraIssues.assigneeDisplay)),
+              )
+              .all(),
+          )).map((r) => [r.id, r.name] as const)
+        : [],
+    );
     const ticketOf = (p: Create): FitTicket => ({
       label: p.summary,
       points: p.storyPoints,
       assignee: p.assignee,
+      assigneeName: p.assignee ? (names.get(p.assignee) ?? null) : null,
     });
     const out: Record<string, CreateSprintFit> = {};
     for (const c of open) {
@@ -168,7 +187,7 @@ export const threadSprintFits = (inboxItemId: string, today = localDate()) =>
         out[c.id] = { kind: "no_sprint" };
         continue;
       }
-      const others = open
+      const joining = open
         .filter(
           (o) =>
             o.id !== c.id &&
@@ -182,7 +201,7 @@ export const threadSprintFits = (inboxItemId: string, today = localDate()) =>
         kind: "sprint",
         sprint: viewOf(sprint, today),
         offBoard: !boardShowsProject(sprint, c.p.projectKey, data.state.boardProjects),
-        fit: loadFit(data, sprint, today, { others, ticket: ticketOf(c.p) }),
+        fit: loadFit(data, sprint, today, { others: joining, ticket: ticketOf(c.p) }),
       };
     }
     return out;

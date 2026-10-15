@@ -16,12 +16,13 @@ import {
   PROPOSAL_LABELS,
   type ProposalPayload,
   pointsLabel,
+  withoutCodeFields,
 } from "@/services/proposals/schema";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
 import { isEditable, viewPayload } from "./proposal-fields";
 import { RevokeControl, RevokeOutcome } from "./revoke-control";
 import { SprintSwitch, sprintOutcome } from "./sprint-choice";
-import { useDecisions } from "./use-inbox";
+import { useDecisions, usePendingEdit, useSavingEdit } from "./use-inbox";
 
 const STATUS_TONE: Record<string, string> = {
   pending: TONE.warning,
@@ -278,7 +279,15 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
   const drafts = useDraftPanel();
   const draftId = result?.communicationId;
   const pending = proposal.status === "pending";
-  const busy = approve.isPending || reject.isPending;
+  // Approve waits for a save of this proposal (the sprint switch, a row field) to land (D57).
+  const saving = useSavingEdit({ id: proposal.id });
+  const pendingEdit = usePendingEdit(proposal.id);
+  const busy = approve.isPending || reject.isPending || saving;
+  // The sprint switch alone is code's field, not an edit of the proposal (D57).
+  const edited =
+    !!proposal.editedPayload &&
+    JSON.stringify(withoutCodeFields(proposal.editedPayload)) !==
+      JSON.stringify(withoutCodeFields(proposal.payload));
   const canApprove = pending || proposal.status === "failed";
   const canEdit = canApprove && isEditable(payload);
   // Dependency proposals are one line with one approve button (D46).
@@ -392,7 +401,7 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
               {proposal.status}
             </Badge>
           )}
-          {proposal.editedPayload && <Badge variant="outline">edited</Badge>}
+          {edited && <Badge variant="outline">edited</Badge>}
           {canApprove && approveButton}
           {revokeControl}
           {expandButton}
@@ -426,7 +435,7 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
         >
           {proposal.status}
         </Badge>
-        {proposal.editedPayload && <Badge variant="outline">edited</Badge>}
+        {edited && <Badge variant="outline">edited</Badge>}
         <span className="ml-auto" />
         <Confidence value={proposal.confidence} />
         {expandButton}
@@ -472,7 +481,22 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
         }
         open={editing}
         onOpenChange={setEditing}
-        onApprove={(edited) => approve.mutate({ id: proposal.id, edited })}
+        busy={busy}
+        onApprove={(changed) => {
+          // The dialog's form does not hold the sprint switch; carry its current value.
+          const current = pendingEdit ?? payload;
+          approve.mutate({
+            id: proposal.id,
+            edited:
+              changed.kind === "create_issue" && current.kind === "create_issue"
+                ? {
+                    ...changed,
+                    joinSprint: current.joinSprint,
+                    joinSprintChosen: current.joinSprintChosen,
+                  }
+                : changed,
+          });
+        }}
       />
     </article>
   );

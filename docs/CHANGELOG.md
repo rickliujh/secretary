@@ -1518,7 +1518,20 @@ Built
   tool's new fields, and the FR-16 AC against the mock Jira (fits at 2 of 3
   days, over at 3.5 of 3, on joins the sprint after a re-triage, off stays in
   the backlog).
+- Review fixes: a sprint with nothing open fits even once it has ended; days
+  are rounded up to the half day without contradicting the verdict; an end time
+  before 12:00 local leaves the end day out (sync keeps Jira's end timestamp);
+  "not closed yet" and the chat's verdict only for an active sprint; other
+  assignees by name; Approve, Approve all and the dialog wait for a switch save
+  and the dialog keeps the switch's value; the switch and chip lock during a
+  reply or re-triage; the "edited" badge ignores the switch; while the fit loads
+  the card shows the stored choice, and when it fails the switch still works;
+  Today names the end date once; the rate field takes "0,5"; fits refresh on a
+  new day.
 
 Known limits
 - Days off, public holidays, partial days and Jira's remaining estimates are not
   counted; in-progress tickets count in full.
+- A revision keeps the switch by the create's `$new` ref, so one that
+  renumbers it loses the choice; revoking a create that was closed (not
+  deleted) leaves it in the sprint.

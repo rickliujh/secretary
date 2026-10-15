@@ -51,6 +51,11 @@ export type AppMutationOptions<I, A> = {
   toastError?: boolean;
   /** Names the mutation, so other components can see it running (`useMutationState`). */
   mutationKey?: readonly unknown[];
+  /**
+   * Stay pending until the refreshed queries are back, so what other components
+   * read while it runs is never older than the write.
+   */
+  awaitRefresh?: boolean;
 };
 
 /**
@@ -64,19 +69,22 @@ export function useAppMutation<I = void, A = unknown, E = unknown>(
   const client = useQueryClient();
   const onError = useErrorToast();
   const { invalidate = [], invalidateOnError = false, success, toastError = true } = opts;
-  const refresh = () => {
-    for (const key of invalidate) void client.invalidateQueries({ queryKey: key });
-  };
+  const refresh = () =>
+    Promise.all(invalidate.map((key) => client.invalidateQueries({ queryKey: key })));
   return useMutation({
     ...(opts.mutationKey ? { mutationKey: opts.mutationKey } : {}),
     mutationFn: (input: I) => run(program(input)),
-    onSuccess: (a, input) => {
-      refresh();
+    onSuccess: async (a, input) => {
+      const refreshed = refresh();
+      if (opts.awaitRefresh) await refreshed.catch(() => undefined);
       if (success) toast.success(typeof success === "string" ? success : success(a, input));
       opts.onSuccess?.(a, input);
     },
-    onError: (e) => {
-      if (invalidateOnError) refresh();
+    onError: async (e) => {
+      if (invalidateOnError) {
+        const refreshed = refresh();
+        if (opts.awaitRefresh) await refreshed.catch(() => undefined);
+      }
       if (toastError) onError(e);
     },
   });

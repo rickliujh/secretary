@@ -28,7 +28,7 @@ import { editedPoints, issueOptions } from "./proposal-fields";
 import { RevokeControl, RevokeOutcome } from "./revoke-control";
 import { SMALL_ASK_KEYS } from "./small-ask-keys";
 import { SprintChip } from "./sprint-choice";
-import { useDecisions } from "./use-inbox";
+import { useDecisions, useSavingEdit, useTurnRunning } from "./use-inbox";
 import { useThreadSprintFits } from "./use-sprint-fit";
 
 type Result = { message?: string; error?: string; issueKey?: string; warning?: string } | null;
@@ -84,7 +84,10 @@ export function SmallAskRow({
   const ids = trackOrder(create, members);
   const createOpen = create.status === "pending" || create.status === "failed";
   const pendingIds = [create, ...members].filter((p) => p.status === "pending").map((p) => p.id);
-  const busy = track.isPending || saveEdit.isPending || rejecting;
+  // A save from the expanded card's switch counts too, and a running turn locks the chip (D57).
+  const saving = useSavingEdit({ id: create.id });
+  const turn = useTurnRunning(create.inboxItemId);
+  const busy = track.isPending || saveEdit.isPending || saving || rejecting;
   const result = create.result as Result;
   const failed = [create, ...members].filter((p) => p.status === "failed");
   const warnings = [create, ...members]
@@ -132,7 +135,10 @@ export function SmallAskRow({
     setPoints(pointsText(next.points));
     setJoin(next.join);
     if (create.status !== "pending") return;
-    saveEdit.mutate({ id: create.id, edited: edited(next) }, { onError: reset });
+    saveEdit.mutate(
+      { id: create.id, inboxItemId: create.inboxItemId, edited: edited(next) },
+      { onError: reset },
+    );
   };
   /** The points field saves when it is left or Enter is pressed; text that is no number is undone. */
   const commitPoints = () => {
@@ -250,8 +256,10 @@ export function SmallAskRow({
           {!subtask && (
             <SprintChip
               choice={fits.data?.[create.id]}
+              loading={fits.isPending && fits.fetchStatus !== "idle"}
+              failed={fits.isError}
               checked={join}
-              disabled={busy}
+              disabled={busy || turn}
               onChange={(j) => change({ ...current(), join: j })}
             />
           )}

@@ -250,6 +250,7 @@ const make = Effect.gen(function* () {
               boardId: v.originBoardId ?? board,
               start: datePart(v.startDate),
               end: datePart(v.endDate),
+              endAt: v.endDate ?? null,
             });
           if (r.value.isLast !== false || r.value.values.length === 0) {
             if (history) complete.add(board);

@@ -5,7 +5,7 @@
  * so revisions keep it; Approve stays one click.
  */
 import { Link } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -14,9 +14,10 @@ import { Toggle } from "@/components/ui/toggle";
 import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
 import type { PayloadOf } from "@/services/proposals/schema";
+import { isSubtaskType } from "@/services/small-asks/home";
 import type { Fit, Verdict } from "@/services/sprints/fit";
 import type { CreateSprintFit } from "@/services/sprints/fit-query";
-import { useDecisions } from "./use-inbox";
+import { useDecisions, usePendingEdit, useSavingEdit, useTurnRunning } from "./use-inbox";
 import { useThreadSprintFits } from "./use-sprint-fit";
 
 const VERDICT_TEXT: Record<Verdict, string> = {
@@ -99,26 +100,47 @@ export function VerdictLine({
 }
 
 /**
- * The create's switch state, saved at once and marked chosen (D57). The local
- * value covers the moment between the save and the refreshed proposal.
+ * Whether a create can never join from its own payload, while the fit is not
+ * known: an Epic, or a sub-task (a parent, or a sub-task type by name).
+ */
+const neverJoins = (p: PayloadOf<"create_issue">) =>
+  /^epic$/i.test(p.issueType.trim()) || !!p.parent || isSubtaskType(p.issueType);
+
+/**
+ * The create's switch (D57). What it shows is the stored proposal, or an edit
+ * of it still being saved from any component (a card, its dialog, the
+ * small-ask row), so two switches never disagree. It is locked while a save
+ * or an intake turn on the thread runs, so a toggle is not lost to a row the
+ * turn replaces.
  */
 export function useSprintSwitch(proposal: ProposalView) {
   const { saveEdit } = useDecisions();
   const payload = (proposal.editedPayload ?? proposal.payload) as PayloadOf<"create_issue">;
   const fits = useThreadSprintFits(proposal.inboxItemId, proposal.kind === "create_issue");
-  // Shown until the saved proposal comes back with a different value.
-  const [local, setLocal] = useState<{ value: boolean; over: boolean } | null>(null);
-  const checked = local && local.over === payload.joinSprint ? local.value : payload.joinSprint;
+  const saving = useSavingEdit({ id: proposal.id });
+  const turn = useTurnRunning(proposal.inboxItemId);
+  const pendingEdit = usePendingEdit(proposal.id);
+  const checked =
+    pendingEdit?.kind === "create_issue" ? pendingEdit.joinSprint : payload.joinSprint;
   const set = (joinSprint: boolean) => {
     if (proposal.status !== "pending") return;
-    setLocal({ value: joinSprint, over: payload.joinSprint });
-    saveEdit.mutate(
-      { id: proposal.id, edited: { ...payload, joinSprint, joinSprintChosen: true } },
-      { onError: () => setLocal(null) },
-    );
+    saveEdit.mutate({
+      id: proposal.id,
+      inboxItemId: proposal.inboxItemId,
+      edited: { ...payload, joinSprint, joinSprintChosen: true },
+    });
   };
   const choice: CreateSprintFit | undefined = fits.data?.[proposal.id];
-  return { choice, checked, set, busy: saveEdit.isPending, payload };
+  return {
+    choice,
+    /** Reading the fit, or it failed: the switch still shows (and, on failure, works). */
+    loading: fits.isPending && fits.fetchStatus !== "idle",
+    failed: fits.isError,
+    checked,
+    set,
+    busy: saving || turn,
+    payload,
+  };
 }
 
 /**
@@ -134,7 +156,8 @@ export function SprintSwitch({
   layout: "card" | "dialog";
 }) {
   const sw = useSprintSwitch(proposal);
-  if (!sw.choice || sw.choice.kind === "never") return null;
+  if (sw.choice ? sw.choice.kind === "never" : neverJoins(sw.payload)) return null;
+  if (!sw.choice && !sw.loading && !sw.failed) return null;
   const body = <SprintSwitchBody proposal={proposal} sw={sw} />;
   return layout === "card" ? (
     <>
@@ -158,25 +181,36 @@ function SprintSwitchBody({
 }) {
   const id = useId();
   const { choice, checked, set, busy, payload } = sw;
-  if (!choice || choice.kind === "never") return null;
+  const locked = busy || proposal.status !== "pending";
+  const control = (label: string, disabled: boolean) => (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <Switch id={id} size="sm" checked={checked} disabled={disabled} onCheckedChange={set} />
+      <Label htmlFor={id} className="font-normal">
+        {label}
+      </Label>
+      {choice?.kind === "sprint" && (
+        <span className="text-xs text-muted-foreground">{choice.sprint.when}</span>
+      )}
+    </div>
+  );
+  // While the fit is read: the stored choice, not yet changeable.
+  if (!choice && sw.loading)
+    return control(checked ? "Joins your active sprint" : "Stays in the backlog", true);
+  // The fit could not be read: the choice still works.
+  if (!choice)
+    return (
+      <div className="flex flex-col gap-1">
+        {control("Add to your active sprint", locked)}
+        <p className="text-xs text-muted-foreground">Can't check the sprint's room</p>
+      </div>
+    );
+  if (choice.kind === "never") return null;
   if (choice.kind === "no_sprint")
     return <span className="text-muted-foreground">No active sprint; it goes to the backlog</span>;
   const { sprint, fit, offBoard } = choice;
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Switch
-          id={id}
-          size="sm"
-          checked={checked}
-          disabled={busy || proposal.status !== "pending"}
-          onCheckedChange={set}
-        />
-        <Label htmlFor={id} className="font-normal">
-          Add to {sprint.name}
-        </Label>
-        <span className="text-xs text-muted-foreground">{sprint.when}</span>
-      </div>
+      {control(`Add to ${sprint.name}`, locked)}
       {offBoard && (
         <p className="text-xs text-amber-700 dark:text-amber-300">
           That sprint's board does not show {payload.projectKey}, so the ticket will not appear on
@@ -198,56 +232,67 @@ export function sprintOutcome(result: unknown): string {
 /**
  * The small-ask row's compact choice (D57): a "Sprint" toggle with the verdict
  * dot, and the same details one click away. `checked` and `onChange` belong to
- * the row, which saves its fields together.
+ * the row, which saves its fields together. While the fit is read the toggle
+ * waits; when it cannot be read the toggle still works.
  */
 export function SprintChip({
   choice,
+  loading,
+  failed,
   checked,
   onChange,
   disabled,
 }: {
   choice: CreateSprintFit | undefined;
+  loading?: boolean;
+  failed?: boolean;
   checked: boolean;
   onChange: (joinSprint: boolean) => void;
   disabled?: boolean;
 }) {
-  if (!choice || choice.kind === "never") return null;
-  if (choice.kind === "no_sprint")
+  if (choice?.kind === "never") return null;
+  if (choice?.kind === "no_sprint")
     return <span className="text-xs text-muted-foreground">No active sprint</span>;
-  const { sprint, fit } = choice;
+  if (!choice && !loading && !failed) return null;
+  const sprint = choice?.sprint;
+  const fit = choice?.fit;
+  const unread = loading ? "Checking the sprint's room" : "Can't check the sprint's room";
   return (
     <span className="inline-flex items-center">
       <Toggle
         size="sm"
         variant="outline"
         pressed={checked}
-        disabled={disabled}
+        disabled={disabled || (!choice && loading)}
         onPressedChange={onChange}
-        aria-label={`Add to ${sprint.name}`}
-        title={`Add to ${sprint.name}, ${sprint.when}`}
-        className="rounded-r-none"
+        aria-label={sprint ? `Add to ${sprint.name}` : "Add to your active sprint"}
+        title={sprint ? `Add to ${sprint.name}, ${sprint.when}` : unread}
+        className={cn(fit && "rounded-r-none")}
       >
         Sprint
       </Toggle>
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 rounded-l-none border-l-0 px-2"
-            aria-label={`Sprint room: ${fit.headline}`}
-            title={fit.headline}
-          >
-            <VerdictDot verdict={fit.verdict} />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-80">
-          <div className="flex flex-col gap-2">
-            <p className={cn("text-sm", VERDICT_TEXT[fit.verdict])}>{fit.headline}</p>
-            <FitDetails fit={fit} sprint={sprint} />
-          </div>
-        </PopoverContent>
-      </Popover>
+      {fit && sprint && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 rounded-l-none border-l-0 px-2"
+              aria-label={`Sprint room: ${fit.headline}`}
+              title={fit.headline}
+            >
+              <VerdictDot verdict={fit.verdict} />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-80">
+            <div className="flex flex-col gap-2">
+              <p className={cn("text-sm", VERDICT_TEXT[fit.verdict])}>{fit.headline}</p>
+              <FitDetails fit={fit} sprint={sprint} />
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
+      {!fit && failed && <span className="ml-2 text-xs text-muted-foreground">{unread}</span>}
     </span>
   );
 }

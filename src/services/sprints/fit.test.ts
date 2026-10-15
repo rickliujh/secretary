@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   chooseRate,
   halfDays,
+  halfDaysUp,
   type LoadIssue,
+  lastSprintDay,
+  shownDays,
   sprintFit,
   sprintWhen,
   userLoad,
@@ -34,7 +37,23 @@ describe("working days", () => {
 
   test("the end has passed: none left, and it says it is not closed yet", () => {
     expect(workingDaysLeft(sprint, "2026-10-21")).toBe(0);
-    expect(sprintWhen(sprint, "2026-10-21")).toBe("ended Mon 19 Oct, not closed yet");
+    expect(sprintWhen({ ...sprint, state: "active" }, "2026-10-21")).toBe(
+      "ended Mon 19 Oct, not closed yet",
+    );
+    // A closed sprint is not "not closed yet".
+    expect(sprintWhen({ ...sprint, state: "closed" }, "2026-10-21")).toBe("ended Mon 19 Oct");
+  });
+
+  test("an end time before noon leaves the end day out; at or after noon it counts", () => {
+    // Local times (no zone), so the test reads the same in every time zone.
+    const at = (time: string) => ({ ...sprint, endAt: `2026-10-19T${time}` });
+    expect(lastSprintDay(at("09:00:00"))).toBe("2026-10-18");
+    expect(workingDaysLeft(at("09:00:00"), "2026-10-15")).toBe(2);
+    expect(lastSprintDay(at("12:00:00"))).toBe("2026-10-19");
+    expect(workingDaysLeft(at("17:00:00"), "2026-10-15")).toBe(3);
+    // Only a date: the end day counts.
+    expect(workingDaysLeft({ ...sprint, endAt: "2026-10-19" }, "2026-10-15")).toBe(3);
+    expect(workingDaysLeft({ ...sprint, endAt: null }, "2026-10-15")).toBe(3);
   });
 
   test("a sprint that has not started counts from its start", () => {
@@ -105,6 +124,18 @@ describe("rate", () => {
     expect(halfDays(1.2)).toBe(1);
     expect(halfDays(1.3)).toBe(1.5);
     expect(halfDays(3.5)).toBe(3.5);
+    expect(halfDaysUp(2.7)).toBe(3);
+    expect(halfDaysUp(3.2)).toBe(3.5);
+    expect(halfDaysUp(2)).toBe(2);
+  });
+
+  test("days shown never contradict the verdict", () => {
+    expect(shownDays(2.7, 3, "tight")).toBe(3);
+    expect(shownDays(3.2, 3, "over")).toBe(3.5);
+    // A fit just under 85 percent is not shown as all the days.
+    expect(shownDays(2.55, 3, "fits")).toBe(2.5);
+    expect(shownDays(0.8, 1, "fits")).toBe(0.5);
+    expect(shownDays(0, 0, "fits")).toBe(0);
   });
 });
 
@@ -231,11 +262,16 @@ describe("fit", () => {
     const f = sprintFit({
       ...base,
       load: load(2),
-      ticket: { label: "New", points: 8, assignee: "ana" },
+      ticket: {
+        label: "New",
+        points: 8,
+        assignee: "5b10ac8d82e05b22cc7d4ef5",
+        assigneeName: "Ana Bell",
+      },
     });
     expect(f.points).toBe(2);
     expect(f.verdict).toBe("fits");
-    expect(f.details).toContain("This ticket: assigned to ana, not counted");
+    expect(f.details).toContain("This ticket: assigned to Ana Bell, not counted");
   });
 
   test("other new tickets of the thread that join count too; another assignee's do not", () => {
@@ -244,7 +280,7 @@ describe("fit", () => {
       load: load(2),
       others: [
         { label: "Export", points: 2, assignee: null },
-        { label: "Docs", points: 5, assignee: "ana" },
+        { label: "Docs", points: 5, assignee: "5b10ac8d82e05b22cc7d4ef5" },
         { label: "Check", points: null, assignee: "me" },
       ],
       ticket: { label: "New", points: 1, assignee: null },
@@ -253,7 +289,7 @@ describe("fit", () => {
     expect(f.verdict).toBe("fits");
     expect(f.unestimated).toBe(1);
     expect(f.details[1]).toBe(
-      "Other new tickets here that join it: Export (2 points, about 1 day); Docs (assigned to ana, not counted); Check (no points)",
+      "Other new tickets here that join it: Export (2 points, about 1 day); Docs (assigned to someone else, not counted); Check (no points)",
     );
     expect(f.details[2]).toBe("This ticket: 1 point, about 0.5 days");
   });
@@ -267,5 +303,30 @@ describe("fit", () => {
     expect(f).toMatchObject({ verdict: "over", days: 4, ticket: null });
     expect(f.headline).toBe("Over: about 4 of 3 working days");
     expect(f.details.at(-1)).toBe("1 point is about 1 day, from your last 3 sprints");
+  });
+
+  test("over only when there is something to do; nothing open fits an ended sprint", () => {
+    const done = sprintFit({ ...base, daysLeft: 0, ended: true, load: load(0, 0) });
+    expect(done.verdict).toBe("fits");
+    expect(done.headline).toBe("Fits: nothing open; the sprint has ended but is not closed yet");
+    // An unsized ticket and no load: nothing says the sprint is full.
+    const unsized = sprintFit({
+      ...base,
+      daysLeft: 0,
+      ended: true,
+      load: load(0, 0),
+      ticket: { label: "New", points: null, assignee: null },
+    });
+    expect(unsized).toMatchObject({ verdict: "unknown", missing: "points", already: false });
+  });
+
+  test("rounding up keeps the numbers in line with the verdict", () => {
+    // 5.4 points x 0.5 = 2.7 days of 3: tight, shown as 3.
+    const tight = sprintFit({ ...base, load: load(5.4), ticket: null });
+    expect(tight).toMatchObject({ verdict: "tight", days: 3 });
+    expect(tight.headline).toBe("Tight: about 3 of 3 working days");
+    // 6.4 points: 3.2 days, over, shown as 3.5.
+    const over = sprintFit({ ...base, load: load(6.4), ticket: null });
+    expect(over.headline).toBe("Over: about 3.5 of 3 working days");
   });
 });

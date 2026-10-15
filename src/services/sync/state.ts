@@ -79,6 +79,7 @@ const SprintInfoSchema = z.object({
   boardId: z.number().nullable().default(null),
   start: z.string().nullable().default(null),
   end: z.string().nullable().default(null),
+  endAt: z.string().nullable().optional(),
 }) satisfies z.ZodType<SprintInfo>;
 
 const SprintStateSchema = z.object({

@@ -47,6 +47,7 @@ export function ProposalEditDialog({
   onOpenChange,
   onApprove,
   sprint,
+  busy,
 }: {
   payload: ProposalPayload;
   lookups: Lookups;
@@ -56,6 +57,8 @@ export function ProposalEditDialog({
   onApprove: (edited: ProposalPayload) => void;
   /** A create's sprint switch (D57); it saves at once, apart from the form. */
   sprint?: ReactNode;
+  /** A save of the proposal is running; approving waits for it. */
+  busy?: boolean;
 }) {
   const form = useForm<Record<string, string>>({ defaultValues: toFormValues(payload) });
   const [errors, setErrors] = useState<string[]>([]);
@@ -201,7 +204,9 @@ export function ProposalEditDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Approve with changes</Button>
+            <Button type="submit" disabled={busy}>
+              Approve with changes
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

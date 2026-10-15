@@ -25,6 +25,7 @@ import { testProvider } from "@/test/helpers";
 import { out } from "@/test/intake-layer";
 import { jiraSettings, jiraTestLayer } from "@/test/layers";
 import { boardSprints, createHandler, generate } from "../../../scripts/mock-jira";
+import { lastSprintDay, workingDaysBetween } from "./fit";
 import { threadSprintFits, userSprintLoad } from "./fit-query";
 
 const servers: { stop: (force?: boolean) => void }[] = [];
@@ -35,9 +36,18 @@ afterAll(() => {
 const DAY = 86_400_000;
 const active = boardSprints(1).find((s) => s.state === "active");
 if (!active) throw new Error("fixture: no active sprint");
-const end = active.endDate.slice(0, 10);
-// The Thursday before the sprint's Monday end: Thu, Fri and Mon are left.
-const today = new Date(Date.parse(`${end}T00:00:00Z`) - 4 * DAY).toISOString().slice(0, 10);
+// The sprint ends Monday 17:00 UTC; whether that day counts depends on the local
+// time of day (D57), so step back from the last counted day to leave three.
+const last = lastSprintDay({
+  start: active.startDate.slice(0, 10),
+  end: active.endDate.slice(0, 10),
+  endAt: active.endDate,
+});
+const today = (() => {
+  let ms = Date.parse(`${last}T00:00:00Z`);
+  while (workingDaysBetween(new Date(ms).toISOString().slice(0, 10), last ?? "") < 3) ms -= DAY;
+  return new Date(ms).toISOString().slice(0, 10);
+})();
 
 const create = {
   kind: "create_issue",

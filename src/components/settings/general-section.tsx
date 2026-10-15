@@ -24,20 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { MAX_DAYS_PER_POINT, MIN_DAYS_PER_POINT } from "@/services/settings/schema";
-
-/** Empty, or working days per story point within the setting's bounds (D57). */
-const DaysPerPoint = z
-  .string()
-  .trim()
-  .refine(
-    (v) =>
-      v === "" ||
-      (Number.isFinite(Number(v)) &&
-        Number(v) >= MIN_DAYS_PER_POINT &&
-        Number(v) <= MAX_DAYS_PER_POINT),
-    `Enter a number from ${MIN_DAYS_PER_POINT} to ${MAX_DAYS_PER_POINT}, or leave it empty`,
-  );
+import { DaysPerPoint, decimal } from "./days-per-point";
 
 const Form = z.object({
   outputLanguage: z.string().trim().min(1, "Enter a language"),
@@ -94,7 +81,7 @@ export function GeneralSection() {
         dependencies: { followupDays: values.followupDays, reminders: values.reminders },
         sprint: {
           ...s.sprint,
-          daysPerPoint: values.daysPerPoint === "" ? null : Number(values.daysPerPoint),
+          daysPerPoint: values.daysPerPoint === "" ? null : decimal(values.daysPerPoint),
         },
       }),
       { onSuccess: () => toast.success("Saved") },
