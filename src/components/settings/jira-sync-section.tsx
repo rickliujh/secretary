@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
-import { Loader2 } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -299,21 +299,21 @@ function SyncCard() {
           </>
         )}
       </CardContent>
-      {/* Fixed labels: a label that changed with each phase resized the buttons
-          every few hundred milliseconds, and WebKit left stale copies behind. */}
+      {/* Nothing here may change size while a sync runs: the macOS webview left a
+          stale copy of a button wherever a resize had moved it from. So the labels
+          are fixed, the icon swaps for a spinner of the same size, and the phase
+          is text after the buttons. */}
       <CardFooter className="mt-4 flex-wrap gap-2">
         <Button disabled={status?.running} onClick={() => start(false)}>
-          {status?.running && <Loader2 className="animate-spin" />}
+          {status?.running ? <Loader2 className="animate-spin" /> : <RefreshCw />}
           Sync now
         </Button>
         <Button variant="outline" disabled={status?.running} onClick={() => start(true)}>
           Full resync
         </Button>
-        {status?.running && (
-          <span role="status" className="min-w-0 truncate text-sm text-muted-foreground">
-            {status.phase ?? "Syncing..."}
-          </span>
-        )}
+        <span role="status" className="min-w-0 truncate text-sm text-muted-foreground">
+          {status?.running ? (status.phase ?? "Syncing...") : ""}
+        </span>
       </CardFooter>
     </Card>
   );
