@@ -314,12 +314,12 @@ unchanged.
 
 ### FR-13 Navigation (D50)
 
-- FR-13.1 (Must) Seven pages: Today, Inbox, Tickets, Waiting on, Sprint (Plan,
-  Report, Epics), Chat, Context (People, Teams, Memory), plus Settings. Old paths
-  redirect.
-- FR-13.2 (Must) Drafts open as a panel from a ticket, a dependency, a person and
-  Ctrl+K. The Drafts page stays in the app, out of the sidebar unless a setting
-  turns it back on.
+- FR-13.1 (Must) Eight pages: Today, Inbox, Tickets, Waiting on, Sprint (Plan,
+  Report, Epics), Drafts, Chat, Context (People, Teams, Memory), plus Settings. Old
+  paths redirect.
+- FR-13.2 (Must) Drafts also open as a panel from a ticket, a dependency, a person
+  and Ctrl+K. (The Drafts page was out of the sidebar at first; it came back on
+  2026-10-15 because it was hard to reach.)
 - FR-13.3 (Must) Settings group model routing, ranking weights and evaluation
   replay under Advanced.
 

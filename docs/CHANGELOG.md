@@ -1203,3 +1203,14 @@ Review fixes
   the original values again clears the edit.
 - A failed create still sends its row changes with Retry.
 
+## Drafts back in the sidebar; chat leaves drafts to the Drafts page (2026-10-15)
+
+- The Drafts page is in the sidebar again, before Chat (design.md D50). It was out
+  of the sidebar behind a setting, so in practice it was reachable only from the
+  Inbox. The setting is removed; the draft panel from tickets, people and Waiting on
+  stays.
+- Chat no longer writes its own email or message draft next to a draft request; it
+  makes the request and says it is waiting in the Inbox (PR #24, also on `main`).
+- The issue picker scrolls inside the edit dialog and shows full summaries (PR #20),
+  and the sync buttons keep their labels while a sync runs (PR #23).
+

@@ -13,13 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -35,7 +29,6 @@ const Form = z.object({
   followupDays: z.coerce.number<string>().int().min(1, "At least 1").max(30, "At most 30"),
   reminders: z.boolean(),
   fiscalYearStartMonth: z.string(),
-  draftsInSidebar: z.boolean(),
 });
 
 const MONTHS = Array.from({ length: 12 }, (_, i) =>
@@ -53,7 +46,6 @@ export function GeneralSection() {
       followupDays: "3",
       reminders: true,
       fiscalYearStartMonth: "1",
-      draftsInSidebar: false,
     },
   });
 
@@ -64,7 +56,6 @@ export function GeneralSection() {
         followupDays: String(settings.dependencies.followupDays),
         reminders: settings.dependencies.reminders,
         fiscalYearStartMonth: String(settings.general.fiscalYearStartMonth),
-        draftsInSidebar: settings.general.draftsInSidebar,
       });
   }, [settings, form]);
 
@@ -76,7 +67,6 @@ export function GeneralSection() {
           ...s.general,
           outputLanguage: values.outputLanguage,
           fiscalYearStartMonth: Number(values.fiscalYearStartMonth),
-          draftsInSidebar: values.draftsInSidebar,
         },
         dependencies: { followupDays: values.followupDays, reminders: values.reminders },
       }),
@@ -145,26 +135,6 @@ export function GeneralSection() {
               <Field orientation="horizontal" className="mt-4">
                 <Switch id="reminders" checked={field.value} onCheckedChange={field.onChange} />
                 <FieldLabel htmlFor="reminders">Notify me when a follow-up is due</FieldLabel>
-              </Field>
-            )}
-          />
-          <Controller
-            control={form.control}
-            name="draftsInSidebar"
-            render={({ field }) => (
-              <Field orientation="horizontal" className="mt-4">
-                <Switch
-                  id="draftsInSidebar"
-                  checked={field.value}
-                  onCheckedChange={field.onChange}
-                />
-                <FieldContent>
-                  <FieldLabel htmlFor="draftsInSidebar">Show Drafts in the sidebar</FieldLabel>
-                  <FieldDescription>
-                    Drafts open as a panel from tickets, people, Waiting on and Ctrl+K. This puts
-                    the page with every draft back in the sidebar.
-                  </FieldDescription>
-                </FieldContent>
               </Field>
             )}
           />

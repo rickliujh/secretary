@@ -30,9 +30,8 @@ const STATUS_TONE: Record<DraftListItem["status"], string> = {
 };
 
 /**
- * Drafts (FR-6): Teams messages and emails in each recipient's style. Out of the
- * sidebar by default since D50 (drafts open as a panel); `general.draftsInSidebar`
- * puts it back.
+ * Drafts (FR-6): Teams messages and emails in each recipient's style. In the
+ * sidebar; drafts also open as a panel from tickets, people and Waiting on (D50).
  */
 function DraftsPage() {
   const { id, write } = Route.useSearch();

@@ -1,29 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { ALL_PAGES, PAGE_TABS, sidebarNav } from "./nav";
+import { ALL_PAGES, MAIN_NAV, PAGE_TABS } from "./nav";
 
 describe("navigation (D50)", () => {
-  test("seven pages in the sidebar, without Drafts by default", () => {
-    expect(sidebarNav(false).map((n) => n.label)).toEqual([
+  test("eight pages in the sidebar, Drafts before Chat", () => {
+    expect(MAIN_NAV.map((n) => n.label)).toEqual([
       "Today",
       "Inbox",
       "Tickets",
       "Waiting on",
       "Sprint",
+      "Drafts",
       "Chat",
       "Context",
-    ]);
-  });
-
-  test("the setting puts Drafts back before Chat", () => {
-    expect(sidebarNav(true).map((n) => n.to)).toEqual([
-      "/",
-      "/inbox",
-      "/tickets",
-      "/waiting",
-      "/sprint",
-      "/drafts",
-      "/chat",
-      "/context",
     ]);
   });
 

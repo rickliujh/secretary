@@ -33,31 +33,22 @@ export type NavItem = {
   icon: LucideIcon;
 };
 
-/** The seven pages in the sidebar (D50). */
+/** The pages in the sidebar (D50; Drafts came back on 2026-10-15). */
 export const MAIN_NAV: NavItem[] = [
   { to: "/", label: "Today", icon: Sunrise },
   { to: "/inbox", label: "Inbox", icon: Inbox },
   { to: "/tickets", label: "Tickets", icon: ListTree },
   { to: "/waiting", label: "Waiting on", icon: Hourglass },
   { to: "/sprint", label: "Sprint", icon: CalendarRange },
+  { to: "/drafts", label: "Drafts", icon: PenLine },
   { to: "/chat", label: "Chat", icon: MessagesSquare },
   { to: "/context", label: "Context", icon: Users },
 ];
 
-/** Out of the sidebar unless `general.draftsInSidebar` is on; drafts open as a panel. */
-export const DRAFTS_NAV: NavItem = { to: "/drafts", label: "Drafts", icon: PenLine };
-
 export const SETTINGS_NAV: NavItem = { to: "/settings", label: "Settings", icon: Settings };
 
-/** The sidebar's pages: Drafts goes back before Chat when the setting asks for it. */
-export function sidebarNav(draftsInSidebar: boolean): NavItem[] {
-  if (!draftsInSidebar) return MAIN_NAV;
-  const chat = MAIN_NAV.findIndex((n) => n.to === "/chat");
-  return [...MAIN_NAV.slice(0, chat), DRAFTS_NAV, ...MAIN_NAV.slice(chat)];
-}
-
-/** Every page, for the header title and the command palette, whatever the sidebar shows. */
-export const ALL_PAGES = [...MAIN_NAV, DRAFTS_NAV, SETTINGS_NAV];
+/** Every page, for the header title and the command palette. */
+export const ALL_PAGES = [...MAIN_NAV, SETTINGS_NAV];
 
 export type PageTab = {
   label: string;

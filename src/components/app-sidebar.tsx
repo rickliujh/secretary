@@ -1,6 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useSettings } from "@/app/hooks";
-import { type NavItem, SETTINGS_NAV, sidebarNav } from "@/app/nav";
+import { MAIN_NAV, type NavItem, SETTINGS_NAV } from "@/app/nav";
 import { macOverlay } from "@/app/platform";
 import { usePendingCount } from "@/app/queries";
 import logo from "@/assets/logo.svg";
@@ -49,7 +48,6 @@ export function AppSidebar() {
   const pending = usePendingCount({
     refetchInterval: 30_000,
   });
-  const settings = useSettings();
   return (
     <Sidebar collapsible="icon">
       {/* macOS draws its traffic lights here (D36); the strip also drags the window. */}
@@ -70,7 +68,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <NavList
-              items={sidebarNav(settings.data?.general.draftsInSidebar ?? false)}
+              items={MAIN_NAV}
               pathname={pathname}
               badges={{ "/inbox": pending.data ?? 0 }}
             />
