@@ -5,6 +5,8 @@ import { snapshot } from "@/test/fixtures/intake/snapshot";
 import {
   buildClassifyPrompt,
   buildItemSchema,
+  CLASSIFY_PROMPT_VERSION,
+  type DecidedProposal,
   fromPayload,
   type ItemOutput,
   mapItemOutput,
@@ -418,5 +420,111 @@ describe("kinds the model cannot propose", () => {
     } as const;
     expect(schema.safeParse({ ...good, proposals: [{ ...move, ...base }] }).success).toBe(false);
     expect(fromPayload(move)).toBeNull();
+  });
+});
+
+describe("revoked proposals in the thread context (FR-14.6, prompt version 11)", () => {
+  const withDecided = (decided: DecidedProposal[]) =>
+    buildClassifyPrompt({ ...snapshot, thread: { instructions: [], decided, pending: [] } });
+  const create = "Create Task in PAY: Send Dana the Q3 numbers";
+
+  test("a revoked create reads as approved, then revoked, with its ticket deleted", () => {
+    expect(CLASSIFY_PROMPT_VERSION).toBe(11);
+    const { system, prompt } = withDecided([
+      {
+        outcome: "revoked",
+        description: create,
+        undone: "PAY-41 was deleted and no longer exists",
+      },
+    ]);
+    expect(prompt).toContain(
+      `- Approved, then revoked by the user: ${create}. Undone: PAY-41 was deleted and no longer exists.`,
+    );
+    expect(prompt).not.toContain("Rejected by the user");
+    // The header agrees with the redo exception.
+    expect(prompt).toContain(
+      "## Already decided in this conversation (do not propose again, except a revoked action the user's newest instruction asks to redo)\n",
+    );
+    expect(system).toContain("A revoked action is undone.");
+    expect(system).toContain("A ticket the revoke deleted no longer exists");
+    expect(system).toContain(
+      "A ticket the revoke closed stays closed unless the user asks to reopen it.",
+    );
+    // Only the user's own words may ask for a redo: the input led to the revoked action.
+    expect(system).toContain(
+      "Do not propose a revoked action again unless the user's newest instruction (or their answer to your question) asks to redo it",
+    );
+    expect(system).toContain(
+      "The input asking for it does not count: that is what led to the action the user revoked.",
+    );
+    expect(system).not.toContain("or the input asks");
+  });
+
+  test("a create closed before the revoke reads as closed, not closed by the revoke", () => {
+    const { prompt } = withDecided([
+      { outcome: "revoked", description: create, undone: "PAY-41 is closed (Done)" },
+    ]);
+    expect(prompt).toContain(
+      `- Approved, then revoked by the user: ${create}. Undone: PAY-41 is closed (Done).`,
+    );
+  });
+
+  test("a revoke that changed nothing back does not read as undone", () => {
+    const { prompt } = withDecided([
+      {
+        outcome: "revoked",
+        description: "Update PAY-2: assignee",
+        undone: "PAY-2 already has its earlier values.",
+        unchanged: true,
+        kept: "Jira refused to assign PAY-2 back to Tom Kay (no permission).",
+      },
+    ]);
+    expect(prompt).toContain(
+      "- Approved, then revoked by the user: Update PAY-2: assignee. Revoked; nothing was changed: PAY-2 already has its earlier values. Left as it is: Jira refused to assign PAY-2 back to Tom Kay (no permission).",
+    );
+    expect(prompt).not.toContain("Undone:");
+  });
+
+  test("a revoked create whose ticket was closed names the status", () => {
+    const { prompt } = withDecided([
+      {
+        outcome: "revoked",
+        description: create,
+        undone: "PAY-41 was closed and moved to Cancelled",
+      },
+    ]);
+    expect(prompt).toContain(
+      `- Approved, then revoked by the user: ${create}. Undone: PAY-41 was closed and moved to Cancelled.`,
+    );
+  });
+
+  test("a revoked comment says what the revoke did, from its record", () => {
+    const { prompt } = withDecided([
+      {
+        outcome: "revoked",
+        description: "Comment on PAY-2",
+        undone: "Deleted the comment on PAY-2",
+      },
+    ]);
+    expect(prompt).toContain(
+      "- Approved, then revoked by the user: Comment on PAY-2. Undone: Deleted the comment on PAY-2.",
+    );
+  });
+
+  test("a proposal dropped because its ticket was revoked is not a rejection by the user", () => {
+    const { system, prompt } = withDecided([
+      { outcome: "done", description: "Move PAY-2 to Blocked" },
+      { outcome: "rejected", description: "Comment on OPS-7" },
+      {
+        outcome: "dropped",
+        description: "Comment on PAY-41",
+        reason: "The ticket it acts on was revoked.",
+      },
+    ]);
+    expect(prompt).toContain(
+      "## Already decided in this conversation (do not propose again)\n- Approved: Move PAY-2 to Blocked\n- Rejected by the user: Comment on OPS-7\n- Dropped without a decision (the ticket it acts on was revoked): Comment on PAY-41",
+    );
+    // Without a revoked action the rule stays out, so older snapshots replay as they ran.
+    expect(system).not.toContain("revoked");
   });
 });

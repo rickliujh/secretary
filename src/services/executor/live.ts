@@ -1044,6 +1044,10 @@ const make = Effect.gen(function* () {
           yield* q((d) => d.delete(memories).where(eq(memories.id, op.memoryId)));
           yield* audit(proposalId, "revoke_memory", op.memoryId, op, null);
           return {};
+        case "forget_issue":
+          yield* forgetIssue(op.issueKey);
+          yield* audit(proposalId, "forget_issue", op.issueKey, op, null);
+          return {};
         case "delete_draft": {
           // Only a draft: a message that was sent or copied cannot be taken back.
           const gone = yield* q((d) =>

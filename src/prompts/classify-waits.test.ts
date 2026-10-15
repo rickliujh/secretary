@@ -240,7 +240,7 @@ describe("awayUntil on update_person (D47)", () => {
     });
     expect(system).toContain("When the input is an out-of-office or leave notice");
     // Prompt version 10: "until" a day is still away; "back on" a day is not (D47).
-    expect(CLASSIFY_PROMPT_VERSION).toBe(10);
+    expect(CLASSIFY_PROMPT_VERSION).toBeGreaterThanOrEqual(10);
     expect(system).toContain(
       'so awayUntil is that day ("out of office until 14 Oct" gives 14 Oct)',
     );

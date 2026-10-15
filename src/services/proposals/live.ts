@@ -547,6 +547,7 @@ const make = Effect.gen(function* () {
         }
         const warnings = [...entry.warnings];
         const did: string[] = [];
+        let ticket = entry.ticket;
         for (const step of entry.steps) {
           const outcome = yield* Effect.either(
             runRevokeStep(step, entry.proposalId, user).pipe(
@@ -574,6 +575,18 @@ const make = Effect.gen(function* () {
           undone.push(...outcome.right.done);
           did.push(...outcome.right.done);
           if (outcome.right.warning) warnings.push(outcome.right.warning);
+          if (outcome.right.ticket) ticket = outcome.right.ticket;
+        }
+        // A ticket gone from Jira before the revoke leaves the cache too (FR-14.6).
+        if (ticket?.state === "deleted" && entry.steps.length === 0) {
+          const key = ticket.key;
+          yield* executor
+            .reverse({ kind: "forget_issue", issueKey: key }, { proposalId: entry.proposalId })
+            .pipe(
+              Effect.catchAll((e) =>
+                Effect.sync(() => logger.warn(`${key} stays in the cache`, e.message)),
+              ),
+            );
         }
         const record: RevokedRecord = {
           at: nowIso(),
@@ -581,6 +594,8 @@ const make = Effect.gen(function* () {
             ? did.join("; ")
             : (entry.notes[0] ?? warnings[0] ?? "Nothing was left to undo."),
           ...(warnings.length ? { warning: warnings.join(" ") } : {}),
+          ...(ticket ? { ticket } : {}),
+          ...(did.length ? {} : { unchanged: true as const }),
         };
         const current = yield* load(entry.proposalId);
         const { revokeError: _, ...kept } =

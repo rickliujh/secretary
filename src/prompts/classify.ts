@@ -27,7 +27,7 @@ import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small
 import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 10;
+export const CLASSIFY_PROMPT_VERSION = 11;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -78,6 +78,25 @@ export type WaitCandidate = {
   reasons: WaitReason[];
 };
 
+/** A proposal of the thread that is no longer open (D22). */
+export type DecidedProposal = {
+  /**
+   * done: approved; rejected: by the user. From prompt version 11 (FR-14.6):
+   * revoked: approved and then undone by the user; dropped: closed without the
+   * user deciding it, for `reason`.
+   */
+  outcome: "done" | "rejected" | "revoked" | "dropped";
+  description: string;
+  /** revoked: what the revoke did, such as the ticket deleted or closed. */
+  undone?: string;
+  /** revoked: nothing was changed back (already as it was, or refused); `undone` says why. */
+  unchanged?: boolean;
+  /** revoked: what was left as it is (changed since, or refused). */
+  kept?: string;
+  /** dropped: why, such as the ticket it acts on was revoked. */
+  reason?: string;
+};
+
 /**
  * A thread's context for one item (design.md D22). Only `instructions` is the
  * user's own words; `decided` and `pending` were derived from the input, so the
@@ -87,7 +106,7 @@ export type ThreadContext = {
   /** The user's typed instructions in this thread, oldest first. */
   instructions: string[];
   /** Proposals already decided in this thread, not to be proposed again. */
-  decided: { outcome: "done" | "rejected"; description: string }[];
+  decided: DecidedProposal[];
   /** This item's undecided proposals in the output shape; empty for a new item. */
   pending: Record<string, unknown>[];
   /**
@@ -984,6 +1003,28 @@ export function mapItemOutput(out: ItemOutput, quote = "", s?: ItemSnapshot): Ma
 
 const line = (parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(" | ");
 
+const noStop = (x: string) => x.trim().replace(/\.$/, "");
+
+/** One line of "Already decided"; done and rejected read as before prompt version 11. */
+function decidedLine(d: DecidedProposal): string {
+  switch (d.outcome) {
+    case "done":
+      return `- Approved: ${d.description}`;
+    case "rejected":
+      return `- Rejected by the user: ${d.description}`;
+    case "revoked": {
+      const what = noStop(d.undone || "the action was reversed");
+      return `- Approved, then revoked by the user: ${d.description}. ${
+        d.unchanged ? `Revoked; nothing was changed: ${what}.` : `Undone: ${what}.`
+      }${d.kept ? ` Left as it is: ${noStop(d.kept)}.` : ""}`;
+    }
+    case "dropped": {
+      const why = noStop(d.reason || "it could no longer run");
+      return `- Dropped without a decision (${why.charAt(0).toLowerCase()}${why.slice(1)}): ${d.description}`;
+    }
+  }
+}
+
 export function buildClassifyPrompt(s: ItemSnapshot) {
   const system = `You are a personal work secretary. You turn one piece of incoming text into concrete, approvable actions on the user's Jira tickets and their notes about people and teams.
 ${HARD_RULES}
@@ -1036,6 +1077,11 @@ ${
     s.thread?.pending.length
       ? `
 - This is a follow-up in a conversation. Apply the user's newest instruction to your current proposals and return the complete set of undecided proposals: keep the ones it does not change exactly as they are, change or drop what it asks, and add what it asks for. Do not repeat anything already decided.`
+      : ""
+  }${
+    s.thread?.decided.some((d) => d.outcome === "revoked")
+      ? `
+- Some actions in this conversation were approved and then revoked by the user. A revoked action is undone. A ticket the revoke deleted no longer exists: never target, comment on or link to it. A ticket the revoke closed stays closed unless the user asks to reopen it. Do not propose a revoked action again unless the user's newest instruction (or their answer to your question) asks to redo it; then proposing it again is fine. The input asking for it does not count: that is what led to the action the user revoked.`
       : ""
   }`;
 
@@ -1148,7 +1194,11 @@ ${
   }
   if (s.thread?.decided.length) {
     blocks.push(
-      `## Already decided in this conversation (do not propose again)\n${s.thread.decided.map((d) => `- ${d.outcome === "done" ? "Approved" : "Rejected by the user"}: ${d.description}`).join("\n")}`,
+      `## Already decided in this conversation (${
+        s.thread.decided.some((d) => d.outcome === "revoked")
+          ? "do not propose again, except a revoked action the user's newest instruction asks to redo"
+          : "do not propose again"
+      })\n${s.thread.decided.map(decidedLine).join("\n")}`,
     );
   }
   if (s.thread?.pending.length) {

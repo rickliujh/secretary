@@ -1312,6 +1312,34 @@ Review fixes
   and assign, a retried update, a mirrored wait whose link is gone, two
   concurrent revokes, and pending members rejected.
 
+Thread context (FR-14.6)
+- Later turns of a thread no longer fold a revoked proposal into the rejections:
+  "Already decided" shows it as approved, then revoked, with what the revoke did
+  (the ticket deleted, or closed and moved to its status; other kinds the stored
+  revoke message), and a pending proposal dropped because its ticket was revoked
+  as dropped with that reason (`intake/decided.ts`). A revoke that changed
+  nothing back says so instead of "Undone", with what was left as it is; a
+  ticket closed before the revoke reads as closed in its status. `$new` refs
+  there name the created key.
+- The `revoked` record keeps `ticket` (deleted, or closed with its status and
+  whether the revoke moved it), written from what the run did, and `unchanged`
+  when nothing was changed back; older records are read from their message
+  (`revokedTicket`).
+- Classify prompt version 11: when something was revoked, a rule says a revoked
+  action is undone, a deleted ticket no longer exists and a closed one stays
+  closed unless the user asks to reopen it, and neither is proposed again unless
+  the user's newest instruction asks to redo it; the input asking for it does
+  not count. The "Already decided" header carries the same exception. Older
+  snapshots replay as they ran (the rule follows the stored context).
+- A ticket a revoke deleted is no longer read, named as a reference or offered by
+  any retrieval source (`exclude` on the snapshot request). A ticket already gone
+  from Jira when it is revoked (or whose DELETE answers 404) leaves the cache
+  like one the revoke deletes (`forget_issue` reverse op). One the revoke closed
+  stays a candidate in its new status. A dropped card shows its reason.
+- Tests: the prompt lines, header and rule, the thread outcomes from stored and
+  older records, retrieval exclusion, and against the mock a tracked ask revoked
+  (deleted, deleted in Jira first, and closed) followed by another turn.
+
 Known limits
 - The revoke comment is matched among the newest 100 comments of the ticket.
 - Deleting a ticket leaves waits created outside its thread pointing at the

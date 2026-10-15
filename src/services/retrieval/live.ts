@@ -132,6 +132,8 @@ const make = Effect.gen(function* () {
         ],
         CANDIDATE_LIMIT,
       );
+      const excluded = new Set(req.exclude ?? []);
+      for (const k of excluded) merged.delete(k);
       const rowsFor = (keys: string[]) =>
         keys.length
           ? q((d) => d.select().from(jiraIssues).where(inArray(jiraIssues.key, keys)).all())
@@ -139,7 +141,11 @@ const make = Effect.gen(function* () {
       let rows = yield* rowsFor([...merged.keys()]);
       // Epics of candidates, so the model can file new work under them.
       const epicKeys = [
-        ...new Set(rows.map((r) => r.epicKey).filter((k): k is string => !!k && !merged.has(k))),
+        ...new Set(
+          rows
+            .map((r) => r.epicKey)
+            .filter((k): k is string => !!k && !merged.has(k) && !excluded.has(k)),
+        ),
       ];
       for (const k of epicKeys) merged.set(k, ["epic" as Reason]);
       rows = [...rows, ...(yield* rowsFor(epicKeys))];

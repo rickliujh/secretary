@@ -2,10 +2,10 @@ import { Context, Data, type Effect } from "effect";
 import type { DbError } from "@/services/db";
 import type { ExecutorError } from "@/services/executor";
 import type { JiraError } from "@/services/jira";
-import type { RevokePlan } from "./revoke";
+import type { RevokedTicket, RevokePlan } from "./revoke";
 import type { ProposalPayload } from "./schema";
 
-export type { RevokeEntry, RevokePlan, RevokeStep } from "./revoke";
+export type { RevokedTicket, RevokeEntry, RevokePlan, RevokeStep } from "./revoke";
 export * from "./schema";
 
 export class ProposalError extends Data.TaggedError("ProposalError")<{
@@ -31,8 +31,18 @@ export type RevokeResult = {
   warning?: string;
 };
 
-/** Stored on a revoked proposal's result (D54 (4)). */
-export type RevokedRecord = { at: string; message: string; warning?: string };
+/**
+ * Stored on a revoked proposal's result (D54 (4)). From FR-14.6 also: for a
+ * create, what became of its ticket; `unchanged` when nothing was changed back
+ * (already as it was, or Jira refused), so `message` says why.
+ */
+export type RevokedRecord = {
+  at: string;
+  message: string;
+  warning?: string;
+  ticket?: RevokedTicket;
+  unchanged?: true;
+};
 /** Stored on an executed proposal whose revoke stopped at a failed step; Revoke runs again. */
 export type RevokeErrorRecord = { at: string; message: string; undone: string[] };
 

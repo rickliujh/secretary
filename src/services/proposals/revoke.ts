@@ -31,6 +31,47 @@ import {
 /** The comment a revoked ticket gets when it is closed rather than deleted (D54). */
 export const REVOKE_COMMENT = "Created by mistake and revoked in Secretary.";
 
+/**
+ * What revoking a create left of its ticket (FR-14.6), kept on the revoked
+ * record: deleted (by the revoke, or already gone), or closed in `status`,
+ * `moved` there by the revoke or already closed. `status` is null only when read
+ * back from an older record's text and nothing was moved.
+ */
+export type RevokedTicket =
+  | { key: string; state: "deleted" }
+  | { key: string; state: "closed"; status: string | null; moved: boolean };
+
+/**
+ * What revoking a create records it did to the ticket (the `done` texts and the
+ * note joined into `RevokedRecord.message`); `revokedTicket` reads them back
+ * from records written before `ticket` was kept.
+ */
+export const createRevokeText = {
+  deleted: (key: string) => `Deleted ${key}`,
+  alreadyDeleted: (key: string) => `${key} is already deleted.`,
+  moved: (key: string, status: string) => `Moved ${key} to ${status}`,
+};
+
+/**
+ * What a revoked create left of its ticket: the record's `ticket`, else read
+ * back from its message (records written before `ticket` was kept).
+ */
+export function revokedTicket(
+  key: string,
+  record: { message: string; ticket?: RevokedTicket },
+): RevokedTicket {
+  if (record.ticket) return record.ticket;
+  const parts = record.message.split("; ");
+  if (
+    parts.includes(createRevokeText.deleted(key)) ||
+    record.message === createRevokeText.alreadyDeleted(key)
+  )
+    return { key, state: "deleted" };
+  const prefix = createRevokeText.moved(key, "");
+  const moved = parts.find((x) => x.startsWith(prefix))?.slice(prefix.length);
+  return { key, state: "closed", status: moved ?? null, moved: !!moved };
+}
+
 /** A stored proposal as the planner sees it: the effective payload, refs as stored. */
 export type RevokeSubject = {
   id: string;
@@ -222,6 +263,11 @@ export type RevokeEntry = {
   /** Left as it is because it changed since the approval (FR-14.3); kept on the result. */
   warnings: string[];
   impossible: string | null;
+  /**
+   * A create: what the plan leaves of its ticket. The run replaces it with what
+   * happened (a delete Jira refuses closes the ticket instead).
+   */
+  ticket?: RevokedTicket;
 };
 
 export type RevokePlan = {
@@ -268,15 +314,17 @@ const sameName = (a: string | null | undefined, b: string | null | undefined) =>
 function planCreate(key: string, f: Extract<RevokeFacts, { kind: "create_issue" }>): Draft {
   const d = empty();
   if (!f.exists) {
-    d.notes.push(`${key} is already deleted.`);
+    d.notes.push(createRevokeText.alreadyDeleted(key));
+    d.ticket = { key, state: "deleted" };
     return d;
   }
   if (f.canDelete && f.subtasks.length === 0) {
     d.steps.push({
       text: `Delete ${key} in Jira`,
-      done: `Deleted ${key}`,
+      done: createRevokeText.deleted(key),
       op: jira({ kind: "delete_issue", issueKey: key }),
     });
+    d.ticket = { key, state: "deleted" };
     return d;
   }
   d.notes.push(
@@ -298,13 +346,17 @@ function planCreate(key: string, f: Extract<RevokeFacts, { kind: "create_issue" 
       done: `Commented on ${key}`,
       op: jira({ kind: "add_comment", issueKey: key, bodyMarkdown: REVOKE_COMMENT }),
     });
-  if (closed) d.notes.push(`${key} is already ${f.status?.name}.`);
-  else if (target)
+  if (closed) {
+    d.notes.push(`${key} is already ${f.status?.name}.`);
+    d.ticket = { key, state: "closed", status: f.status?.name ?? null, moved: false };
+  } else if (target) {
     d.steps.push({
       text: `Move ${key} to ${target.name}`,
-      done: `Moved ${key} to ${target.name}`,
+      done: createRevokeText.moved(key, target.name),
       op: { kind: "transition_to", issueKey: key, status: target.name },
     });
+    d.ticket = { key, state: "closed", status: target.name, moved: true };
+  }
   return d;
 }
 

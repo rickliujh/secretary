@@ -238,6 +238,8 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
     issueKey?: string;
     communicationId?: string;
     warning?: string;
+    /** Why it was dropped without the user deciding it (a revoked ticket, D54). */
+    reason?: string;
   } | null;
   const drafts = useDraftPanel();
   const draftId = result?.communicationId;
@@ -280,6 +282,9 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
       )}
       {proposal.status === "failed" && result?.error && (
         <p className="text-sm text-destructive">{result.error}</p>
+      )}
+      {proposal.status === "rejected" && result?.reason && (
+        <p className="text-sm text-muted-foreground">{result.reason}</p>
       )}
       {proposal.status === "revoked" && result?.message && (
         <p className="text-sm text-muted-foreground line-through">{result.message}</p>

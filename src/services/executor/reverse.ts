@@ -29,6 +29,11 @@ export type ReverseOp =
   | { kind: "restore_person"; personId: string; set: Record<string, unknown> }
   | { kind: "restore_team"; teamId: string; set: Record<string, unknown> }
   | { kind: "delete_memory"; memoryId: string }
+  /**
+   * Drops a ticket that is already gone from Jira from the cache, with what
+   * Secretary kept about it, as a delete through `run` does.
+   */
+  | { kind: "forget_issue"; issueKey: string }
   /** Deletes a draft that was neither sent nor copied. */
   | { kind: "delete_draft"; communicationId: string };
 

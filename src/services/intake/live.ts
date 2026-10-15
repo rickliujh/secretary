@@ -49,6 +49,7 @@ import {
   type TriageInput,
   type TriageResult,
 } from ".";
+import { threadOutcomes } from "./decided";
 import { mergeItemProposals } from "./merge";
 import {
   cleanInput,
@@ -61,15 +62,6 @@ import { partsOf, splitMessage, UserContentSchema, withLinkedItems } from "./thr
 
 const UNSURE_QUESTION =
   "I am not sure what should happen here. What would you like me to do with this?";
-
-const DECIDED = {
-  executed: "done",
-  approved: "done",
-  failed: "done",
-  rejected: "rejected",
-  // Undone by the user (D54): not to be proposed again, like a rejection.
-  revoked: "rejected",
-} as const;
 
 type ProposalRow = typeof proposals.$inferSelect;
 type ItemRow = typeof intakeItems.$inferSelect;
@@ -222,16 +214,26 @@ const make = Effect.gen(function* () {
         if (!c.success) return [];
         return splitMessage(c.data.parts, i === 0).instruction ?? [];
       });
-      const decided = rows
-        .filter((r) => r.kind !== "needs_clarification" && r.status in DECIDED)
-        .map((r) => ({
-          outcome: DECIDED[r.status as keyof typeof DECIDED],
-          description: describePayload(effectivePayload(r)),
-        }));
-      const createdKeys = rows
-        .filter((r) => r.kind === "create_issue" && r.status === "executed")
+      // A ticket a revoke closed without moving it shows its status as cached now.
+      const revokedKeys = rows
+        .filter((r) => r.kind === "create_issue" && r.status === "revoked")
         .map((r) => (r.result as { issueKey?: string } | null)?.issueKey)
         .filter((k): k is string => !!k);
+      const cachedStatus = new Map(
+        revokedKeys.length
+          ? (yield* q((d) =>
+              d
+                .select({ key: jiraIssues.key, status: jiraIssues.status })
+                .from(jiraIssues)
+                .where(inArray(jiraIssues.key, revokedKeys))
+                .all(),
+            )).map((r) => [r.key, r.status] as const)
+          : [],
+      );
+      const { decided, createdKeys, deletedKeys } = threadOutcomes(
+        rows,
+        (key) => cachedStatus.get(key) ?? null,
+      );
       const pendingByIdx = new Map<number, ProposalRow[]>();
       for (const r of rows) {
         if (r.status !== "pending" || !r.intakeItemId) continue;
@@ -248,6 +250,7 @@ const make = Effect.gen(function* () {
         instructions,
         decided,
         createdKeys,
+        deletedKeys,
         pendingByIdx,
       };
     });
@@ -295,7 +298,7 @@ const make = Effect.gen(function* () {
           ? { instructions: job.instructions, decided: ctx.thread.decided, pending, others }
           : null;
       const site = { jiraHost: jiraHost((yield* settingsOrDefault(settingsSvc)).jira.baseUrl) };
-      const references = [
+      const named = [
         extractReferences(job.quote, contacts, site),
         extractReferences(job.instructions.join("\n"), contacts, site),
         // Tickets named anywhere earlier in the thread stay candidates for this item.
@@ -308,6 +311,13 @@ const make = Effect.gen(function* () {
           ],
         },
       ].reduce(mergeRefs);
+      // A ticket a revoke deleted no longer exists (FR-14.6): not read, not named as a
+      // reference, and retrieval leaves it out however it would find it.
+      const deleted = new Set(ctx.thread.deletedKeys);
+      const references = {
+        ...named,
+        issueKeys: named.issueKeys.filter((k) => !deleted.has(k)),
+      };
       yield* readMissingKeys(references.issueKeys);
       const snapshot = yield* retrieval.snapshot({
         quote: job.quote,
@@ -317,6 +327,7 @@ const make = Effect.gen(function* () {
         today: ctx.today,
         ...(job.askedOn ? { askedOn: job.askedOn } : {}),
         thread,
+        exclude: ctx.thread.deletedKeys,
       });
       const result = yield* Effect.either(
         llm.object<ItemOutput>("classify_item", {
