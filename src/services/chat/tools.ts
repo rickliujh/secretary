@@ -511,12 +511,23 @@ export function chatTools(
               questions: rows
                 .filter((p) => p.kind === "needs_clarification")
                 .map((p) => describePayload(p.payload as ProposalPayload)),
-              note: "Nothing has changed yet. The user approves these in the Inbox.",
+              note: proposeNote(rows.map((p) => p.kind)),
             };
           }),
         ),
     }),
   };
+}
+
+/**
+ * What the model is told after propose_actions. A draft request is written by the
+ * Drafts page after approval, so the chat must not write its own version too.
+ */
+export function proposeNote(kinds: readonly string[]): string {
+  const base = "Nothing has changed yet. The user approves these in the Inbox.";
+  return kinds.includes("draft_message")
+    ? `${base} A draft request is among them: the Drafts page writes the message after the user approves it, so do not write the message, a subject or a sample in your reply.`
+    : base;
 }
 
 export type ChatTools = ReturnType<typeof chatTools>;
