@@ -380,3 +380,32 @@ Checklist
 - FR-12 AC passes; each list has a test for a fixture that mixes small asks, waits,
   blockers and sprint work.
 - Done on a small ask transitions it in the mock Jira and the row leaves the list.
+
+## Phase 17: Revoke an approval (FR-14, D54)
+
+Needs Phases 11 to 16. Branch `feat/17-revoke`, stacked on `feat/11-small-asks`.
+
+Tasks
+1. Undo data: each Executor path records `undo` in the proposal result as D54 (1)
+   lists, read just before the write; tests per kind against the stubbed Jira.
+2. Reverse actions in the Jira client and the Executor: delete issue, my-permissions
+   check, delete comment, move to backlog, plus the existing transition, field
+   update, assign, sprint move and link deletion; the cancel-status choice as a pure
+   function with tests (cancelled/canceled, won't do, rejected, declined, then done).
+3. A pure revoke planner (`src/services/proposals/revoke.ts`): steps per kind, the
+   cascade from a create to what acts on it, impossibility reasons, the
+   "changed since" check; unit tests for every kind and the cascade.
+4. `Proposals.revokePlan` and `Proposals.revoke`, status `revoked`, `revokeError`,
+   resumable runs; the cache follows (deleted rows removed, others refreshed).
+5. UI: Revoke on executed proposal cards and on tracked small-ask rows, a
+   confirmation dialog listing the steps (shadcn AlertDialog), the revoked badge and
+   message, warnings and the retry path; disabled with the reason when impossible.
+6. Mock Jira: delete issue, delete comment, my-permissions (with a switch for a user
+   without delete permission), backlog moves, and a cancelled status in a workflow.
+
+Checklist
+- FR-14 AC passes against the mock Jira, both with and without delete permission.
+- Every kind has a revoke test; a field changed in Jira after approval is kept and
+  named in a warning; a failed step leaves the proposal resumable.
+- typecheck, lint, tests and cargo checks pass; CHANGELOG has the phase entry.
+

@@ -323,6 +323,31 @@ unchanged.
 - FR-13.3 (Must) Settings group model routing, ranking weights and evaluation
   replay under Advanced.
 
+### FR-14 Revoke an approval (D54)
+
+- FR-14.1 (Must) An executed proposal can be revoked from its card, and a tracked
+  small ask from its row (the whole bundle). Revoke opens a confirmation that lists
+  each step it will take in Jira and in Secretary; confirming is the approval of
+  those steps, and they run through the Executor like any other write.
+- FR-14.2 (Must) Each kind is undone the reverse way: a created ticket is deleted
+  when the user may delete issues, otherwise moved to a cancelled status (a status
+  named like Cancelled, Won't Do, Rejected or Declined, else any done status) with
+  a comment; a comment is deleted; field updates, assignee, status, sprint, waits,
+  contacts and teams get their previous values back; a blocked-by link Secretary made
+  is removed; a wait, a memory or an unsent draft is deleted.
+- FR-14.3 (Must) Revoking never overwrites a later change: a field changed by
+  someone else since the approval is left as it is and named in a warning.
+- FR-14.4 (Must) Revoking a ticket created in a thread first revokes the executed
+  proposals of that thread that act on it, newest first.
+- FR-14.5 (Must) A step that fails stops the revoke and says what was undone; Revoke
+  can be pressed again to finish. A proposal that cannot be undone (a sent draft, a
+  sprint that has closed, an approval from before undo data was recorded) says why
+  instead of offering Revoke.
+- AC: a small ask tracked with a wait and a comment, revoked in the mock Jira as a
+  user without delete permission, leaves the ticket in a cancelled status with a
+  comment, the Secretary comment deleted, the wait gone and the row marked revoked;
+  with delete permission the ticket is gone.
+
 ## 5. Non-functional requirements
 
 - NFR-1 Works offline for browsing cached data, drafting from cache and editing
