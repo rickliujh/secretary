@@ -60,6 +60,22 @@ describe("the schema and the prompt", () => {
     expect(prompt).toContain("- PAY-2 [Story, In Progress, epic PAY-1, assignee ana.b, 3 points]");
   });
 
+  test("a teammate's new estimate is proposed; an answer is acted on, not confirmed (eval, 2026-10-15)", () => {
+    const { system } = buildClassifyPrompt(withScale);
+    expect(system).toContain("including one from a teammate in a message the user pasted");
+    expect(system).toContain("do not ask first, because the user approves every proposal");
+    expect(system).not.toContain("Once the user has answered your question");
+    const answered: ItemSnapshot = {
+      ...withScale,
+      thread: { instructions: ["3"], decided: [], pending: [], questions: ["How many points?"] },
+    };
+    expect(buildClassifyPrompt(answered).system).toContain(
+      "Once the user has answered your question, act on the answer",
+    );
+    const older = { ...answered, promptVersion: 11, pointScale: undefined };
+    expect(buildClassifyPrompt(older).system).not.toContain("Once the user has answered");
+  });
+
   test("an empty scale offers only stated points and says not to estimate", () => {
     const s = { ...withScale, pointScale: [] };
     expect(fields(s).pointsSource?.safeParse("estimated").success).toBe(false);
@@ -106,6 +122,68 @@ describe("validation and mapping", () => {
     expect(validateItemOutput(estimated, withScale).join(" ")).toContain(
       "never estimate an existing ticket",
     );
+  });
+
+  test("fields the ticket already has are dropped from an update (eval, 2026-10-15)", () => {
+    const s: ItemSnapshot = {
+      ...withScale,
+      candidates: withScale.candidates.map((c) =>
+        c.key === "PAY-2" ? { ...c, priority: "High", dueDate: "2026-10-30" } : c,
+      ),
+    };
+    const out = answer({
+      kind: "update_issue",
+      target: "PAY-2",
+      summary: "Export invoices to the new ledger",
+      priority: "High",
+      dueDate: "2026-10-30",
+      assignee: "ana.b",
+      storyPoints: "5",
+      pointsSource: "stated",
+      ...e,
+    });
+    expect(validateItemOutput(out, s)).toEqual([]);
+    expect(mapItemOutput(out, "", s)[0]?.payload).toEqual({
+      kind: "update_issue",
+      target: "PAY-2",
+      changes: { storyPoints: 5 },
+    });
+  });
+
+  test("an update that changes nothing is left out, not repeated or asked about", () => {
+    const out = answer({
+      kind: "update_issue",
+      target: "PAY-2",
+      assignee: "ana.b",
+      storyPoints: "3",
+      pointsSource: "stated",
+      ...e,
+    });
+    const errors = validateItemOutput(out, withScale);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('PAY-2 already has assignee "ana.b", storyPoints 3');
+    expect(errors[0]).toContain("Leave it out, and do not ask the user to confirm");
+    // What the repair asks for passes: no proposals, and a question that says so.
+    expect(
+      validateItemOutput({ ...answer(), question: "PAY-2 already has 3 story points." }, withScale),
+    ).toEqual([]);
+  });
+
+  test("stray punctuation in the points is ignored; text that is no number drops them", () => {
+    const update = { kind: "update_issue", target: "PAY-2", ...e };
+    const colon = answer({ ...update, storyPoints: ": 5", pointsSource: "stated" });
+    expect(validateItemOutput(colon, withScale)).toEqual([]);
+    expect(mapItemOutput(colon, "", withScale)[0]?.payload).toMatchObject({
+      changes: { storyPoints: 5 },
+    });
+    const created = answer({ ...story, storyPoints: ":", pointsSource: "stated" });
+    expect(validateItemOutput(created, withScale)).toEqual([]);
+    expect(mapItemOutput(created, "", withScale)[0]?.payload).toMatchObject({
+      storyPoints: null,
+      storyPointsEstimated: false,
+    });
+    const words = answer({ ...story, storyPoints: "not sure", pointsSource: "(none)" });
+    expect(validateItemOutput(words, withScale)).toEqual([]);
   });
 
   test("an Epic gets no points", () => {

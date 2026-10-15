@@ -1451,6 +1451,14 @@ Built
   points telling the user what cannot be done or asking them for a value to
   repair, telling the model to ask in its question. A fourth live eval case
   answers the question with "3".
+- Fixed (2026-10-15, live eval): `storyPoints` text ignores stray punctuation
+  and whitespace at its ends (": 2" is 2); empty, punctuation, "(none)", "null",
+  "none" and "n/a" are no points, and other text that is not a number drops the
+  points instead of failing the item; only a number out of range or off the
+  scale is repaired. An update_issue drops the fields the ticket already has; one
+  left with nothing is repaired to be left out. The rule proposes a teammate's
+  new estimate without asking, and an answered question is acted on, not
+  confirmed.
 
 Known limits
 - On update_issue an empty points field means "no change"; clearing uses the

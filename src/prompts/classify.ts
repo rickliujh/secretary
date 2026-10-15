@@ -579,6 +579,42 @@ const keptFor = (p: Record<string, unknown>, s: ItemSnapshot | undefined) => {
   return key ? keptPoints(s?.thread?.pending).get(key) : undefined;
 };
 
+const UPDATE_FIELDS = ["summary", "priority", "dueDate", "assignee", "storyPoints"] as const;
+type UpdateField = (typeof UPDATE_FIELDS)[number];
+
+/**
+ * An update_issue's changes (D55): `given` is what the model set; `changes`
+ * leaves out the fields the ticket already has as cached (`same`), since writing
+ * them changes nothing (eval, 2026-10-15). Only stated points change an existing
+ * ticket; a clear the user chose stays.
+ */
+function updateChanges(p: Record<string, unknown>, s: ItemSnapshot | undefined) {
+  const points = p.pointsSource === "stated" ? parsePoints(p.storyPoints) : null;
+  const cleared = typeof points !== "number" && !!keptFor(p, s)?.cleared;
+  const given: Partial<Record<UpdateField, string | number | null>> = {
+    ...defined({
+      summary: str(p.summary),
+      priority: str(p.priority),
+      dueDate: str(p.dueDate),
+      assignee: str(p.assignee),
+      storyPoints: points,
+    }),
+    ...(cleared ? { storyPoints: null } : {}),
+  };
+  const ticket = s?.candidates.find((c) => c.key === p.target);
+  // Undefined: not known (an older snapshot), so nothing counts as the same. A
+  // clear is kept: the user chose it.
+  const same = ticket
+    ? UPDATE_FIELDS.filter(
+        (f) => given[f] != null && ticket[f] !== undefined && given[f] === ticket[f],
+      )
+    : [];
+  const changes = Object.fromEntries(
+    Object.entries(given).filter(([f]) => !(same as string[]).includes(f)),
+  );
+  return { given, changes, same, ticket };
+}
+
 /** The timeline channel of a reply, from the input's source (D46). */
 const followupChannel = (source: string | undefined): (typeof FOLLOWUP_CHANNELS)[number] =>
   (FOLLOWUP_CHANNELS as readonly string[]).includes(source ?? "")
@@ -609,25 +645,12 @@ function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): Propos
           cleared: keptFor(p, s)?.cleared,
         }),
       });
-    case "update_issue": {
-      // Only stated points change an existing ticket (D55); a clear the user chose stays.
-      const points = g("pointsSource") === "stated" ? parsePoints(g("storyPoints")) : null;
-      const cleared = typeof points !== "number" && !!keptFor(p, s)?.cleared;
+    case "update_issue":
       return ProposalPayloadSchema.parse({
         kind: "update_issue",
         target: g("target"),
-        changes: {
-          ...defined({
-            summary: str(g("summary")),
-            priority: str(g("priority")),
-            dueDate: str(g("dueDate")),
-            assignee: str(g("assignee")),
-            storyPoints: typeof points === "number" ? points : null,
-          }),
-          ...(cleared ? { storyPoints: null } : {}),
-        },
+        changes: updateChanges(p, s).changes,
       });
-    }
     case "add_comment":
       return ProposalPayloadSchema.parse({
         kind: "add_comment",
@@ -1014,15 +1037,20 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       !/^[A-Z]{2,6}\d{7,}$/.test(String(p.externalRef ?? ""))
     )
       errors.push(`${at}: an incident dependency needs externalRef like INC0012345.`);
-    if (
-      p.kind === "update_issue" &&
-      // Clearing the points the user chose is a change the model's shape cannot carry.
-      !keptOf(p)?.cleared &&
-      ["summary", "priority", "dueDate", "assignee", "storyPoints"].every(
-        (k) => p[k] === null || p[k] === undefined || p[k] === "",
-      )
-    )
+    // Fields the ticket already has are dropped; an update left with nothing is
+    // left out, not asked about (eval, 2026-10-15).
+    const update = p.kind === "update_issue" ? updateChanges(p, s) : null;
+    const noChange = !!update && Object.keys(update.changes).length === 0;
+    if (update && noChange && !update.same.length)
       errors.push(`${at}: update_issue must change at least one field.`);
+    if (update && noChange && update.same.length)
+      errors.push(
+        `${at}: ${p.target} already has ${update.same
+          .map((f) => `${f} ${JSON.stringify(update.ticket?.[f])}`)
+          .join(
+            ", ",
+          )}, so this update changes nothing. Leave it out, and do not ask the user to confirm a value the ticket already has. When nothing else is left to do, return no proposals and say in question that ${p.target} already has it.`,
+      );
     // The small-ask default replaces an estimate, so a wrong one needs no repair.
     const replaced =
       small && typeof s.smallAsks?.defaultPoints === "number" && p.pointsSource !== "stated";
@@ -1063,14 +1091,16 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       const problem = awayDateProblem(String(str(p.awayUntil)), s.today);
       if (problem) errors.push(`${at}: awayUntil ${problem}.`);
     }
-    // A structurally valid proposal must also map cleanly to a payload.
-    try {
-      toPayload(p, s);
-    } catch (e) {
-      errors.push(
-        `${at}: ${e instanceof z.ZodError ? e.issues.map((x) => `${x.path.join(".")}: ${x.message}`).join("; ") : String(e)}`,
-      );
-    }
+    // A structurally valid proposal must also map cleanly to a payload; an empty
+    // update is reported above.
+    if (!noChange)
+      try {
+        toPayload(p, s);
+      } catch (e) {
+        errors.push(
+          `${at}: ${e instanceof z.ZodError ? e.issues.map((x) => `${x.path.join(".")}: ${x.message}`).join("; ") : String(e)}`,
+        );
+      }
   });
   errors.push(...revokedMentions(out, s));
   if (out.proposals.length === 0 && !out.question?.trim())
@@ -1285,7 +1315,7 @@ ${
         s.pointScale.length
           ? "For a new ticket (create_issue) whose points the input does not state, suggest points: a value from the Story point scale, sized against the candidate issues' points, with pointsSource estimated."
           : "There is no story point scale yet, so do not estimate: set points only when the input states them."
-      } Never estimate an existing ticket: propose update_issue with storyPoints only when the input or the user asks to change its points or gives a new estimate ("PAY-12 is more like a 5"), with pointsSource stated. When the user wants an existing ticket's points set but gives no number, ask for it in question. An Epic gets no points.${
+      } Never estimate an existing ticket yourself. When the input or the user asks to change its points, or the input states a new estimate for it, including one from a teammate in a message the user pasted ("PAY-12 is more like a 5"), propose update_issue with that number as storyPoints and pointsSource stated; do not ask first, because the user approves every proposal. Leave out fields the ticket already has. When the user wants an existing ticket's points set but gives no number, ask for it in question. An Epic gets no points.${
         s.thread?.pending.some((p) => p.pointsCleared === true)
           ? " A current proposal with pointsCleared true had its points removed by the user: keep storyPoints empty for it unless their newest instruction gives a number."
           : ""
@@ -1297,6 +1327,11 @@ ${
 - The user reviews and can edit every proposal before it runs, so a sensible proposal with a stated assumption beats a question. Decide details yourself: the priority (from urgency, deadlines, blocking and customer impact), wording, and which listed value fits. Say what you assumed in the rationale.
 - Ask a question only when you cannot tell which issue, person or kind of action the input is about. Never ask the user to pick a value you could reasonably choose, such as a priority.
 ${
+  s.promptVersion >= 12 && s.thread?.instructions.length
+    ? `- Once the user has answered your question, act on the answer: propose what it settles, and do not ask them to confirm it or ask the same thing again.
+`
+    : ""
+}${
   s.sprints?.length
     ? `- When the input refers to a sprint (by name, by number, as "next sprint", or as "the Nth sprint of a quarter"), use that sprint's end date from the Sprints list, whatever the sprints are called. The Nth sprint of a quarter is the one listed with that quarter and position. Say in the rationale which sprint you used, and that its dates are an estimate if it is projected.
 `

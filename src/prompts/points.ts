@@ -16,18 +16,29 @@ export type PointSource = (typeof POINT_SOURCES)[number];
 export const pointSources = (scale: readonly number[]): readonly PointSource[] =>
   scale.length ? POINT_SOURCES : ["stated"];
 
+/** Stray punctuation and whitespace at either end (": 2", "3."); a sign or point before a digit stays. */
+const LEADING_NOISE = /^(?:[^\p{L}\p{N}.-]|[.-](?!\d))+/u;
+const TRAILING_NOISE = /[^\p{L}\p{N}]+$/u;
+/** What a model writes for "no points" when it fills the field anyway. */
+const NO_POINTS = /^(?:none|null|nil|n\/?a|no|empty|unknown|tbd)$/i;
+
 /**
- * The model's `storyPoints` text as a number: "3", "0.5", "5 points". Null when
- * empty; "invalid" when it is not a number of points.
+ * The model's `storyPoints` text as a number: "3", "0.5", "5 points", ": 2",
+ * "three". Null when there are no points: empty, only punctuation, "(none)",
+ * "null", "n/a", or anything else that is not a number of points. Points are
+ * optional, so text that is not a number drops them rather than failing the
+ * item; dropping them is no guess (eval, 2026-10-15). A number out of range
+ * ("-2", "2000") comes back as that number for the checks to refuse.
  */
-export function parsePoints(v: unknown): number | null | "invalid" {
-  if (v === null || v === undefined) return null;
-  if (typeof v === "number") return Number.isFinite(v) ? v : "invalid";
-  if (typeof v !== "string") return "invalid";
-  const t = v.trim();
-  if (!t) return null;
-  const m = /^(\d+(?:[.,]\d+)?)\s*(?:story\s*)?(?:points?|pts?|sp)?$/i.exec(t);
-  return m?.[1] ? Number(m[1].replace(",", ".")) : "invalid";
+export function parsePoints(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v !== "string") return null;
+  const t = v.trim().replace(LEADING_NOISE, "").replace(TRAILING_NOISE, "");
+  if (!t || NO_POINTS.test(t)) return null;
+  const m = POINTS_TEXT.exec(t);
+  if (!m?.[1]) return null;
+  const n = numberOf(m[1].replace(",", "."));
+  return Number.isFinite(n) ? n : null;
 }
 
 const WORDS: Record<string, number> = {
@@ -55,7 +66,13 @@ const WORDS: Record<string, number> = {
   twenty: 20,
 };
 
-const NUM = String.raw`(?:\d+(?:\.\d+)?|${Object.keys(WORDS).join("|")})`;
+const WORD_NUM = Object.keys(WORDS).join("|");
+const NUM = String.raw`(?:\d+(?:\.\d+)?|${WORD_NUM})`;
+/** The whole of a `storyPoints` value: a number (digits or a word) and an optional unit. */
+const POINTS_TEXT = new RegExp(
+  String.raw`^(-?(?:\d+(?:[.,]\d+)?|[.,]\d+)|${WORD_NUM})\s*(?:-\s*)?(?:story\s*)?(?:points?|pointers?|pts?|sp)?$`,
+  "i",
+);
 /** "3", "3, 5 or 8", "5-8", "3/5": a comma between digits separates, it is no decimal point. */
 const LIST = String.raw`${NUM}(?:\s*(?:,|/|-|–|\bor\b|\bto\b)\s*${NUM})*`;
 /** A number before a points cue: "3 points", "a 3-pointer", "a three point story", "8 SP". */
@@ -230,17 +247,13 @@ const isSource = (v: unknown): v is PointSource =>
 export function pointsProblems(c: PointsContext): string[] {
   const points = parsePoints(c.storyPoints);
   const source = isSource(c.pointsSource) ? c.pointsSource : null;
-  if (points === null) {
-    return source
-      ? [
-          `pointsSource is ${source} but storyPoints is empty; give the number, or leave both empty.`,
-        ]
-      : [];
-  }
-  if (points === "invalid")
-    return [`storyPoints must be a number such as 3 or 0.5, not "${String(c.storyPoints)}".`];
+  // No number (empty, "(none)", stray punctuation, words): the optional points
+  // are dropped, never a reason to fail the item (eval, 2026-10-15).
+  if (points === null) return [];
   if (points < 0 || points > MAX_STORY_POINTS)
     return [`storyPoints ${points} is out of range (0 to ${MAX_STORY_POINTS}).`];
+  // The value the ticket already has changes nothing; code drops it.
+  if (c.kind === "update_issue" && c.current === points) return [];
   if (!source) return ["storyPoints needs pointsSource stated or estimated."];
   if (c.epic) return ["an Epic does not get story points; leave storyPoints empty."];
   if (c.kept?.cleared && !(source === "stated" && c.instructed.has(points)))
@@ -253,7 +266,6 @@ export function pointsProblems(c: PointsContext): string[] {
       return [
         "never estimate an existing ticket: set its storyPoints only to a number the input or the user gives as its points, with pointsSource stated, or leave them out; when the user wants them set but gave no number, ask for it in question.",
       ];
-    if (c.current === points) return [`the ticket already has ${points} points; leave them out.`];
   }
   if (source === "stated" && !c.stated.has(points) && !kept)
     return [

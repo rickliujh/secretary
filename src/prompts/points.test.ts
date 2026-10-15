@@ -24,13 +24,46 @@ describe("parsePoints", () => {
     expect(parsePoints(13)).toBe(13);
   });
 
-  test("empty is none; anything else is invalid", () => {
-    expect(parsePoints("")).toBeNull();
-    expect(parsePoints(null)).toBeNull();
-    expect(parsePoints(undefined)).toBeNull();
-    expect(parsePoints("three")).toBe("invalid");
-    expect(parsePoints("3-5")).toBe("invalid");
-    expect(parsePoints("-2")).toBe("invalid");
+  test("stray punctuation and whitespace around the number are ignored", () => {
+    expect(parsePoints(": 2")).toBe(2);
+    expect(parsePoints(" 3 ")).toBe(3);
+    expect(parsePoints("3 points")).toBe(3);
+    expect(parsePoints("3.")).toBe(3);
+    expect(parsePoints('"5"')).toBe(5);
+    expect(parsePoints("~8 SP")).toBe(8);
+    expect(parsePoints(".5")).toBe(0.5);
+    expect(parsePoints("three")).toBe(3);
+  });
+
+  test("empty, punctuation and the words for none are no points", () => {
+    for (const v of [
+      "",
+      " ",
+      ":",
+      "-",
+      "...",
+      "(none)",
+      "none",
+      "null",
+      "N/A",
+      "n/a",
+      null,
+      undefined,
+    ])
+      expect(parsePoints(v)).toBeNull();
+  });
+
+  test("anything else that is not a number of points is dropped, not invalid", () => {
+    expect(parsePoints("abc")).toBeNull();
+    expect(parsePoints("3-5")).toBeNull();
+    expect(parsePoints("3 or 5")).toBeNull();
+    expect(parsePoints({})).toBeNull();
+    expect(parsePoints(Number.NaN)).toBeNull();
+  });
+
+  test("a number out of range stays a number, for the checks to refuse", () => {
+    expect(parsePoints("-2")).toBe(-2);
+    expect(parsePoints("2000")).toBe(2000);
   });
 });
 
@@ -211,15 +244,8 @@ describe("pointsProblems (D55)", () => {
     expect(
       check({ ...update, storyPoints: "5", pointsSource: "stated", stated: new Set([5]) }),
     ).toEqual([]);
-    expect(
-      check({
-        ...update,
-        storyPoints: "5",
-        pointsSource: "stated",
-        stated: new Set([5]),
-        current: 5,
-      })[0],
-    ).toContain("already has 5 points");
+    // The value the ticket has changes nothing: payload building drops it.
+    expect(check({ ...update, storyPoints: "5", pointsSource: "stated", current: 5 })).toEqual([]);
   });
 
   test("an Epic gets no points", () => {
@@ -228,10 +254,16 @@ describe("pointsProblems (D55)", () => {
     ]);
   });
 
-  test("shape errors: no number, out of range, a source without a number, a number without a source", () => {
-    expect(check({ storyPoints: "lots", pointsSource: "stated" })[0]).toContain("must be a number");
+  test("shape errors: out of range, a number without a source; no number is no points", () => {
+    // Text that is no number drops the optional points: never a repair (eval, 2026-10-15).
+    for (const storyPoints of ["lots", ":", "abc", "(none)"])
+      expect(check({ storyPoints, pointsSource: "stated" })).toEqual([]);
+    expect(check({ pointsSource: "estimated" })).toEqual([]);
     expect(check({ storyPoints: "2000", pointsSource: "stated" })[0]).toContain("out of range");
-    expect(check({ pointsSource: "estimated" })[0]).toContain("storyPoints is empty");
+    expect(check({ storyPoints: "-2", pointsSource: "stated" })[0]).toContain("out of range");
+    expect(check({ storyPoints: ": 2", pointsSource: "estimated", scale: [3, 5] })[0]).toContain(
+      "an estimate must be one of the scale's values",
+    );
     expect(check({ storyPoints: "3" })).toEqual([
       "storyPoints needs pointsSource stated or estimated.",
     ]);
