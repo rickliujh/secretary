@@ -33,6 +33,15 @@
  * Cloud shape one unknown key fails it with 400, as Cloud does. Tests can also
  * hide issues (403), move them to a new key, and cap the search page size.
  *
+ * Revoking (D54): `DELETE /issue/{key}` (refused for an issue with sub-tasks,
+ * and with 403 when `canDelete` is false), `GET /mypermissions`, `GET` and
+ * `DELETE /issue/{key}/comment/{id}`, `POST /rest/agile/1.0/backlog/issue`, and
+ * with `--cancel-status` a done-category Cancelled status. `--no-delete` plays a
+ * user without the delete permission; tests can also refuse the delete of one
+ * issue and the assigning of one user. Transitions follow a workflow: which are
+ * available depends on the issue's status, and `POST /transitions` refuses one
+ * that is not available from it.
+ *
  *   bun run mock:jira --cloud         # Cloud shape: Basic auth, POST /search/jql
  *                                     # token paging (old /search is 410), account
  *                                     # ids, parent epics, /priority/search
@@ -74,6 +83,8 @@ type Issue = {
   points: number | null;
   /** Set when the issue was moved into a sprint through the Agile API. */
   movedToSprint?: number;
+  /** Set when the issue was moved to the backlog through the Agile API: no open sprint. */
+  inBacklog?: boolean;
   /** Changelog, oldest first. */
   history?: History[];
   remoteLinks?: {
@@ -89,11 +100,31 @@ const STATUSES = {
   Blocked: { id: "10400", category: "indeterminate" },
   "In Review": { id: "10401", category: "indeterminate" },
   Done: { id: "10002", category: "done" },
+  /** A done-category status a revoked ticket can end in (D54); only with `cancelStatus`. */
+  Cancelled: { id: "10003", category: "done" },
 } as const;
-const TRANSITIONS = Object.keys(STATUSES).map((name, i) => ({
-  id: String((i + 1) * 10 + 1),
-  name,
-}));
+/** Statuses seeded issues start in. */
+const SEEDED_STATUSES = ["To Do", "In Progress", "Blocked", "In Review", "Done"] as const;
+type StatusName = keyof typeof STATUSES;
+const STATUS_NAMES = Object.keys(STATUSES) as StatusName[];
+/**
+ * The workflow: which statuses each status moves to. Like a real workflow it is
+ * not global, so a transition id read in one status is refused in another.
+ */
+const WORKFLOW: Record<StatusName, readonly StatusName[]> = {
+  "To Do": ["In Progress", "Blocked", "Done", "Cancelled"],
+  "In Progress": ["To Do", "Blocked", "In Review", "Done", "Cancelled"],
+  Blocked: ["To Do", "In Progress", "Done", "Cancelled"],
+  "In Review": ["In Progress", "Blocked", "Done", "Cancelled"],
+  Done: ["To Do", "In Progress"],
+  Cancelled: ["To Do"],
+};
+/** The transitions out of a status; each id belongs to one from-to pair. */
+const transitionsFrom = (from: StatusName) =>
+  WORKFLOW[from].map((to) => ({
+    id: String((STATUS_NAMES.indexOf(from) + 1) * 10 + STATUS_NAMES.indexOf(to) + 1),
+    name: to,
+  }));
 const ISSUE_TYPES = ["Epic", "Story", "Task", "Bug", "Sub-task"] as const;
 const LINK_TYPES = [
   { id: "10000", name: "Blocks", inward: "is blocked by", outward: "blocks" },
@@ -176,6 +207,8 @@ function issueSprints(issue: Issue, now = Date.now()): string[] | null {
   const active = sprintIndex(now);
   const createdAt = new Date(issue.created.replace("+0000", "Z")).getTime();
   const created = Math.min(sprintIndex(createdAt), active);
+  if (issue.inBacklog)
+    return [sprints[created]].filter((s): s is Sprint => s?.state === "closed").map(sprintString);
   const moved = sprints.findIndex((s) => s.id === issue.movedToSprint);
   if (moved >= 0)
     return (created < moved ? [sprints[created], sprints[moved]] : [sprints[moved]])
@@ -228,6 +261,7 @@ const PREVIOUS_STATUS: Record<keyof typeof STATUSES, keyof typeof STATUSES> = {
   Blocked: "In Progress",
   "In Review": "In Progress",
   Done: "In Review",
+  Cancelled: "To Do",
 };
 
 const statusItem = (from: keyof typeof STATUSES, to: keyof typeof STATUSES): ChangeItem => ({
@@ -313,7 +347,7 @@ export function generate(total: number, now = Date.now()): Map<string, Issue> {
       type,
       summary: `${pick(VERBS)} ${topic}`,
       description: `Context for the ${topic} work.\n\nh3. Notes\n* check with the platform team\n* see {{INC00${Math.floor(10000 + rand() * 89999)}}}`,
-      status: pick(Object.keys(STATUSES) as (keyof typeof STATUSES)[]),
+      status: pick(SEEDED_STATUSES),
       priority: pick(PRIORITIES),
       assignee: rand() < 0.2 ? null : pick(USERS),
       reporter: pick(USERS),
@@ -465,6 +499,7 @@ function issueJson(
       resolutiondate: issue.status === "Done" ? issue.updated : null,
       ...(cloud ? {} : { [EPIC_LINK]: issue.epic, [EPIC_NAME]: issue.epicName }),
       [SPRINT]: issueSprints(issue),
+      subtasks: [...all.values()].filter((i) => i.parent === issue.key).map(linkedIssue),
       [STORY_POINTS]: issue.points,
       // Both sides: on `to` the other issue is inward ("is blocked by"), on `from` outward.
       issuelinks: links.flatMap((l) => {
@@ -521,6 +556,20 @@ export type MockOptions = {
   moved?: Map<string, string>;
   /** Most issues on one search page, below what was asked (Cloud may do this). */
   searchPageSize?: number;
+  /**
+   * Whether the user holds DELETE_ISSUES (default true): `GET /mypermissions`
+   * says so and `DELETE /issue/{key}` answers 403 without it (D54).
+   */
+  canDelete?: boolean;
+  /** Add the done-category Cancelled status to the workflow (D54). */
+  cancelStatus?: boolean;
+  /**
+   * Keys whose delete Jira refuses with 403 although the user holds the
+   * permission (issue security, a workflow that denies deleting).
+   */
+  undeletable?: Set<string>;
+  /** Users who can no longer be assigned: `PUT /assignee` answers 400. */
+  unassignable?: Set<string>;
 };
 
 export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}) {
@@ -530,6 +579,9 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
     issue.updated = new Date().toISOString().replace("Z", "+0000");
   };
   const blocks = LINK_TYPES[0];
+  const inWorkflow = (name: StatusName) => opts.cancelStatus || name !== "Cancelled";
+  const available = (issue: Issue) =>
+    transitionsFrom(issue.status).filter((t) => inWorkflow(t.name));
   let nextLink = 10000;
   const links: MockLink[] = [];
   for (const issue of issues.values())
@@ -581,6 +633,22 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       for (const issue of found)
         if (issue) {
           issue.movedToSprint = sprintId;
+          issue.inBacklog = false;
+          touch(issue);
+        }
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname === "/rest/agile/1.0/backlog/issue" && req.method === "POST") {
+      const body = (await req.json().catch(() => undefined)) as { issues?: unknown } | undefined;
+      const keys = Array.isArray(body?.issues) ? body.issues.map(String) : [];
+      if (keys.length === 0 || keys.length > 50) return error("Between 1 and 50 issues required.");
+      const found = keys.map((k) => issues.get(k));
+      const missing = keys.filter((_, i) => !found[i]);
+      if (missing.length) return error(`Issues do not exist: ${missing.join(", ")}`);
+      for (const issue of found)
+        if (issue) {
+          issue.movedToSprint = undefined;
+          issue.inBacklog = true;
           touch(issue);
         }
       return new Response(null, { status: 204 });
@@ -593,6 +661,19 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
 
     if (path === "myself") return json({ ...userJson(USERS[0] ?? null), timeZone: "UTC" });
     if (path === "issueLinkType") return json({ issueLinkTypes: LINK_TYPES });
+    if (path === "mypermissions") {
+      const key = url.searchParams.get("issueKey") ?? "";
+      if (key && !issues.has(key)) return error("Issue Does Not Exist", 404);
+      const asked = (url.searchParams.get("permissions") ?? "").split(",").filter(Boolean);
+      return json({
+        permissions: Object.fromEntries(
+          asked.map((p) => [
+            p,
+            { key: p, havePermission: p === "DELETE_ISSUES" ? opts.canDelete !== false : true },
+          ]),
+        ),
+      });
+    }
     if (path === "issueLink" && req.method === "POST") {
       const type = LINK_TYPES.find(
         (t) => t.name === (body?.type as { name?: string } | undefined)?.name,
@@ -699,7 +780,7 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
           id: name,
           name,
           subtask: name === "Sub-task",
-          statuses: (Object.keys(STATUSES) as (keyof typeof STATUSES)[]).map(status),
+          statuses: STATUS_NAMES.filter(inWorkflow).map(status),
         })),
       );
     }
@@ -900,11 +981,47 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       }
       if (sub === "/assignee" && req.method === "PUT") {
         const assignee = userFrom(body);
+        if (assignee && opts.unassignable?.has(assignee.name))
+          return json(
+            {
+              errorMessages: [],
+              errors: { assignee: `User '${assignee.name}' cannot be assigned issues.` },
+            },
+            400,
+          );
         if (assignee?.name !== issue.assignee?.name)
           addHistory(issue, USERS[0] as User, Date.now(), [assigneeItem(issue.assignee, assignee)]);
         issue.assignee = assignee;
         touch(issue);
         return new Response(null, { status: 204 });
+      }
+      if (sub === "" && req.method === "DELETE") {
+        if (opts.canDelete === false)
+          return error("You do not have permission to delete issues in this project.", 403);
+        if (opts.undeletable?.has(issue.key))
+          return error("You do not have permission to delete this issue.", 403);
+        const subtasks = [...issues.values()].filter((i) => i.parent === issue.key);
+        if (subtasks.length && url.searchParams.get("deleteSubtasks") !== "true")
+          return error(
+            "The issue has subtasks. Set deleteSubtasks to true to delete them with it.",
+          );
+        for (const sub of subtasks) issues.delete(sub.key);
+        issues.delete(issue.key);
+        for (let i = links.length - 1; i >= 0; i--)
+          if (links[i]?.from === issue.key || links[i]?.to === issue.key) links.splice(i, 1);
+        return new Response(null, { status: 204 });
+      }
+      const commentPath = /^\/comment\/(\d+)$/.exec(sub);
+      if (commentPath) {
+        const i = issue.comments.findIndex((c) => c.id === commentPath[1]);
+        const found = issue.comments[i];
+        if (!found) return error("Can not find a comment for the id.", 404);
+        if (req.method === "GET") return json(commentJson(found, userJson));
+        if (req.method === "DELETE") {
+          issue.comments.splice(i, 1);
+          touch(issue);
+          return new Response(null, { status: 204 });
+        }
       }
       if (sub === "/comment" && req.method === "GET")
         return json({
@@ -928,21 +1045,17 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       }
       if (sub === "/transitions" && req.method === "GET")
         return json({
-          transitions: TRANSITIONS.filter((t) => t.name !== issue.status).map((t) => ({
-            ...t,
-            to: status(t.name as keyof typeof STATUSES),
-          })),
+          transitions: available(issue).map((t) => ({ ...t, to: status(t.name) })),
         });
       if (sub === "/transitions" && req.method === "POST") {
-        const t = TRANSITIONS.find(
+        // Only a transition out of the current status: an id from another is refused.
+        const t = available(issue).find(
           (x) => x.id === (body?.transition as { id?: string } | undefined)?.id,
         );
         if (!t)
           return error("It seems that you have tried to perform an illegal workflow operation.");
-        addHistory(issue, USERS[0] as User, Date.now(), [
-          statusItem(issue.status, t.name as keyof typeof STATUSES),
-        ]);
-        issue.status = t.name as keyof typeof STATUSES;
+        addHistory(issue, USERS[0] as User, Date.now(), [statusItem(issue.status, t.name)]);
+        issue.status = t.name;
         touch(issue);
         return new Response(null, { status: 204 });
       }
@@ -976,7 +1089,10 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       }
       if (sub === "/remotelink" && req.method === "DELETE") {
         const globalId = url.searchParams.get("globalId");
-        issue.remoteLinks = (issue.remoteLinks ?? []).filter((l) => l.globalId !== globalId);
+        const kept = (issue.remoteLinks ?? []).filter((l) => l.globalId !== globalId);
+        if (kept.length === (issue.remoteLinks ?? []).length)
+          return error("No remote link with that global id.", 404);
+        issue.remoteLinks = kept;
         return new Response(null, { status: 204 });
       }
     }
@@ -991,7 +1107,12 @@ if (import.meta.main) {
   const cloud = args.includes("--cloud");
   Bun.serve({
     port,
-    fetch: createHandler(issues, { cloud, reversedLinks: args.includes("--reversed-links") }),
+    fetch: createHandler(issues, {
+      cloud,
+      reversedLinks: args.includes("--reversed-links"),
+      canDelete: !args.includes("--no-delete"),
+      cancelStatus: args.includes("--cancel-status"),
+    }),
   });
   console.log(
     `Mock Jira ${cloud ? "Cloud (any email and token)" : "DC"} on http://localhost:${port} with ${issues.size} issues (tracked epic suggestion: PAY-1)`,

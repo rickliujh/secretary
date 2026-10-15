@@ -1214,3 +1214,105 @@ Review fixes
 - The issue picker scrolls inside the edit dialog and shows full summaries (PR #20),
   and the sync buttons keep their labels while a sync runs (PR #23).
 
+
+## Phase 17: Revoke an approval (2026-10-15)
+
+Built
+- Undo data (D54 (1)): the Executor records `undo` in a proposal's result, read
+  from Jira just before it writes: the replaced values of an update (priority and
+  assignee as names and user ids), the status a move left, the open sprint a sprint
+  move left (null for the backlog), the new comment's id, the id of the link it
+  made, a wait's state before and after with the timeline entry it added, and the
+  changed columns of a contact or team before and after. Creates, waits, memories
+  and drafts use the ids their results already held.
+- Reverse writes: `delete_issue`, `delete_comment` and `move_to_backlog` Jira
+  actions; `JiraClient.myPermissions` and `getComment`; `Executor.reverse` runs a
+  Jira action through `run` (logged with the proposal id) or a local change (delete
+  or restore a wait, put back a contact or team, forget a memory, delete a draft).
+  A deleted issue leaves the cache with its comments and `issue_meta`.
+- `jira/cancel.ts` `revokeTransition`: the first transition into a status named
+  like cancelled or canceled, won't do, rejected, declined (in that order), else
+  one into a done-category status.
+- `proposals/revoke.ts` plans in pure code: `revokeBlock` (what stored data rules
+  out), `cascadeOf` (the executed proposals of the thread that act on a created
+  ticket, by `$new` ref or key, recursively, newest first), and `planEntry` /
+  `planRevoke` per kind over facts that `revoke-facts.ts` reads fresh.
+- `Proposals.revokePlan` and `Proposals.revoke`. Status `revoked`; the result keeps
+  the original fields and gains `revoked: {at, message, warning?}`. A failed step
+  stops the run, leaves the proposal executed with `revokeError: {at, message,
+  undone}`, and Revoke can be pressed again: each step checks current state, so the
+  comment is not posted twice and a deleted thing is not deleted again.
+- Inbox: Revoke on executed cards (compact ones too) and on a tracked small-ask
+  row, which revokes the bundle through its create. An AlertDialog lists every step
+  per proposal, with notes (already undone, closed instead of deleted) and
+  warnings (changed since); confirming sends the step texts it showed. A revoked
+  card shows the badge, what the approval did struck through, and what the revoke
+  did. Old approvals show a disabled Revoke with the reason.
+- Mock Jira: `DELETE /issue/{key}` (refused with sub-tasks; 403 with `canDelete:
+  false` or `--no-delete`), `GET /mypermissions`, `GET` and `DELETE
+  /issue/{key}/comment/{id}`, `POST /rest/agile/1.0/backlog/issue`, a `subtasks`
+  field, and a done-category Cancelled status with `cancelStatus` or
+  `--cancel-status`.
+- Tests: the FR-14 AC against the mock with and without delete permission, a
+  failed transition finished by a second Revoke, each Jira kind against the mock
+  (a priority changed in Jira since is kept and named), each local kind against
+  the database, the planner per kind and the cascade, and the undo data per kind.
+
+Decisions and defaults
+- Recorded in D54's Built note: what "changed since" compares for each kind, a
+  cascaded proposal that cannot be undone is left and named instead of blocking
+  the revoke, drafts that only mention the ticket stay, the revoke refuses to run
+  when the fresh steps differ from the confirmed ones, and a revoked proposal
+  counts as rejected in the thread context of later turns.
+- The cancel status is opt-in in the mock, so the Today tests that close a ticket
+  as Done keep their workflow.
+- The new `revoked` value of `proposals.status` needs no migration (a text
+  column); `db:generate` produced none.
+
+Review fixes
+- The cascade is planned end to end: entries are planned newest first, each
+  against the facts as the steps before it leave them (a status moved back,
+  values and assignee put back, a sprint, sub-tasks deleted, waits, contact and
+  team columns). A ticket moved to Done in a later turn now goes back to To Do
+  and then to the cancel status instead of staying in To Do; a sub-task the
+  cascade deletes no longer keeps its parent from being deleted; two changes of
+  one field or status go back to the first value.
+- Steps name targets, not ids: a status move is `transition_to` a status, and
+  `Executor.reverse` picks the transition available when it runs. The cancel
+  status of a ticket the cascade moves first comes from the project's statuses
+  for its issue type (`revokeStatus`). The confirmed-steps guard still compares
+  the described steps.
+- `proposals/revoke-run.ts`: right before a delete its sub-tasks are read again;
+  a ticket that still has some, or whose delete Jira refuses (400 or 403), is
+  closed in the same run (the comment unless present, then the cancel
+  transition available then) with a warning. An assign Jira refuses is skipped
+  with a warning instead of failing the revoke.
+- The confirmation and warnings name users by display name: recorded at approval
+  in the undo data (`names`), else from the fresh read, the cache or contacts;
+  the user id only when nothing else is known.
+- A retried update_issue or update_dependency keeps the undo data its first
+  attempt recorded before writing (the earliest value per field), kept on the
+  failed result.
+- Deleting a mirrored wait treats a 404 on its remote link as gone, and the
+  remote-link writes of a revoke or wait update are logged with the proposal id.
+- `Proposals.revoke` holds every proposal its cascade covers; a second revoke of
+  any of them fails with `busy`. The inbox disables Revoke across the thread
+  while one runs.
+- A revoked create rejects the still-pending proposals of its thread that act on
+  the ticket (no correction recorded) and files the thread.
+- FR-14.5 on the card: a sent or copied draft and a sprint move whose earlier
+  sprint has closed show a disabled Revoke with the reason before the dialog
+  opens (`localRevokeBlock`, `ProposalView.revokeBlocked`).
+- Mock Jira: transitions follow a workflow (which are available depends on the
+  issue's status, and `POST /transitions` refuses others), deleting a missing
+  remote link answers 404, and tests can refuse one issue's delete and one
+  user's assignment.
+- Tests: the planner over each scenario above, and against the mock a ticket
+  moved to Done, two moves, two priority changes, a sub-task, a refused delete
+  and assign, a retried update, a mirrored wait whose link is gone, two
+  concurrent revokes, and pending members rejected.
+
+Known limits
+- The revoke comment is matched among the newest 100 comments of the ticket.
+- Deleting a ticket leaves waits created outside its thread pointing at the
+  deleted key (D54 revokes only what the thread did).

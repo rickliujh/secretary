@@ -14,6 +14,7 @@ import { compactLine, isCompact } from "@/services/proposals/compact";
 import { NEW_REF_RE, PROPOSAL_LABELS, type ProposalPayload } from "@/services/proposals/schema";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
 import { isEditable, viewPayload } from "./proposal-fields";
+import { RevokeControl, RevokeOutcome } from "./revoke-control";
 import { useDecisions } from "./use-inbox";
 
 const STATUS_TONE: Record<string, string> = {
@@ -22,6 +23,7 @@ const STATUS_TONE: Record<string, string> = {
   failed: TONE.danger,
   rejected: TONE.neutral,
   approved: TONE.info,
+  revoked: TONE.neutral,
 };
 
 function IssueRef({ value, lookups }: { value: string; lookups: Lookups }) {
@@ -279,8 +281,13 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
       {proposal.status === "failed" && result?.error && (
         <p className="text-sm text-destructive">{result.error}</p>
       )}
+      {proposal.status === "revoked" && result?.message && (
+        <p className="text-sm text-muted-foreground line-through">{result.message}</p>
+      )}
+      <RevokeOutcome result={proposal.result} />
     </>
   );
+  const revokeControl = <RevokeControl proposal={proposal} />;
   const approveButton = (
     <Button size="sm" disabled={busy} onClick={() => approve.mutate({ id: proposal.id })}>
       {approve.isPending ? (
@@ -341,6 +348,7 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
           )}
           {proposal.editedPayload && <Badge variant="outline">edited</Badge>}
           {canApprove && approveButton}
+          {revokeControl}
           {expandButton}
         </div>
         {outcome}
@@ -385,6 +393,9 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
         </blockquote>
       )}
       {outcome}
+      {proposal.status === "executed" && proposal.payload.kind !== "needs_clarification" && (
+        <footer className="flex gap-2">{revokeControl}</footer>
+      )}
       {canApprove && (
         <footer className="flex gap-2">
           {approveButton}

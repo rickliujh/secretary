@@ -8,6 +8,8 @@ import {
   type MessagePart,
   UserContentSchema,
 } from "@/services/intake/thread";
+import { localRevokeBlock } from "@/services/proposals/revoke";
+import { localRevokeData } from "@/services/proposals/revoke-facts";
 import { type ProposalPayload, parsePayload } from "@/services/proposals/schema";
 
 export type InboxListItem = {
@@ -70,6 +72,8 @@ export const listInbox = (search = "", limit = 100) =>
 export type ProposalView = Omit<typeof proposals.$inferSelect, "payload" | "editedPayload"> & {
   payload: ProposalPayload;
   editedPayload: ProposalPayload | null;
+  /** Why it cannot be revoked, from local data (FR-14.5); null when Revoke may be offered. */
+  revokeBlocked: string | null;
 };
 
 /** One message of a thread (D22), with its content parsed. */
@@ -147,18 +151,21 @@ export const inboxDetail = (id: string) =>
         .orderBy(asc(intakeItems.idx))
         .all(),
     );
-    const props = (yield* query((d) =>
+    const rows = yield* query((d) =>
       d
         .select()
         .from(proposals)
         .where(eq(proposals.inboxItemId, id))
         .orderBy(asc(proposals.seq))
         .all(),
-    )).map(
+    );
+    const local = yield* localRevokeData(rows);
+    const props = rows.map(
       (p): ProposalView => ({
         ...p,
         payload: parsePayload(p.payload),
         editedPayload: p.editedPayload ? parsePayload(p.editedPayload) : null,
+        revokeBlocked: p.status === "executed" ? localRevokeBlock(p, local) : null,
       }),
     );
     const messages = yield* query((d) =>

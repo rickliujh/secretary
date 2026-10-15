@@ -24,6 +24,7 @@ import { isSubtaskType } from "@/services/small-asks/home";
 import { smallAskHome } from "@/services/small-asks/queries";
 import { ProposalCard } from "./proposal-card";
 import { issueOptions } from "./proposal-fields";
+import { RevokeControl, RevokeOutcome } from "./revoke-control";
 import { SMALL_ASK_KEYS } from "./small-ask-keys";
 import { useDecisions } from "./use-inbox";
 
@@ -121,7 +122,7 @@ export function SmallAskRow({
       aria-label={`Small ask: ${payload.summary}, ${create.status}`}
       className={cn(
         "flex flex-col gap-2 rounded-lg border p-3",
-        create.status === "rejected" && "opacity-75",
+        (create.status === "rejected" || create.status === "revoked") && "opacity-75",
       )}
     >
       <header className="flex min-w-0 items-center gap-2">
@@ -215,7 +216,21 @@ export function SmallAskRow({
               Run the rest
             </Button>
           )}
+          <span className="ml-auto" />
+          {/* Revoking the ticket revokes what hangs on it first: the bundle goes as one (D54). */}
+          <RevokeControl proposal={create} />
         </p>
+      )}
+      {create.status === "revoked" && (
+        <p className="flex flex-wrap items-center gap-2 text-sm">
+          <Badge variant="secondary" className={cn("border-transparent", TONE.neutral)}>
+            revoked
+          </Badge>
+          {result?.issueKey && <span className="font-mono text-xs">{result.issueKey}</span>}
+        </p>
+      )}
+      {(create.status === "executed" || create.status === "revoked") && (
+        <RevokeOutcome result={create.result} />
       )}
       {create.status === "rejected" && <p className="text-sm text-muted-foreground">Rejected</p>}
       {warnings.map((w) => (

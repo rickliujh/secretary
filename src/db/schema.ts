@@ -359,7 +359,8 @@ export const proposals = sqliteTable(
     confidence: real("confidence"),
     status: text("status", {
       // superseded: replaced by a later turn of the thread before it was decided (D22).
-      enum: ["pending", "approved", "rejected", "executed", "failed", "superseded"],
+      // revoked: executed, then undone by the user (D54).
+      enum: ["pending", "approved", "rejected", "executed", "failed", "superseded", "revoked"],
     })
       .notNull()
       .default("pending"),

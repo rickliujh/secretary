@@ -2,12 +2,14 @@ import { Context, Data, type Effect } from "effect";
 import type { DbError } from "@/services/db";
 import type { ExecutorError } from "@/services/executor";
 import type { JiraError } from "@/services/jira";
+import type { RevokePlan } from "./revoke";
 import type { ProposalPayload } from "./schema";
 
+export type { RevokeEntry, RevokePlan, RevokeStep } from "./revoke";
 export * from "./schema";
 
 export class ProposalError extends Data.TaggedError("ProposalError")<{
-  readonly kind: "not_found" | "decided" | "invalid";
+  readonly kind: "not_found" | "decided" | "invalid" | "busy";
   readonly message: string;
 }> {}
 
@@ -18,6 +20,21 @@ export type DecisionResult = {
   /** Set when it ran but part of it did not happen, such as a sprint move (D44). */
   warning?: string;
 };
+
+/** The outcome of a revoke (D54); a failed step is recorded, not thrown. */
+export type RevokeResult = {
+  status: "revoked" | "failed";
+  message: string;
+  /** What was undone, in order, including before a failure. */
+  undone: string[];
+  /** What was left as it is: changed since (FR-14.3), or a cascaded proposal that cannot be undone. */
+  warning?: string;
+};
+
+/** Stored on a revoked proposal's result (D54 (4)). */
+export type RevokedRecord = { at: string; message: string; warning?: string };
+/** Stored on an executed proposal whose revoke stopped at a failed step; Revoke runs again. */
+export type RevokeErrorRecord = { at: string; message: string; undone: string[] };
 
 export interface ProposalsShape {
   /** Approves (optionally with edits) and executes one proposal. Execution failures are recorded, not thrown. */
@@ -48,6 +65,27 @@ export interface ProposalsShape {
     id: string,
     edited: ProposalPayload,
   ) => Effect.Effect<void, ProposalError | DbError>;
+  /**
+   * What revoking an executed proposal would do (FR-14, D54): for a create, the
+   * executed proposals of its thread that act on the new ticket first, newest
+   * first; each with its steps, notes, warnings, or why it cannot be undone.
+   * Reads Jira fresh; writes nothing.
+   */
+  readonly revokePlan: (
+    id: string,
+  ) => Effect.Effect<RevokePlan, ProposalError | JiraError | DbError>;
+  /**
+   * Plans again and runs the steps through the Executor. `confirmed` is the step
+   * text the user saw; when the fresh plan differs, nothing runs. A failed step
+   * stops the revoke, leaves the proposal executed with `revokeError`, and
+   * Revoke can be pressed again: steps already done are skipped. Fails with
+   * `busy` while a revoke of it (or of a cascade that covers it) runs. A revoked
+   * create rejects the pending proposals of its thread that act on the ticket.
+   */
+  readonly revoke: (
+    id: string,
+    confirmed?: readonly string[],
+  ) => Effect.Effect<RevokeResult, ProposalError | JiraError | DbError>;
   /** Marks the inbox item dismissed and rejects its pending proposals without recording corrections. */
   readonly dismiss: (inboxItemId: string) => Effect.Effect<void, DbError>;
 }

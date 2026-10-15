@@ -484,3 +484,24 @@ describe("proposal text bound for Jira (D51)", () => {
     expect(w()).toEqual({ body: "!https://x/p.png!" });
   });
 });
+
+describe("reverse writes (D54)", () => {
+  test("delete an issue without its sub-tasks, delete a comment, move to the backlog", () => {
+    expect(buildJiraWrite({ kind: "delete_issue", issueKey: "PAY-12" }, { fieldIds })).toEqual({
+      method: "DELETE",
+      path: "issue/PAY-12",
+    });
+    expect(
+      buildJiraWrite(
+        { kind: "delete_comment", issueKey: "PAY-12", commentId: "50004" },
+        { fieldIds },
+      ),
+    ).toEqual({ method: "DELETE", path: "issue/PAY-12/comment/50004" });
+    expect(buildJiraWrite({ kind: "move_to_backlog", issueKey: "PAY-12" }, { fieldIds })).toEqual({
+      method: "POST",
+      api: "agile",
+      path: "backlog/issue",
+      body: { issues: ["PAY-12"] },
+    });
+  });
+});

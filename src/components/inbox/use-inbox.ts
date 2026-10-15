@@ -88,9 +88,25 @@ export function useReply() {
 }
 
 /** A decision can partly apply before it fails, so views refresh either way. */
-function useDecisionMutation<A, E, I>(program: (input: I) => Effect.Effect<A, E, AppServices>) {
-  return useAppMutation(program, { invalidate: DECISION_KEYS, invalidateOnError: true });
+function useDecisionMutation<A, E, I>(
+  program: (input: I) => Effect.Effect<A, E, AppServices>,
+  mutationKey?: readonly unknown[],
+) {
+  return useAppMutation(program, {
+    invalidate: DECISION_KEYS,
+    invalidateOnError: true,
+    ...(mutationKey ? { mutationKey } : {}),
+  });
 }
+
+/** Names revoke mutations, so every Revoke of a thread can wait while one runs. */
+export const REVOKE_MUTATION = ["revoke"] as const;
+/** What a running revoke carries: the proposal and its thread. */
+export type RevokeInput = {
+  id: string;
+  inboxItemId: string | null;
+  confirmed: readonly string[];
+};
 
 const withProposals =
   <A, E, I>(f: (p: Proposals["Type"], input: I) => Effect.Effect<A, E>) =>
@@ -119,8 +135,13 @@ export function useDecisions() {
   const saveEdit = useDecisionMutation(
     withProposals((p, i: { id: string; edited: ProposalPayload }) => p.saveEdit(i.id, i.edited)),
   );
+  /** Revoke (FR-14): the steps the user confirmed; a failed step comes back as a result. */
+  const revoke = useDecisionMutation(
+    withProposals((p, i: RevokeInput) => p.revoke(i.id, i.confirmed)),
+    REVOKE_MUTATION,
+  );
   const retriage = useDecisionMutation((inboxItemId: string) =>
     Effect.flatMap(Intake, (i) => i.retriage(inboxItemId)),
   );
-  return { approve, reject, approveAll, track, saveEdit, dismiss, retriage };
+  return { approve, reject, approveAll, track, saveEdit, dismiss, retriage, revoke };
 }

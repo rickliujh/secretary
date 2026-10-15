@@ -67,6 +67,8 @@ const DECIDED = {
   approved: "done",
   failed: "done",
   rejected: "rejected",
+  // Undone by the user (D54): not to be proposed again, like a rejection.
+  revoked: "rejected",
 } as const;
 
 type ProposalRow = typeof proposals.$inferSelect;
