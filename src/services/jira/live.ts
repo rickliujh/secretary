@@ -13,6 +13,7 @@ import {
   ChangelogPageSchema,
   CloudSearchPageSchema,
   CommentPageSchema,
+  CommentSchema,
   CreateMetaFieldsSchema,
   CreateMetaIssueTypesSchema,
   type Credentials,
@@ -24,6 +25,7 @@ import {
   JiraClient,
   JiraError,
   JiraUserSchema,
+  MyPermissionsSchema,
   PrioritySchema,
   PrioritySearchSchema,
   ProjectSchema,
@@ -144,6 +146,18 @@ const make = Effect.gen(function* () {
       call(CommentPageSchema, `issue/${encodeURIComponent(key)}/comment`, {
         searchParams: { startAt, maxResults: 100, expand: "renderedBody" },
       }),
+    getComment: (key, id) =>
+      call(CommentSchema, `issue/${encodeURIComponent(key)}/comment/${encodeURIComponent(id)}`),
+    myPermissions: (issueKey, permissions) =>
+      call(MyPermissionsSchema, "mypermissions", {
+        searchParams: { issueKey, permissions: csv(permissions) },
+      }).pipe(
+        Effect.map((r) =>
+          Object.fromEntries(
+            permissions.map((p) => [p, r.permissions[p]?.havePermission === true]),
+          ),
+        ),
+      ),
     getTransitions: (key) =>
       call(TransitionsSchema, `issue/${encodeURIComponent(key)}/transitions`).pipe(
         Effect.map((r) => r.transitions),

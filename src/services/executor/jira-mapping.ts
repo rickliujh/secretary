@@ -148,6 +148,21 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
     }
     case "delete_issue_link":
       return { method: "DELETE", path: `issueLink/${encodeURIComponent(action.linkId)}` };
+    case "delete_issue":
+      // No deleteSubtasks: a ticket with sub-tasks is closed instead (D54).
+      return { method: "DELETE", path: issuePath(action.issueKey) };
+    case "delete_comment":
+      return {
+        method: "DELETE",
+        path: issuePath(action.issueKey, `/comment/${encodeURIComponent(action.commentId)}`),
+      };
+    case "move_to_backlog":
+      return {
+        method: "POST",
+        api: "agile",
+        path: "backlog/issue",
+        body: { issues: [action.issueKey] },
+      };
   }
 }
 

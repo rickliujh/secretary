@@ -19,6 +19,7 @@ import {
   type SyncStatus,
 } from ".";
 import { refreshBlocker, syncBlockers } from "./blockers";
+import { clearReopened, deletedKeys, sweepDeleted, withoutDeleted } from "./deleted";
 import { buildScopeJql, chunk, withUpdatedSince } from "./jql";
 import { parentEpicsToRead } from "./parent-epics";
 import {
@@ -135,13 +136,19 @@ const make = Effect.gen(function* () {
           expand: ["renderedFields"],
         });
         if (page.issues.length === 0) break;
-        const mapped = page.issues.map((raw: RawIssue) =>
+        const all = page.issues.map((raw: RawIssue) =>
           mapIssue(raw, {
             fieldIds: ctx.fieldIds,
             trackedEpics: ctx.tracked,
             syncedAt: ctx.syncedAt,
           }),
         );
+        // A ticket a revoke deleted is never stored again, though Cloud's search
+        // index may still return it for a while (FR-14.6).
+        const kept = new Set(
+          (yield* withDb(withoutDeleted(all.map((m) => m.issue)))).map((i) => i.key),
+        );
+        const mapped = all.filter((m) => kept.has(m.issue.key));
         const comments: CommentRow[] = [];
         for (const m of mapped) {
           for (const sprint of m.sprints) {
@@ -161,6 +168,8 @@ const make = Effect.gen(function* () {
           if (!maxUpdated || m.issue.updated > maxUpdated) maxUpdated = m.issue.updated;
         }
         yield* withDb(upsertIssues(mapped.map((m) => m.issue)));
+        // A ticket a revoke closed that is open again is no longer marked revoked.
+        yield* withDb(clearReopened(mapped.map((m) => m.issue)));
         yield* withDb(
           replaceComments(
             mapped.map((m) => m.issue.key),
@@ -363,11 +372,16 @@ const make = Effect.gen(function* () {
           .from(jiraIssues)
           .all(),
       );
+      const deleted = yield* withDb(deletedKeys);
       for (const keys of chunk(
-        parentEpicsToRead(epicRefs, { full, syncedAt: ctx.syncedAt }),
+        parentEpicsToRead(epicRefs, { full, syncedAt: ctx.syncedAt }).filter(
+          (k) => !deleted.has(k),
+        ),
         PARENT_EPICS_PER_QUERY,
       ))
         fetched += yield* readByKey(keys, ctx);
+      // A page read before a revoke deleted its ticket and written after it.
+      yield* withDb(sweepDeleted);
 
       // Real issue types and statuses per project, so intake validation does not
       // depend on which tickets happen to be cached. Refreshed on full syncs and
@@ -517,10 +531,17 @@ const make = Effect.gen(function* () {
           .where(eq(jiraIssues.key, m.issue.key))
           .get(),
       );
+      if ((yield* withDb(withoutDeleted([m.issue]))).length === 0) {
+        logger.info(`${m.issue.key} was deleted by a revoke; not stored again`);
+        return;
+      }
       const issue = { ...m.issue, stale: cached ? cached.stale : !!opts.candidate };
       const comments = m.commentsComplete ? m.comments : yield* allComments(m.issue.key);
       yield* withDb(upsertIssues([issue]));
       yield* withDb(replaceComments([m.issue.key], comments));
+      // A revoke that deleted it between the check and the write wins (FR-14.6).
+      yield* withDb(sweepDeleted);
+      yield* withDb(clearReopened([issue]));
       // A blocker closed (or reopened) from the app shows at once (D45 review).
       yield* blockerLock
         .withPermits(1)(

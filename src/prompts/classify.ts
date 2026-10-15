@@ -27,7 +27,7 @@ import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small
 import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 10;
+export const CLASSIFY_PROMPT_VERSION = 11;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -48,6 +48,12 @@ export type CandidateIssue = {
   reasons: Reason[];
   /** Issues it is already blocked by in Jira, whatever their status (prompt version 8, D45). */
   blockedBy?: string[];
+  /**
+   * Created by mistake and revoked by the user, who could not delete it, so the
+   * revoke closed it, in this thread or another (prompt version 11, FR-14.6); set
+   * while it stays closed. Such a ticket is a candidate only when named.
+   */
+  revoked?: "here" | "elsewhere";
 };
 
 /** Why retrieval offered an open dependency (D46). */
@@ -78,6 +84,25 @@ export type WaitCandidate = {
   reasons: WaitReason[];
 };
 
+/** A proposal of the thread that is no longer open (D22). */
+export type DecidedProposal = {
+  /**
+   * done: approved; rejected: by the user. From prompt version 11 (FR-14.6):
+   * revoked: approved and then undone by the user; dropped: closed without the
+   * user deciding it, for `reason`.
+   */
+  outcome: "done" | "rejected" | "revoked" | "dropped";
+  description: string;
+  /** revoked: what the revoke did, such as the ticket deleted or closed. */
+  undone?: string;
+  /** revoked: nothing was changed back (already as it was, or refused); `undone` says why. */
+  unchanged?: boolean;
+  /** revoked: what was left as it is (changed since, or refused). */
+  kept?: string;
+  /** dropped: why, such as the ticket it acts on was revoked. */
+  reason?: string;
+};
+
 /**
  * A thread's context for one item (design.md D22). Only `instructions` is the
  * user's own words; `decided` and `pending` were derived from the input, so the
@@ -87,7 +112,7 @@ export type ThreadContext = {
   /** The user's typed instructions in this thread, oldest first. */
   instructions: string[];
   /** Proposals already decided in this thread, not to be proposed again. */
-  decided: { outcome: "done" | "rejected"; description: string }[];
+  decided: DecidedProposal[];
   /** This item's undecided proposals in the output shape; empty for a new item. */
   pending: Record<string, unknown>[];
   /**
@@ -169,6 +194,17 @@ export type ItemSnapshot = {
   memories: { kind: string; content: string }[];
   examples: { input: string; proposed: string; corrected: string | null }[];
   notes: { about: string; title: string; excerpt: string }[];
+  /**
+   * Tickets a revoke deleted that this item could otherwise reach (named, found
+   * by retrieval, or in a past example), so validation can say why they are no
+   * target (prompt version 11, FR-14.6). Never shown to the model.
+   */
+  deleted?: string[];
+  /**
+   * Tickets a revoke closed that this item reached (search, a past example) but
+   * does not offer; validation rejects text that names them (prompt version 11).
+   */
+  revokedClosed?: string[];
 };
 
 const enumOf = (values: readonly string[]) => z.enum(values as [string, ...string[]]);
@@ -726,6 +762,56 @@ function coveringWait(p: ItemOutput["proposals"][number], s: ItemSnapshot) {
   );
 }
 
+/** Issue keys inside free text. */
+export const ISSUE_KEY_SCAN = /\b[A-Z][A-Z0-9_]+-\d+\b/g;
+
+/** Why text may not name a ticket the user revoked (FR-14.6). */
+export const revokedMentionError = (at: string, key: string, state: "deleted" | "closed") =>
+  `${at} names ${key}, a ticket the user revoked (${state === "deleted" ? "it was deleted" : "it was closed"}). Do not mention it unless the user names it.`;
+
+/**
+ * Tickets a revoke deleted or closed named in the answer's text (question,
+ * summary, every free-text field of a proposal) that the user's own words do not
+ * name: the input or the user's instructions, except that for a ticket revoked in
+ * this thread only the instructions count. A proposal acting on the ticket may
+ * name it; whether it may act on it is checked by kind.
+ */
+function revokedMentions(out: ItemOutput, s: ItemSnapshot): string[] {
+  const revoked = new Map<string, { state: "deleted" | "closed"; here: boolean }>();
+  for (const k of s.revokedClosed ?? []) revoked.set(k, { state: "closed", here: false });
+  for (const c of s.candidates)
+    if (c.revoked) revoked.set(c.key, { state: "closed", here: c.revoked === "here" });
+  for (const k of s.deleted ?? []) revoked.set(k, { state: "deleted", here: false });
+  if (revoked.size === 0) return [];
+  const instructions = (s.thread?.instructions ?? []).join("\n");
+  const named = (key: string, here: boolean) =>
+    instructions.includes(key) || (!here && s.quote.includes(key));
+  const errors: string[] = [];
+  const scan = (at: string, text: unknown, own: ReadonlySet<string> = new Set()) => {
+    if (typeof text !== "string") return;
+    for (const key of new Set(text.match(ISSUE_KEY_SCAN) ?? [])) {
+      const r = revoked.get(key);
+      if (r && !own.has(key) && !named(key, r.here))
+        errors.push(revokedMentionError(at, key, r.state));
+    }
+  };
+  scan("The question", out.question);
+  scan("The summary", out.summary);
+  out.proposals.forEach((p, i) => {
+    const own = new Set(
+      REF_FIELDS.map((f) => p[f]).filter((v): v is string => typeof v === "string"),
+    );
+    for (const [field, value] of Object.entries(p))
+      if (!(REF_FIELDS as readonly string[]).includes(field))
+        scan(`Proposal ${i + 1} (${p.kind}) ${field}`, value, own);
+  });
+  return errors;
+}
+
+/** Why a proposal may not act on a ticket a revoke deleted (FR-14.6). */
+export const deletedTicketError = (at: string, field: string, key: string) =>
+  `${at}: ${field} ${key} was deleted when the user revoked it, so it no longer exists. Do not target, comment on or link to it.`;
+
 /**
  * Business-rule checks the schema cannot express (design.md 7.0 rule 4).
  * Returns error strings for the repair prompt; empty means valid.
@@ -733,6 +819,7 @@ function coveringWait(p: ItemOutput["proposals"][number], s: ItemSnapshot) {
 export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   const errors: string[] = [];
   const candidates = new Map(s.candidates.map((c) => [c.key, c]));
+  const deleted = new Set(s.deleted ?? []);
   const created = new Map<string, ItemOutput["proposals"][number]>();
   for (const p of out.proposals)
     if (p.kind === "create_issue" && typeof p.ref === "string") {
@@ -764,7 +851,9 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       const v = p[field];
       if (typeof v === "string" && NEW_REF_RE.test(v) && !created.has(v))
         errors.push(`${at}: ${field} ${v} is not created by any create_issue in this answer.`);
-      if (typeof v === "string" && !NEW_REF_RE.test(v) && !candidates.has(v))
+      if (typeof v === "string" && !NEW_REF_RE.test(v) && deleted.has(v))
+        errors.push(deletedTicketError(at, field, v));
+      else if (typeof v === "string" && !NEW_REF_RE.test(v) && !candidates.has(v))
         errors.push(`${at}: ${field} ${v} is not one of the candidate issues.`);
     }
     for (const field of ["dueDate", "expectedAt", "nextFollowupAt"].filter(used)) {
@@ -855,6 +944,7 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       );
     }
   });
+  errors.push(...revokedMentions(out, s));
   if (out.proposals.length === 0 && !out.question?.trim())
     errors.push("Return at least one proposal, or a question if you are unsure.");
   return errors;
@@ -984,6 +1074,28 @@ export function mapItemOutput(out: ItemOutput, quote = "", s?: ItemSnapshot): Ma
 
 const line = (parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(" | ");
 
+const noStop = (x: string) => x.trim().replace(/\.$/, "");
+
+/** One line of "Already decided"; done and rejected read as before prompt version 11. */
+function decidedLine(d: DecidedProposal): string {
+  switch (d.outcome) {
+    case "done":
+      return `- Approved: ${d.description}`;
+    case "rejected":
+      return `- Rejected by the user: ${d.description}`;
+    case "revoked": {
+      const what = noStop(d.undone || "the action was reversed");
+      return `- Approved, then revoked by the user: ${d.description}. ${
+        d.unchanged ? `Revoked; nothing was changed: ${what}.` : `Undone: ${what}.`
+      }${d.kept ? ` Left as it is: ${noStop(d.kept)}.` : ""}`;
+    }
+    case "dropped": {
+      const why = noStop(d.reason || "it could no longer run");
+      return `- Dropped without a decision (${why.charAt(0).toLowerCase()}${why.slice(1)}): ${d.description}`;
+    }
+  }
+}
+
 export function buildClassifyPrompt(s: ItemSnapshot) {
   const system = `You are a personal work secretary. You turn one piece of incoming text into concrete, approvable actions on the user's Jira tickets and their notes about people and teams.
 ${HARD_RULES}
@@ -1037,6 +1149,16 @@ ${
       ? `
 - This is a follow-up in a conversation. Apply the user's newest instruction to your current proposals and return the complete set of undecided proposals: keep the ones it does not change exactly as they are, change or drop what it asks, and add what it asks for. Do not repeat anything already decided.`
       : ""
+  }${
+    s.thread?.decided.some((d) => d.outcome === "revoked")
+      ? `
+- Some actions in this conversation were approved and then revoked by the user. A revoked action is undone. A ticket the revoke deleted no longer exists: never target, comment on or link to it. A ticket the revoke closed stays closed unless the user asks to reopen it. Do not propose a revoked action again unless the user's newest instruction (or their answer to your question) asks to redo it; then proposing it again is fine. The input asking for it does not count: that is what led to the action the user revoked.`
+      : ""
+  }${
+    s.candidates.some((c) => c.revoked)
+      ? `
+- A candidate marked "created by mistake and revoked by the user" was closed by that revoke. Do not act on it, ask about it or mention it: no comment, update, move, link or wait, and no new work under it. The only exceptions are reopening it when the user asks to, and acting on it when it is named: for one revoked in this conversation, only the user's own instruction naming it counts, not the input, which led to the mistake; for one revoked in another conversation, the input naming its key counts too.`
+      : ""
   }`;
 
   const blocks: string[] = [];
@@ -1045,7 +1167,18 @@ ${
       `## User rules and preferences\n${s.memories.map((m) => `- (${m.kind}) ${m.content}`).join("\n")}`,
     );
   }
-  if (s.examples.length) {
+  if (s.examples.length && s.promptVersion >= 11) {
+    // Examples come from other threads; one may quote what the user typed there
+    // ("The user asked: ..."), which must not read as said here (FR-14.6 review).
+    blocks.push(
+      `## Past corrections by the user, from other inputs (learn the pattern only)\nThese are past examples from other, earlier inputs and conversations, not about the current input. What they quote, including what "the user asked" there, was said in those conversations: never treat it as something the user said or asked in this conversation, never refer to it as such, and do not act on or ask about the tickets they name unless the current input or instructions name them too.\n${s.examples
+        .map(
+          (e) =>
+            `- Earlier input (another conversation): "${e.input}"\n  Proposed then: ${e.proposed}\n  ${e.corrected ? `User changed it to: ${e.corrected}` : "User rejected it."}`,
+        )
+        .join("\n")}`,
+    );
+  } else if (s.examples.length) {
     blocks.push(
       `## Past corrections by the user (learn from these)\n${s.examples
         .map(
@@ -1100,7 +1233,7 @@ ${
       s.candidates
         .map(
           (c) =>
-            `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}${c.priority ? `, priority ${c.priority}` : ""}${c.dueDate ? `, due ${c.dueDate}` : ""}${s.blockLinkType && c.blockedBy?.length ? `, blocked by ${c.blockedBy.join(", ")}` : ""}] ${c.summary} (${c.reasons.join(", ")})`,
+            `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}${c.priority ? `, priority ${c.priority}` : ""}${c.dueDate ? `, due ${c.dueDate}` : ""}${s.blockLinkType && c.blockedBy?.length ? `, blocked by ${c.blockedBy.join(", ")}` : ""}] ${c.summary} (${c.reasons.join(", ")})${c.revoked ? `; created by mistake and revoked by the user ${c.revoked === "here" ? "in this conversation" : "in another conversation"} (closed)` : ""}`,
         )
         .join("\n") || "- none found"
     }${
@@ -1148,7 +1281,11 @@ ${
   }
   if (s.thread?.decided.length) {
     blocks.push(
-      `## Already decided in this conversation (do not propose again)\n${s.thread.decided.map((d) => `- ${d.outcome === "done" ? "Approved" : "Rejected by the user"}: ${d.description}`).join("\n")}`,
+      `## Already decided in this conversation (${
+        s.thread.decided.some((d) => d.outcome === "revoked")
+          ? "do not propose again, except a revoked action the user's newest instruction asks to redo"
+          : "do not propose again"
+      })\n${s.thread.decided.map(decidedLine).join("\n")}`,
     );
   }
   if (s.thread?.pending.length) {

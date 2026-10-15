@@ -49,6 +49,8 @@ export type AppMutationOptions<I, A> = {
   onSuccess?: (a: A, input: I) => void;
   /** Set false when the caller shows the error itself. */
   toastError?: boolean;
+  /** Names the mutation, so other components can see it running (`useMutationState`). */
+  mutationKey?: readonly unknown[];
 };
 
 /**
@@ -66,6 +68,7 @@ export function useAppMutation<I = void, A = unknown, E = unknown>(
     for (const key of invalidate) void client.invalidateQueries({ queryKey: key });
   };
   return useMutation({
+    ...(opts.mutationKey ? { mutationKey: opts.mutationKey } : {}),
     mutationFn: (input: I) => run(program(input)),
     onSuccess: (a, input) => {
       refresh();

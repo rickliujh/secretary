@@ -70,6 +70,14 @@ function setup(opts: { createStatus?: number; requiredExtra?: boolean } = {}) {
       respond: () => json({ ...pay4, id: "20099", key: "PAY-5" }),
     },
     {
+      // Fresh reads of a fixture issue, such as the values an update replaces (D54).
+      match: (u, r) => /\/issue\/[A-Z]+-\d+$/.test(u.pathname) && r.method === "GET",
+      respond: (r) => {
+        const issue = fixtureIssues.find((i) => r.url.pathname.endsWith(`/issue/${i.key}`));
+        return issue ? json(issue) : json({ errorMessages: ["Issue Does Not Exist"] }, 404);
+      },
+    },
+    {
       match: (u, r) => u.pathname.endsWith("/transitions") && r.method === "GET",
       respond: () => json(transitions),
     },
