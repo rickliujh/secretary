@@ -16,6 +16,9 @@ export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const IsoDate = z.string().regex(ISO_DATE_RE, "Use YYYY-MM-DD");
 
 export const ISSUE_TYPES = ["Epic", "Story", "Task", "Sub-task", "Bug"] as const;
+/** Story points a proposal may set (D55). */
+export const MAX_STORY_POINTS = 1000;
+export const StoryPoints = z.number().min(0).max(MAX_STORY_POINTS);
 export const DEPENDENCY_KINDS = ["person", "team", "incident", "external"] as const;
 /** How a follow-up on a dependency happened (its timeline, FR-3.1). */
 export const FOLLOWUP_CHANNELS = ["teams", "email", "meeting", "phone", "jira", "other"] as const;
@@ -53,6 +56,15 @@ export const CreateIssue = z.object({
   requesterPersonId: z.string().min(1).nullable().default(null),
   /** Move the created issue into the user's active sprint (D44); sub-tasks follow their parent. */
   joinSprint: z.boolean().default(false),
+  /** Story points to set on create (D55); null for none. */
+  storyPoints: StoryPoints.nullable().default(null),
+  /** True only while the points are the model's suggestion; any edit of them sets it false. */
+  storyPointsEstimated: z.boolean().default(false),
+  /**
+   * The user cleared the points: a revision keeps them empty, with no estimate
+   * or small-ask default, unless the user's instructions give a number.
+   */
+  storyPointsCleared: z.boolean().default(false),
 });
 
 export const UpdateIssue = z.object({
@@ -64,6 +76,8 @@ export const UpdateIssue = z.object({
       priority: z.string().min(1).optional(),
       dueDate: IsoDate.nullable().optional(),
       assignee: z.string().min(1).nullable().optional(),
+      /** New story points; null clears them (D55). */
+      storyPoints: StoryPoints.nullable().optional(),
     })
     .refine((c) => Object.keys(c).length > 0, "Nothing to update"),
 });
@@ -315,13 +329,25 @@ export function resolveRefs(
   }
 }
 
+/** "1 point", "3 points", "0.5 points" (D55). */
+export const pointsLabel = (n: number) => `${n} ${n === 1 ? "point" : "points"}`;
+
 /** Short human description, used on cards and for correction examples. */
 export function describePayload(p: ProposalPayload): string {
   switch (p.kind) {
-    case "create_issue":
-      return `Create ${p.issueType} in ${p.projectKey}: ${p.summary}`;
+    case "create_issue": {
+      const points =
+        typeof p.storyPoints === "number"
+          ? `, ${pointsLabel(p.storyPoints)}${p.storyPointsEstimated ? " (suggested)" : ""}`
+          : "";
+      return `Create ${p.issueType} in ${p.projectKey}: ${p.summary}${points}`;
+    }
     case "update_issue":
-      return `Update ${p.target}: ${Object.keys(p.changes).join(", ")}`;
+      return `Update ${p.target}: ${Object.entries(p.changes)
+        .map(([k, v]) =>
+          k !== "storyPoints" ? k : typeof v === "number" ? pointsLabel(v) : "clear story points",
+        )
+        .join(", ")}`;
     case "add_comment":
       return `Comment on ${p.target}`;
     case "transition_issue":

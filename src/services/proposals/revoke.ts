@@ -290,6 +290,7 @@ const FIELD_LABELS: Record<IssueField, string> = {
   priority: "priority",
   dueDate: "due date",
   assignee: "assignee",
+  storyPoints: "story points",
 };
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -375,7 +376,12 @@ function planUpdateIssue(
     d.notes.push(`${key} no longer exists.`);
     return d;
   }
-  const fields: { summary?: string; priority?: string; dueDate?: string | null } = {};
+  const fields: {
+    summary?: string;
+    priority?: string;
+    dueDate?: string | null;
+    storyPoints?: number | null;
+  } = {};
   const changed: string[] = [];
   let assign: { to: string | null } | null = null;
   for (const k of Object.keys(u.after) as IssueField[]) {
@@ -390,21 +396,35 @@ function planUpdateIssue(
       continue;
     }
     if (k === "assignee") {
-      assign = { to: before ?? null };
+      assign = { to: typeof before === "string" ? before : null };
       continue;
     }
-    if (k === "dueDate") fields.dueDate = before ?? null;
+    if (k === "storyPoints") {
+      // Written back to the field the approval wrote (D55); none points clear them.
+      if (!u.pointsField) {
+        d.warnings.push(`The story point field of ${key} was not recorded, so its points stay.`);
+        continue;
+      }
+      fields.storyPoints = typeof before === "number" ? before : null;
+    } else if (k === "dueDate") fields.dueDate = (before as string | null | undefined) ?? null;
     else if (before === null || before === undefined || before === "") {
       d.warnings.push(`The ${label} of ${key} had no value before, so it stays ${shown(now)}.`);
       continue;
-    } else fields[k] = before;
+    } else fields[k] = String(before);
     changed.push(`${label} back to ${shown(before)}`);
   }
   if (Object.keys(fields).length)
     d.steps.push({
       text: `Set the ${listed(changed)} on ${key}`,
       done: `Set the ${listed(changed)} on ${key}`,
-      op: jira({ kind: "update_fields", issueKey: key, fields }),
+      op: jira({
+        kind: "update_fields",
+        issueKey: key,
+        fields,
+        ...(fields.storyPoints !== undefined && u.pointsField
+          ? { pointsField: u.pointsField }
+          : {}),
+      }),
     });
   if (assign)
     d.steps.push({
@@ -735,7 +755,13 @@ const issueSim = (sim: Sim, key: string): IssueSim => {
   return made;
 };
 
-const ISSUE_FIELDS: readonly IssueField[] = ["summary", "priority", "dueDate", "assignee"];
+const ISSUE_FIELDS: readonly IssueField[] = [
+  "summary",
+  "priority",
+  "dueDate",
+  "assignee",
+  "storyPoints",
+];
 
 /** Records what an entry's steps leave behind, for planning the entries after it. */
 function applySteps(sim: Sim, steps: readonly RevokeStep[]) {

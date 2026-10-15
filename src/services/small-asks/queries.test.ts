@@ -45,6 +45,7 @@ describe("small-asks home (FR-10.1)", () => {
         label: "small-ask",
         joinActiveSprint: true,
         hintDismissed: false,
+        defaultPoints: null,
       },
     });
     const r = await Effect.runPromise(

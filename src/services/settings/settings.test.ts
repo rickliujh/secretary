@@ -63,6 +63,7 @@ describe("Settings schema", () => {
         label: "small-ask",
         joinActiveSprint: true,
         hintDismissed: false,
+        defaultPoints: null,
       },
       network: {
         proxyMode: "system",
@@ -81,6 +82,7 @@ describe("Settings schema", () => {
       label: "small-ask",
       joinActiveSprint: true,
       hintDismissed: false,
+      defaultPoints: null,
     });
     expect(SettingsSchema.safeParse({ smallAsks: { label: "small ask" } }).success).toBe(false);
     expect(SettingsSchema.safeParse({ smallAsks: { projectKey: "ask" } }).success).toBe(false);

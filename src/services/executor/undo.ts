@@ -14,17 +14,25 @@ export const IssueFieldValuesSchema = z.object({
   priority: z.string().nullable().optional(),
   dueDate: z.string().nullable().optional(),
   assignee: z.string().nullable().optional(),
+  /** Read from the story point field the approval wrote (D55). */
+  storyPoints: z.number().nullable().optional(),
 });
 export type IssueFieldValues = z.infer<typeof IssueFieldValuesSchema>;
 export type IssueField = keyof IssueFieldValues;
 
-/** Jira field ids to read for each comparable field. */
-export const ISSUE_FIELD_IDS: Record<IssueField, string> = {
+/** Jira field ids to read for each comparable field; story points live in a custom field. */
+export const ISSUE_FIELD_IDS: Record<Exclude<IssueField, "storyPoints">, string> = {
   summary: "summary",
   priority: "priority",
   dueDate: "duedate",
   assignee: "assignee",
 };
+
+/** The Jira field ids holding `keys`; story points only when their field is known. */
+export const issueFieldIds = (keys: readonly IssueField[], pointsField?: string): string[] =>
+  keys.flatMap((k) =>
+    k === "storyPoints" ? (pointsField ? [pointsField] : []) : [ISSUE_FIELD_IDS[k]],
+  );
 
 /** A wait's state columns that update_dependency changes (D46). */
 export const WaitStateSchema = z.object({
@@ -50,6 +58,8 @@ export const UndoSchema = z.discriminatedUnion("kind", [
     after: IssueFieldValuesSchema,
     /** Display names of the users in `before`, by user id, for the revoke's texts. */
     names: z.record(z.string(), z.string()).optional(),
+    /** The story point field the approval wrote, to read and restore the same one (D55). */
+    pointsField: z.string().optional(),
   }),
   z.object({
     kind: z.literal("transition_issue"),
@@ -106,13 +116,19 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T | undefined => {
   return r.success ? r.data : undefined;
 };
 
-/** The comparable values of `keys` in an issue's raw fields. */
+/** The comparable values of `keys` in an issue's raw fields; story points from `pointsField`. */
 export function issueFieldValues(
   fields: Record<string, unknown>,
   keys: readonly IssueField[],
+  pointsField?: string,
 ): IssueFieldValues {
   const out: IssueFieldValues = {};
   for (const k of keys) {
+    if (k === "storyPoints") {
+      const v = pointsField ? fields[pointsField] : null;
+      out.storyPoints = typeof v === "number" ? v : null;
+      continue;
+    }
     const v = fields[ISSUE_FIELD_IDS[k]];
     if (k === "summary") out.summary = typeof v === "string" ? v : "";
     if (k === "priority") out.priority = parse(NamedSchema, v)?.name ?? null;

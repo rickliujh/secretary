@@ -3,7 +3,7 @@
  * view, and approved proposals mapped onto the same shapes.
  */
 import { z } from "zod";
-import { IsoDate, IssueKey } from "@/services/proposals/schema";
+import { IsoDate, IssueKey, StoryPoints } from "@/services/proposals/schema";
 
 export const JiraActionSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -22,19 +22,28 @@ export const JiraActionSchema = z.discriminatedUnion("kind", [
     transitionId: z.string().min(1),
     transitionName: z.string().optional(),
   }),
-  z.object({
-    kind: z.literal("update_fields"),
-    issueKey: IssueKey,
-    fields: z
-      .object({
-        summary: z.string().trim().min(1).optional(),
-        /** Wiki markup; edited as-is to avoid lossy round trips (design.md section 5). */
-        descriptionWiki: z.string().nullable().optional(),
-        priority: z.string().min(1).optional(),
-        dueDate: IsoDate.nullable().optional(),
-      })
-      .refine((f) => Object.keys(f).length > 0, "Nothing to update"),
-  }),
+  z
+    .object({
+      kind: z.literal("update_fields"),
+      issueKey: IssueKey,
+      fields: z
+        .object({
+          summary: z.string().trim().min(1).optional(),
+          /** Wiki markup; edited as-is to avoid lossy round trips (design.md section 5). */
+          descriptionWiki: z.string().nullable().optional(),
+          priority: z.string().min(1).optional(),
+          dueDate: IsoDate.nullable().optional(),
+          /** Written to `pointsField`; null clears them (D55). */
+          storyPoints: StoryPoints.nullable().optional(),
+        })
+        .refine((f) => Object.keys(f).length > 0, "Nothing to update"),
+      /** The story point field on the issue's edit screen, chosen by the Executor (D55). */
+      pointsField: z.string().min(1).optional(),
+    })
+    .refine((a) => a.fields.storyPoints === undefined || !!a.pointsField, {
+      message: "Story points need the story point field to write",
+      path: ["pointsField"],
+    }),
   z.object({
     kind: z.literal("assign"),
     issueKey: IssueKey,

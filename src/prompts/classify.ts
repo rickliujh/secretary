@@ -19,6 +19,7 @@ import {
   NEW_REF_RE,
   type ProposalPayload,
   ProposalPayloadSchema,
+  pointsLabel,
   WAIT_ACTIONS,
 } from "@/services/proposals/schema";
 import type { Reason } from "@/services/retrieval/ranking";
@@ -26,8 +27,17 @@ import { sameWaitSubject } from "@/services/retrieval/waits";
 import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small-asks/home";
 import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
+import {
+  createPoints,
+  keptPoints,
+  parsePoints,
+  pointSources,
+  pointsKey,
+  pointsProblems,
+  statedNumbers,
+} from "./points";
 
-export const CLASSIFY_PROMPT_VERSION = 11;
+export const CLASSIFY_PROMPT_VERSION = 12;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -48,6 +58,8 @@ export type CandidateIssue = {
   reasons: Reason[];
   /** Issues it is already blocked by in Jira, whatever their status (prompt version 8, D45). */
   blockedBy?: string[];
+  /** Its story points as cached (prompt version 12, D55); null when unestimated. */
+  storyPoints?: number | null;
 };
 
 /** Why retrieval offered an open dependency (D46). */
@@ -127,6 +139,8 @@ export type SmallAskHomeSnapshot = {
   /** Types a small ask may take in the home; empty when Jira's metadata is not synced yet. */
   issueTypes: string[];
   defaultType: string | null;
+  /** Points a small ask gets when the input states none (D55); null or absent: none. */
+  defaultPoints?: number | null;
 };
 
 /** Everything the model sees for one item, stored on the item for replay. */
@@ -140,6 +154,12 @@ export type ItemSnapshot = {
   blockLinkType?: string | null;
   /** Sprint calendar around today (D23); absent in snapshots before prompt version 5. */
   sprints?: PromptSprint[];
+  /**
+   * The story point values the synced tickets use, ascending (prompt version 12,
+   * D55); empty when none has points. Absent in older snapshots, which have no
+   * points fields, so they replay as they ran.
+   */
+  pointScale?: number[];
   promptVersion: number;
   today: string;
   /** The day the item's input arrived; a revision keeps it for "Asked ... on" (D44). */
@@ -245,6 +265,7 @@ const FIELD_KINDS: Record<string, readonly string[]> = {
   expectedAt: ["link_dependency", "update_dependency"],
   nextFollowupAt: ["update_dependency"],
   assignee: ["create_issue", "update_issue"],
+  storyPoints: ["create_issue", "update_issue"],
 };
 
 /** Fields checked as issue references: a candidate key or a ref created in this answer. */
@@ -309,6 +330,19 @@ export function buildItemSchema(s: ItemSnapshot) {
         ),
       }
     : {};
+  // From prompt version 12 (D55); older snapshots replay without them. Text, not a
+  // number: the portable schema (D21) cannot leave a number empty.
+  const scale = s.pointScale;
+  const pointsFields = scale
+    ? {
+        storyPoints: nullableText(
+          `Story points as a number, e.g. 3: as the input states them, or for a new ticket a value from the story point scale. ${uses("create_issue", "update_issue")}`,
+        ),
+        pointsSource: nullableEnum(pointSources(scale)).describe(
+          `stated: the input gives this number as the ticket's story points; estimated: your suggestion for a new ticket. ${uses("create_issue", "update_issue")}`,
+        ),
+      }
+    : {};
   // Only when the instance has a "blocks" link type (D45).
   const linkFields = offered("link_issues")
     ? {
@@ -344,6 +378,7 @@ export function buildItemSchema(s: ItemSnapshot) {
       `Jira user id from the list. ${uses("create_issue", "update_issue")}`,
     ),
     dueDate: nullableText(`YYYY-MM-DD. ${uses("create_issue", "update_issue")}`),
+    ...pointsFields,
     ...smallAskFields,
     // add_comment
     body: nullableText(`Comment text in Markdown. ${uses("add_comment")}`),
@@ -491,8 +526,24 @@ function smallAskPayload(p: ItemOutput["proposals"][number], s: ItemSnapshot): P
     requesterPersonId: requester?.id ?? null,
     // Sub-tasks follow their parent's sprint.
     joinSprint: home.joinSprint && !subtask,
+    // Without stated points, the default from Settings when one is set (D55).
+    ...createPoints(p.storyPoints, p.pointsSource, {
+      epic: false,
+      smallAsk: true,
+      defaultPoints: home.defaultPoints,
+      cleared: keptFor(p, s)?.cleared,
+    }),
   });
 }
+
+/** An Epic by type name; it never gets story points (D55). */
+const isEpicType = (type: unknown) => typeof type === "string" && /^epic$/i.test(type.trim());
+
+/** The points of the pending proposal this one revises, in a revision (D55). */
+const keptFor = (p: Record<string, unknown>, s: ItemSnapshot | undefined) => {
+  const key = pointsKey(p);
+  return key ? keptPoints(s?.thread?.pending).get(key) : undefined;
+};
 
 /** The timeline channel of a reply, from the input's source (D46). */
 const followupChannel = (source: string | undefined): (typeof FOLLOWUP_CHANNELS)[number] =>
@@ -518,18 +569,31 @@ function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): Propos
         priority: str(g("priority")),
         assignee: str(g("assignee")),
         dueDate: str(g("dueDate")),
+        ...createPoints(g("storyPoints"), g("pointsSource"), {
+          epic: isEpicType(g("issueType")),
+          smallAsk: false,
+          cleared: keptFor(p, s)?.cleared,
+        }),
       });
-    case "update_issue":
+    case "update_issue": {
+      // Only stated points change an existing ticket (D55); a clear the user chose stays.
+      const points = g("pointsSource") === "stated" ? parsePoints(g("storyPoints")) : null;
+      const cleared = typeof points !== "number" && !!keptFor(p, s)?.cleared;
       return ProposalPayloadSchema.parse({
         kind: "update_issue",
         target: g("target"),
-        changes: defined({
-          summary: str(g("summary")),
-          priority: str(g("priority")),
-          dueDate: str(g("dueDate")),
-          assignee: str(g("assignee")),
-        }),
+        changes: {
+          ...defined({
+            summary: str(g("summary")),
+            priority: str(g("priority")),
+            dueDate: str(g("dueDate")),
+            assignee: str(g("assignee")),
+            storyPoints: typeof points === "number" ? points : null,
+          }),
+          ...(cleared ? { storyPoints: null } : {}),
+        },
       });
+    }
     case "add_comment":
       return ProposalPayloadSchema.parse({
         kind: "add_comment",
@@ -763,6 +827,18 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   const knownUsers = new Set(s.jiraUsers.map((u) => u.username));
   const isEpic = (ref: string) =>
     candidates.get(ref)?.issueType === "Epic" || created.get(ref)?.issueType === "Epic";
+  // Numbers the input and the user's own words give as points, and what each
+  // pending proposal carries (the user's edits, a default, a clear), for D55.
+  const instructed = statedNumbers([
+    ...(s.thread?.instructions ?? []),
+    ...(s.clarification ? [s.clarification] : []),
+  ]);
+  const stated = new Set([...statedNumbers([s.quote]), ...instructed]);
+  const kept = keptPoints(s.thread?.pending);
+  const keptOf = (p: Record<string, unknown>) => {
+    const key = pointsKey(p);
+    return key ? kept.get(key) : undefined;
+  };
 
   out.proposals.forEach((p, i) => {
     const at = `Proposal ${i + 1} (${p.kind})`;
@@ -844,11 +920,34 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       errors.push(`${at}: an incident dependency needs externalRef like INC0012345.`);
     if (
       p.kind === "update_issue" &&
-      ["summary", "priority", "dueDate", "assignee"].every(
-        (k) => p[k] === null || p[k] === undefined,
+      // Clearing the points the user chose is a change the model's shape cannot carry.
+      !keptOf(p)?.cleared &&
+      ["summary", "priority", "dueDate", "assignee", "storyPoints"].every(
+        (k) => p[k] === null || p[k] === undefined || p[k] === "",
       )
     )
       errors.push(`${at}: update_issue must change at least one field.`);
+    // The small-ask default replaces an estimate, so a wrong one needs no repair.
+    const replaced =
+      small && typeof s.smallAsks?.defaultPoints === "number" && p.pointsSource !== "stated";
+    if (s.pointScale && !replaced && (p.kind === "create_issue" || p.kind === "update_issue")) {
+      const candidate = p.kind === "update_issue" ? candidates.get(String(p.target)) : undefined;
+      for (const problem of pointsProblems({
+        kind: p.kind,
+        storyPoints: p.storyPoints,
+        pointsSource: p.pointsSource,
+        epic:
+          p.kind === "create_issue"
+            ? !small && isEpicType(p.issueType)
+            : isEpicType(candidate?.issueType),
+        current: candidate?.storyPoints,
+        scale: s.pointScale,
+        stated,
+        instructed,
+        kept: keptOf(p),
+      }))
+        errors.push(`${at}: ${problem}`);
+    }
     if (p.kind === "draft_message" && !p.recipientPersonId && !p.recipientTeamId)
       errors.push(`${at}: draft_message needs a recipient person or team.`);
     if (p.kind === "add_comment" && !str(p.body)) errors.push(`${at}: comment body is empty.`);
@@ -879,6 +978,15 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   return errors;
 }
 
+/** Story points in the output shape (D55); left out when there are none. */
+const pointsShape = (points: number | null | undefined, estimated: boolean, cleared: boolean) =>
+  typeof points === "number"
+    ? { storyPoints: String(points), pointsSource: estimated ? "estimated" : "stated" }
+    : // Data for the model and for mapping the revision back: the user cleared them.
+      cleared
+      ? { pointsCleared: true }
+      : {};
+
 /**
  * A stored payload in the model's flat output shape, so a revision can return it
  * unchanged (D22). `$new` refs are renamed through `refs`; questions and kinds
@@ -905,6 +1013,8 @@ export function fromPayload(
         // Code assigns a small ask; the user may not be in this item's list of Jira users.
         assignee: p.smallAsk ? null : p.assignee,
         dueDate: p.dueDate,
+        // Points the user set (or a small-ask default) return as stated (D55).
+        ...pointsShape(p.storyPoints, p.storyPointsEstimated, p.storyPointsCleared),
         ...(p.smallAsk ? { smallAsk: "yes", requesterPersonId: p.requesterPersonId } : {}),
       };
     case "update_issue":
@@ -915,6 +1025,7 @@ export function fromPayload(
         priority: p.changes.priority ?? null,
         dueDate: p.changes.dueDate ?? null,
         assignee: p.changes.assignee ?? null,
+        ...pointsShape(p.changes.storyPoints, false, p.changes.storyPoints === null),
       };
     case "add_comment":
       return { kind: p.kind, target: r(p.target), body: p.bodyMd };
@@ -1063,6 +1174,19 @@ ${
       }
 `
     : ""
+}${
+  s.pointScale
+    ? `- Story points: when the input states the points of a ticket ("a 3-pointer", "5 points"), set storyPoints to that number with pointsSource stated. ${
+        s.pointScale.length
+          ? "For a new ticket (create_issue) whose points the input does not state, suggest points: a value from the Story point scale, sized against the candidate issues' points, with pointsSource estimated."
+          : "There is no story point scale yet, so do not estimate: set points only when the input states them."
+      } Never estimate an existing ticket: propose update_issue with storyPoints only when the input asks to change its points or states a new estimate ("PAY-12 is more like a 5"), with pointsSource stated. An Epic gets no points.${
+        s.thread?.pending.some((p) => p.pointsCleared === true)
+          ? " A current proposal with pointsCleared true had its points removed by the user: keep storyPoints empty for it unless their instructions give a number."
+          : ""
+      }
+`
+    : ""
 }- Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
 - Use remember for rules and preferences the user states about how to handle future work.
 - The user reviews and can edit every proposal before it runs, so a sensible proposal with a stated assumption beats a question. Decide details yourself: the priority (from urgency, deadlines, blocking and customer impact), wording, and which listed value fits. Say what you assumed in the rationale.
@@ -1129,7 +1253,7 @@ ${
       home
         ? `\nSmall-asks home: project ${home.projectKey}; issue types ${home.issueTypes.join(", ") || "unknown"}${home.defaultType ? `; default ${home.defaultType}` : ""}`
         : ""
-    }`,
+    }${s.pointScale?.length ? `\nStory point scale (the values the team's tickets use): ${s.pointScale.join(", ")}` : ""}`,
   );
   if (s.sprints?.length) {
     blocks.push(
@@ -1146,7 +1270,7 @@ ${
       s.candidates
         .map(
           (c) =>
-            `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}${c.priority ? `, priority ${c.priority}` : ""}${c.dueDate ? `, due ${c.dueDate}` : ""}${s.blockLinkType && c.blockedBy?.length ? `, blocked by ${c.blockedBy.join(", ")}` : ""}] ${c.summary} (${c.reasons.join(", ")})`,
+            `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}${c.priority ? `, priority ${c.priority}` : ""}${c.dueDate ? `, due ${c.dueDate}` : ""}${s.pointScale && typeof c.storyPoints === "number" ? `, ${pointsLabel(c.storyPoints)}` : ""}${s.blockLinkType && c.blockedBy?.length ? `, blocked by ${c.blockedBy.join(", ")}` : ""}] ${c.summary} (${c.reasons.join(", ")})`,
         )
         .join("\n") || "- none found"
     }${

@@ -17,7 +17,11 @@
  * Sprint field names the sprint it was created in, plus the active one when
  * unfinished work was carried over. `POST /rest/agile/1.0/sprint/{id}/issue`
  * moves issues into a sprint. Stories, tasks and bugs carry Story Points
- * (1, 2, 3, 5, 8, 13; some unestimated).
+ * (1, 2, 3, 5, 8, 13; some unestimated). Their create and edit screens have
+ * the Story Points field (not Epic or Sub-task, D55); with --cloud also "Story
+ * point estimate", empty until written, as on Cloud sites with both (D35).
+ * Like Jira, a create or edit that sets a field its screen lacks, or points
+ * that are not a number, is refused with 400.
  *
  * Change history: every other issue has a status change and some an assignee
  * change in the last few days, plus an older priority change; status,
@@ -81,6 +85,8 @@ type Issue = {
   links: { type: "Blocks"; inward: string }[];
   /** Story Points; null when unestimated. */
   points: number | null;
+  /** Cloud's "Story point estimate" (--cloud only); empty unless written. */
+  estimate?: number | null;
   /** Set when the issue was moved into a sprint through the Agile API. */
   movedToSprint?: number;
   /** Set when the issue was moved to the backlog through the Agile API: no open sprint. */
@@ -138,6 +144,8 @@ const EPIC_LINK = "customfield_10100";
 const EPIC_NAME = "customfield_10102";
 const SPRINT = "customfield_10104";
 const STORY_POINTS = "customfield_10106";
+/** Cloud's "Story point estimate" (jsw-story-points), served with --cloud beside Story Points (D35). */
+const ESTIMATE = "customfield_10016";
 /** Cycled by issue id so points do not disturb the seeded random sequence. */
 const POINTS = [3, 1, 5, 2, 8, 3, null, 2, 5, 1, 3, 13, 2, null, 5, 1, 8] as const;
 
@@ -501,6 +509,7 @@ function issueJson(
       [SPRINT]: issueSprints(issue),
       subtasks: [...all.values()].filter((i) => i.parent === issue.key).map(linkedIssue),
       [STORY_POINTS]: issue.points,
+      ...(cloud ? { [ESTIMATE]: issue.estimate ?? null } : {}),
       // Both sides: on `to` the other issue is inward ("is blocked by"), on `from` outward.
       issuelinks: links.flatMap((l) => {
         const type = {
@@ -570,6 +579,11 @@ export type MockOptions = {
   undeletable?: Set<string>;
   /** Users who can no longer be assigned: `PUT /assignee` answers 400. */
   unassignable?: Set<string>;
+  /**
+   * Projects whose create screens have no Story Points field (D55); the edit
+   * screen still has it.
+   */
+  noPointsOnCreate?: Set<string>;
 };
 
 export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}) {
@@ -588,6 +602,64 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
     for (const l of issue.links)
       links.push({ id: String(nextLink++), type: blocks, from: l.inward, to: issue.key });
   const issueOut = (issue: Issue, embed?: number) => issueJson(issue, issues, embed, links, cloud);
+
+  /** Standard types (not Epic or Sub-task) have the story point fields (D55). */
+  const pointed = (type: string | undefined) => type !== "Epic" && type !== "Sub-task";
+  /** The story point fields of a screen: Cloud has "Story point estimate" as well (D35). */
+  const pointFields = () => [
+    ...(cloud ? [{ fieldId: ESTIMATE, name: "Story point estimate", required: false }] : []),
+    { fieldId: STORY_POINTS, name: "Story Points", required: false },
+  ];
+  /** The create screen of a project and type, as createmeta serves it. */
+  const createScreen = (project: string, type: string | undefined) => [
+    { fieldId: "project", name: "Project", required: true },
+    { fieldId: "issuetype", name: "Issue Type", required: true },
+    { fieldId: "summary", name: "Summary", required: true },
+    { fieldId: "description", name: "Description", required: false },
+    { fieldId: "priority", name: "Priority", required: false, hasDefaultValue: true },
+    { fieldId: "assignee", name: "Assignee", required: false },
+    { fieldId: "duedate", name: "Due Date", required: false },
+    { fieldId: "labels", name: "Labels", required: false },
+    ...(pointed(type) && !opts.noPointsOnCreate?.has(project) ? pointFields() : []),
+    ...(type === "Sub-task" ? [{ fieldId: "parent", name: "Parent", required: true }] : []),
+    ...(cloud
+      ? pointed(type)
+        ? [{ fieldId: "parent", name: "Parent", required: false }]
+        : []
+      : [
+          ...(type === "Epic" ? [{ fieldId: EPIC_NAME, name: "Epic Name", required: true }] : []),
+          ...(pointed(type) ? [{ fieldId: EPIC_LINK, name: "Epic Link", required: false }] : []),
+        ]),
+  ];
+  /** An issue's edit screen, as editmeta serves it. */
+  const editScreen = (issue: Issue) => {
+    const meta = (name: string) => ({ name, required: false, operations: ["set"] });
+    return {
+      summary: meta("Summary"),
+      description: meta("Description"),
+      priority: meta("Priority"),
+      duedate: meta("Due Date"),
+      labels: meta("Labels"),
+      ...(pointed(issue.type)
+        ? {
+            ...(cloud ? { parent: meta("Parent") } : { [EPIC_LINK]: meta("Epic Link") }),
+            ...Object.fromEntries(pointFields().map((f) => [f.fieldId, meta(f.name)])),
+          }
+        : {}),
+    };
+  };
+  /** Jira's 400 for a field the screen does not have, or points that are not a number. */
+  const screenProblem = (fields: Record<string, unknown>, screen: readonly string[]) => {
+    const allowed = new Set(screen);
+    const errors: Record<string, string> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (!allowed.has(k))
+        errors[k] = `Field '${k}' cannot be set. It is not on the appropriate screen, or unknown.`;
+      else if ((k === STORY_POINTS || k === ESTIMATE) && v !== null && typeof v !== "number")
+        errors[k] = "Operation value must be a number.";
+    }
+    return Object.keys(errors).length ? json({ errorMessages: [], errors }, 400) : null;
+  };
 
   const handler = async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
@@ -747,6 +819,20 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
             customId: 10104,
           },
         },
+        ...(cloud
+          ? [
+              {
+                id: ESTIMATE,
+                name: "Story point estimate",
+                custom: true,
+                schema: {
+                  type: "number",
+                  custom: "com.pyxis.greenhopper.jira:jsw-story-points",
+                  customId: 10016,
+                },
+              },
+            ]
+          : []),
         {
           id: STORY_POINTS,
           name: "Story Points",
@@ -835,29 +921,7 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
         const types = ISSUE_TYPES.map((t) => ({ id: t, name: t, subtask: t === "Sub-task" }));
         return json(cloud ? { issueTypes: types } : { isLast: true, values: types });
       }
-      const fieldsMeta = [
-        { fieldId: "project", name: "Project", required: true },
-        { fieldId: "issuetype", name: "Issue Type", required: true },
-        { fieldId: "summary", name: "Summary", required: true },
-        { fieldId: "description", name: "Description", required: false },
-        { fieldId: "priority", name: "Priority", required: false, hasDefaultValue: true },
-        { fieldId: "assignee", name: "Assignee", required: false },
-        { fieldId: "duedate", name: "Due Date", required: false },
-        { fieldId: "labels", name: "Labels", required: false },
-        ...(meta[2] === "Sub-task" ? [{ fieldId: "parent", name: "Parent", required: true }] : []),
-        ...(cloud
-          ? meta[2] !== "Epic" && meta[2] !== "Sub-task"
-            ? [{ fieldId: "parent", name: "Parent", required: false }]
-            : []
-          : [
-              ...(meta[2] === "Epic"
-                ? [{ fieldId: EPIC_NAME, name: "Epic Name", required: true }]
-                : []),
-              ...(meta[2] !== "Epic" && meta[2] !== "Sub-task"
-                ? [{ fieldId: EPIC_LINK, name: "Epic Link", required: false }]
-                : []),
-            ]),
-      ];
+      const fieldsMeta = createScreen(meta[1] ?? "", meta[2]);
       return json(cloud ? { fields: fieldsMeta } : { isLast: true, values: fieldsMeta });
     }
     if (path === "issue" && req.method === "POST") {
@@ -866,6 +930,12 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       const type = (f.issuetype as { id?: string } | undefined)?.id as Issue["type"] | undefined;
       if (!["PAY", "OPS"].includes(project) || !type)
         return error("project and issuetype are required");
+      // Like Jira: a field the create screen does not have is refused.
+      const refused = screenProblem(
+        f,
+        createScreen(project, type).map((x) => x.fieldId),
+      );
+      if (refused) return refused;
       if (type === "Epic" && !cloud && !f[EPIC_NAME])
         return json({ errorMessages: [], errors: { [EPIC_NAME]: "Epic Name is required." } }, 400);
       const count = [...issues.values()].filter((i) => i.project === project).length;
@@ -898,6 +968,7 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
         comments: [],
         links: [],
         points: typeof f[STORY_POINTS] === "number" ? (f[STORY_POINTS] as number) : null,
+        ...(cloud && typeof f[ESTIMATE] === "number" ? { estimate: f[ESTIMATE] as number } : {}),
       };
       issues.set(created.key, created);
       return json(
@@ -946,6 +1017,11 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       }
       if (sub === "" && req.method === "PUT") {
         const f = (body?.fields ?? {}) as Record<string, unknown>;
+        // Like Jira: a field the edit screen does not have is refused.
+        const refused = screenProblem(f, Object.keys(editScreen(issue)));
+        if (refused) return refused;
+        if (cloud && ESTIMATE in f)
+          issue.estimate = typeof f[ESTIMATE] === "number" ? (f[ESTIMATE] as number) : null;
         if ("summary" in f) issue.summary = String(f.summary);
         if ("description" in f) issue.description = (f.description as string | null) ?? null;
         if ("priority" in f) {
@@ -1061,12 +1137,7 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       }
       if (sub === "/editmeta")
         return json({
-          fields:
-            issue.type === "Sub-task" || issue.type === "Epic"
-              ? {}
-              : cloud
-                ? { parent: { name: "Parent", required: false, operations: ["set"] } }
-                : { [EPIC_LINK]: { name: "Epic Link", required: false, operations: ["set"] } },
+          fields: editScreen(issue),
         });
       if (sub === "/remotelink" && req.method === "GET") return json(issue.remoteLinks ?? []);
       if (sub === "/remotelink" && req.method === "POST") {

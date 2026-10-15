@@ -451,6 +451,7 @@ describe("small asks and blockers in the chat (D49)", () => {
             label: "small-ask",
             joinActiveSprint: true,
             hintDismissed: false,
+            defaultPoints: null,
           },
         },
       },

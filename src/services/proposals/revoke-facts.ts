@@ -8,7 +8,7 @@ import { Effect, Option } from "effect";
 import { communications, dependencies, followups, memories, people, teams } from "@/db/schema";
 import { query } from "@/services/db";
 import {
-  ISSUE_FIELD_IDS,
+  issueFieldIds,
   issueFieldValues,
   issueStatus,
   issueUserNames,
@@ -137,12 +137,14 @@ export const revokeFacts = (s: RevokeSubject) =>
         if (undo?.kind !== "update_issue") return null;
         const keys = Object.keys(undo.after) as (keyof typeof undo.after)[];
         const raw = yield* unlessGone(
-          jira.getIssue(undo.issueKey, { fields: keys.map((k) => ISSUE_FIELD_IDS[k]) }),
+          jira.getIssue(undo.issueKey, { fields: issueFieldIds(keys, undo.pointsField) }),
         );
         return {
           kind: "update_issue",
           exists: Option.isSome(raw),
-          values: Option.isSome(raw) ? issueFieldValues(raw.value.fields, keys) : {},
+          values: Option.isSome(raw)
+            ? issueFieldValues(raw.value.fields, keys, undo.pointsField)
+            : {},
           userNames: Option.isSome(raw) ? issueUserNames(raw.value.fields, keys) : {},
         } satisfies RevokeFacts;
       }

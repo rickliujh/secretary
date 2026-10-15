@@ -1344,3 +1344,72 @@ Known limits
 - The revoke comment is matched among the newest 100 comments of the ticket.
 - Deleting a ticket leaves waits created outside its thread pointing at the
   deleted key (D54 revokes only what the thread did).
+
+## Phase 18: Story points on proposals (2026-10-15)
+
+Built
+- Payloads (D55): create_issue gains `storyPoints` (number 0 to 1000, or null) and
+  `storyPointsEstimated`; update_issue `changes` gains `storyPoints` (null clears).
+  Both default, so stored proposals still parse. `describePayload` shows "N points",
+  "(suggested)" while estimated. Settings > Jira > Small asks has a default
+  (`smallAsks.defaultPoints`, empty by default).
+- Scale: `retrieval/points.ts` counts the cache's point values per project (Epics,
+  sub-tasks and stale tickets left out) and keeps the 8 most frequent of the
+  candidates' projects and the small-asks home, else of every project, sorted
+  ascending. The snapshot stores it as `pointScale`, and candidates carry their
+  points.
+- Classify prompt version 12 (11 is taken by a parallel fix): `storyPoints` (text,
+  parsed in code, since the portable schema cannot leave a number empty) and
+  `pointsSource` (`stated`, `estimated`; only `stated` while the scale is empty),
+  the rule (use stated points, estimate only new tickets from the scale, never
+  re-estimate an existing ticket, no points on an Epic), the scale under Projects
+  and each candidate's points. Snapshots without `pointScale` (older versions)
+  get none of this, so they replay as they ran.
+- `prompts/points.ts` checks in code and the repair prompt says why: a number from
+  0 to 1000; a source with the number; `estimated` only on create_issue and only a
+  scale value; `stated` only when the input or the user's instructions give the
+  number next to a points cue (points, pts, SP, "-pointer", estimate, "like a 5"),
+  every number of a list counting, issue keys in any case, dates and times not;
+  update_issue points only `stated` and not the value the ticket has; no points
+  on an Epic. In a revision the pending proposal it revises (a create by ref, an
+  update by target) may keep the user's points, never an estimate. A small ask's
+  estimate is not checked when the default replaces it. Payload building gives a
+  small ask without stated points the default when one is set, and an Epic none.
+- Cleared points stay cleared: emptying a create's points sets
+  `storyPointsCleared`; the revision's pending shape carries `pointsCleared`, and
+  no estimate or default comes back unless the user's instructions give a number.
+  An update's clear (`storyPoints: null`) survives a revision the same way.
+- Executor: a create writes the first effective story point field (D35) that the
+  create screen lists (`pointsFieldOn`); a screen without one creates without
+  points and the result warns. An update reads the issue's story point fields and
+  `GET /issue/{key}/editmeta`, writes the on-screen field that holds its points,
+  else the first on the screen (`pointsFieldForIssue`), fails (`invalid`) naming
+  the reason when the screen has none, and records the previous points and the
+  field in its undo data; a retry keeps the field the first attempt chose.
+  `update_fields` carries the points with their field (`pointsField`).
+- Revoke puts the previous points back in the same field under the changed-since
+  rule; points that were empty before are cleared.
+- UI: a Story points field in the edit dialog (hidden for an Epic; changing the
+  type to Epic drops the points), a "Clear story points on the ticket" checkbox
+  for update_issue (FR-15.3), the points on the small-ask row next to type and
+  epic (saved on blur or Enter, like the row's other fields), and a Points row on
+  cards with a "suggested" badge. A changed or cleared value is the user's, no
+  longer a suggestion.
+- Mock Jira: Story Points on the create and edit screens of standard types (not
+  Epic or Sub-task); `noPointsOnCreate` drops it from a project's create screens;
+  with `--cloud` "Story point estimate" too, empty until written. Like Jira, a
+  create or edit that sets a field its screen lacks, or points that are not a
+  number, gets 400; the edit screens list summary, description, priority, due
+  date and labels.
+- Tests: the scale and its SQL, the stated-number check, every validation rule,
+  per-proposal kept points, cleared points across a revision, payload building
+  with and without the small-ask default, the field choice from create and edit
+  metadata (both Cloud fields on screen), the create and update mappings,
+  describePayload and the edit form; against the mock Jira the FR-15 AC (3
+  stated, a suggestion, the small-ask default, "is more like a 5" and its revoke,
+  a create screen without the field, an update without it), the Cloud two-field
+  path end to end, and the mock's 400s. Three live eval cases.
+
+Known limits
+- On update_issue an empty points field means "no change"; clearing uses the
+  checkbox.

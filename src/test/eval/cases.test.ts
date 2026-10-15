@@ -34,6 +34,22 @@ describe("eval cases", () => {
     expect(fixtureIssues.some((i) => i.key === "PLAT-1")).toBe(false);
   });
 
+  test("story point cases: stated, suggested and an existing ticket re-estimated (D55)", () => {
+    const fieldOf = (kind: string, field: string) =>
+      EVAL_CASES.filter((c) =>
+        c.expect.required.some((r) => r.kind === kind && field in (r.fields ?? {})),
+      );
+    expect(fieldOf("create_issue", "storyPointsEstimated")).toHaveLength(2);
+    const update = fieldOf("update_issue", "storyPoints");
+    expect(update).toHaveLength(1);
+    // The fixture ticket has other points now, so the update changes something.
+    const target = update[0]?.expect.required[0]?.target;
+    const issue = fixtureIssues.find((i) => i.key === target) as
+      | { fields: Record<string, unknown> }
+      | undefined;
+    expect(issue?.fields.customfield_10106).not.toBe(5);
+  });
+
   test("wait cases: an answer resolves a wait, a partial one logs a reply, an out-of-office sets the date (D46, D47)", () => {
     const actionOf = (action: string) =>
       EVAL_CASES.filter(
