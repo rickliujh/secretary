@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { communications, dependencies } from "@/db/schema";
-import { query } from "@/services/db";
+import { communications, dependencies, proposals } from "@/db/schema";
+import { type Db, query } from "@/services/db";
 import { createPerson, createTeam } from "@/services/directory/queries";
-import type { ExecutorError } from "@/services/executor";
+import { Executor, type ExecutorError } from "@/services/executor";
 import { ExecutorLive } from "@/services/executor/live";
+import { ProposalPayloadSchema } from "@/services/proposals/schema";
 import { syncedJiraLayer, syncOnce } from "@/test/seed";
-import { json, noContent } from "@/test/stub-fetch";
+import { json, noContent, type StubRoute } from "@/test/stub-fetch";
 import { groupByOwner } from "./logic";
 import {
   createDependency,
@@ -123,6 +124,47 @@ describe("dependencies", () => {
     expect(r.tomorrow.map((d) => d.label)).toEqual(["Platform fix"]);
   });
 
+  test("a wait on someone away sleeps: no reminder until they are back, then one with the reason (D47)", async () => {
+    const { layer } = setup();
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          // Away until Thursday 2026-10-01: back on Friday 2026-10-02.
+          const bob = yield* createPerson({ displayName: "Bob Ray", awayUntil: "2026-10-01" });
+          const id = yield* createDependency({
+            issueKey: "PAY-2",
+            kind: "person",
+            label: "Numbers from finance",
+            ownerPersonId: bob,
+            expectedAt: "2026-09-29",
+            nextFollowupAt: "2026-09-30",
+          });
+          yield* query((d) =>
+            d
+              .update(dependencies)
+              .set({ requestedAt: "2026-09-25T09:00:00.000Z" })
+              .where(eq(dependencies.id, id)),
+          );
+          const away = yield* dueForReminder("2026-10-01");
+          const back = yield* dueForReminder("2026-10-02");
+          const rows = yield* listDependencies();
+          const detail = yield* getDependency(id);
+          return { away, back, rows, detail };
+        }),
+        layer,
+      ),
+    );
+    expect(r.away).toEqual([]);
+    expect(r.back.map((d) => [d.label, d.reason])).toEqual([
+      ["Numbers from finance", "Bob Ray is back"],
+    ]);
+    expect(r.rows[0]?.ownerAway).toEqual({ name: "Bob Ray", awayUntil: "2026-10-01" });
+    const [asleep] = groupByOwner(r.rows, "2026-10-01")[0]?.items ?? [];
+    expect(asleep?.timing).toMatchObject({ asleep: true, overdueDays: 0, followupDue: false });
+    expect(r.detail?.timingInput.ownerAway?.awayUntil).toBe("2026-10-01");
+  });
+
   test("mirroring creates a remote link, resolving updates it, turning it off deletes it", async () => {
     const { layer, seen } = setup();
     const r = await Effect.runPromise(
@@ -211,5 +253,125 @@ describe("dependencies", () => {
     expect(row?.notesMd).toMatch(
       /^Chase Platform fix \(INC0012345\) for PAY-2\. First requested on \d{4}-\d{2}-\d{2}\. Was expected by 2026-09-24\.$/,
     );
+  });
+});
+
+describe("update_dependency through the Executor (D46)", () => {
+  const run = (
+    payload: Record<string, unknown>,
+    extra: StubRoute[] = [],
+    before: (id: string) => Effect.Effect<unknown, unknown, Db | Executor> = () => Effect.void,
+  ) => {
+    const jira = syncedJiraLayer(extra);
+    return Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const id = yield* createDependency({
+            issueKey: "PAY-2",
+            kind: "external",
+            label: "Vendor quote",
+            expectedAt: "2026-09-30",
+          });
+          yield* Effect.orDie(before(id));
+          yield* query((d) =>
+            d.insert(proposals).values({
+              id: "u1",
+              seq: 0,
+              kind: "update_dependency",
+              payload: {},
+              status: "approved",
+              createdAt: "2026-10-03T10:00:00.000Z",
+            }),
+          );
+          const result = yield* Effect.either(
+            (yield* Executor).runProposal(
+              ProposalPayloadSchema.parse({ ...payload, dependencyId: payload.dependencyId ?? id }),
+              { proposalId: "u1", inboxItemId: null },
+            ),
+          );
+          return { result, after: yield* getDependency(id) };
+        }),
+        Layer.provideMerge(ExecutorLive, jira.layer),
+      ),
+    );
+  };
+  const base = { kind: "update_dependency", channel: "email" };
+
+  test("a reply with a new date logs it, moves the date and chases the working day after", async () => {
+    const r = await run({
+      ...base,
+      action: "log_reply",
+      summary: "Half now, the rest on Friday",
+      expectedAt: "2026-10-09",
+    });
+    expect(r.result).toMatchObject({
+      _tag: "Right",
+      right: { message: "Logged the reply on PAY-2 waits on Vendor quote" },
+    });
+    // 2026-10-09 is a Friday: ask again on Monday.
+    expect(r.after?.dependency).toMatchObject({
+      status: "waiting",
+      expectedAt: "2026-10-09",
+      nextFollowupAt: "2026-10-12",
+    });
+    expect(r.after?.timeline.map((t) => [t.channel, t.summary])).toEqual([
+      ["email", "Half now, the rest on Friday"],
+    ]);
+  });
+
+  test("a reschedule sets when to ask again and says so on the timeline", async () => {
+    const r = await run({ ...base, action: "reschedule", nextFollowupAt: "2026-10-20" });
+    expect(r.after?.dependency).toMatchObject({
+      expectedAt: "2026-09-30",
+      nextFollowupAt: "2026-10-20",
+    });
+    expect(r.after?.timeline[0]?.summary).toBe(
+      "Reschedule PAY-2 waits on Vendor quote: ask again 2026-10-20",
+    );
+  });
+
+  test("resolving one already resolved writes nothing; anything else on it fails", async () => {
+    const resolved = (id: string) => setStatus(id, "resolved");
+    const again = await run({ ...base, action: "resolve" }, [], resolved);
+    expect(again.result).toMatchObject({
+      _tag: "Right",
+      right: { message: "PAY-2 waits on Vendor quote was already resolved" },
+    });
+    expect(again.after?.timeline).toEqual([]);
+    const reply = await run({ ...base, action: "log_reply", summary: "x" }, [], resolved);
+    expect(reply.result._tag === "Left" && (reply.result.left as ExecutorError).message).toBe(
+      "PAY-2 waits on Vendor quote is resolved; reopen it on the Waiting page first.",
+    );
+  });
+
+  test("a missing dependency fails; a failed mirror update is a warning on a done change", async () => {
+    const missing = await run({ ...base, action: "resolve", dependencyId: "gone" });
+    expect(missing.result._tag === "Left" && (missing.result.left as ExecutorError).message).toBe(
+      "That dependency no longer exists.",
+    );
+    const mirrored = (id: string) =>
+      query((d) =>
+        d
+          .update(dependencies)
+          .set({ mirrorRemoteLinkId: "1", externalUrl: "https://vendor.example.com/q" })
+          .where(eq(dependencies.id, id)),
+      );
+    const r = await run(
+      { ...base, action: "resolve", summary: "Quote arrived" },
+      [
+        {
+          match: (u, req) => u.pathname.endsWith("/remotelink") && req.method === "POST",
+          respond: () => json({ errorMessages: ["No permission"] }, 403),
+        },
+      ],
+      mirrored,
+    );
+    expect(r.result._tag).toBe("Right");
+    if (r.result._tag !== "Right") return;
+    expect(r.result.right.message).toBe("Resolved: PAY-2 waits on Vendor quote");
+    expect(r.result.right.warning).toStartWith(
+      "The wait was updated here, but its link on PAY-2 in Jira was not:",
+    );
+    expect(r.after?.dependency.status).toBe("resolved");
   });
 });

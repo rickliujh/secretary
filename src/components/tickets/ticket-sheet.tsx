@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, Paperclip, Pencil, UserPlus } from "lucide-react";
+import { ExternalLink, Paperclip, Pencil, PenLine, UserPlus } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { z } from "zod";
 import { useSettings } from "@/app/hooks";
@@ -10,6 +10,7 @@ import { run } from "@/app/runtime";
 import { IssueDependencies } from "@/components/dependencies/issue-dependencies";
 import { ContextNotes } from "@/components/directory/context-notes";
 import { PersonDialog } from "@/components/directory/person-dialog";
+import { useDraftPanel } from "@/components/drafts/use-draft-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -70,7 +71,7 @@ function JiraUser({
   const contact = contacts.data?.get(normalizeUsername(username));
   if (contact) {
     return (
-      <Link to="/people" search={{ id: contact.id }} className="underline">
+      <Link to="/context" search={{ tab: "people", id: contact.id }} className="underline">
         {contact.displayName}
       </Link>
     );
@@ -239,14 +240,21 @@ export function TicketSheet({
   const { data: settings } = useSettings();
   const baseUrl = settings?.jira.baseUrl ?? "";
   const [editing, setEditing] = useState(false);
+  const drafts = useDraftPanel();
   const detail = useQuery({
     queryKey: queryKeys.ticketDetail(issueKey ?? ""),
     queryFn: ({ signal }) => run(ticketDetail(issueKey ?? ""), signal),
     enabled: !!issueKey,
   });
+  const client = useQueryClient();
+  // Looking at a ticket clears its woken and new-comment rows on Today (D45, D49).
   useEffect(() => {
-    if (issueKey) void run(markViewed(issueKey)).catch(() => undefined);
-  }, [issueKey]);
+    if (!issueKey) return;
+    run(markViewed(issueKey)).then(
+      () => client.invalidateQueries({ queryKey: queryKeys.today }),
+      () => undefined,
+    );
+  }, [issueKey, client]);
 
   const d = detail.data;
   return (
@@ -267,6 +275,13 @@ export function TicketSheet({
               <EpicSelect issue={d.issue} />
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
                 <Pencil /> Edit
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => drafts.open({ prefill: { issueKeys: [d.issue.key] } })}
+              >
+                <PenLine /> Draft a message
               </Button>
               <Button
                 variant="ghost"

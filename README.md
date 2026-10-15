@@ -12,8 +12,14 @@ machine as a desktop app and keeps everything local.
   what each one waits on.
 - **Waiting**: everything you are waiting on from people, teams and incidents, with
   follow-up reminders and one-click chase drafts.
-- **Dashboard**: a ranked focus list, what is due, what others wait on you for, and a
-  daily brief.
+- **Today**: one page with a capture box and three lists. *Your move*: tickets whose
+  blocker just closed, your small asks, new comments and mentions, Inbox threads
+  with decisions. *Their move*: what you wait on, most pressing first, and your
+  tickets blocked by others. *Sprint work*: your ranked sprint tickets with "due soon"
+  and "at risk" badges. Rows act in place (Done, snooze, draft a reply or a chase,
+  log a reply, resolve), and **Sweep** steps through what needs a decision from the
+  keyboard (D done, N nudge, S snooze, X drop, Space skip). The daily brief opens
+  from a button.
 - **Drafts**: Teams messages and emails written in each recipient's style, grounded in
   the tickets and the dependency history. "Open in Teams" or "Open in email" fills in
   a Teams chat or a new message in your default mail app (no Microsoft sign-in); you
@@ -87,6 +93,34 @@ Open **Settings** and work through the tabs.
    a proxy through a PAC file, choose **Manual** under Network and enter the proxy the
    PAC file returns.
 
+### Quick capture and the tray
+
+To file a message or a task without leaving what you are doing, open **Capture**:
+Ctrl+K then Enter, the global shortcut (Ctrl+Shift+Space, Cmd+Shift+Space on macOS),
+the tray menu, or `secretary --capture`. Paste or type, press Enter, and the dialog
+closes; the secretary reads it in the background and puts the window back the way it
+was. When something is waiting for your approval and the window is out of sight, a
+notification says so. Change the shortcut, or turn it off, in Settings -> General ->
+Capture and tray.
+
+Closing the window keeps Secretary running in the tray, so sync, reminders and the
+shortcut keep working; **Quit** is in the tray menu. On macOS closing hides the app the
+way Cmd+H does: the Dock icon stays, and a Dock click, Cmd+Tab or the menu bar icon
+brings the window back. Turn this off in the same settings card, and closing quits again.
+Starting Secretary a second time brings the running window forward.
+
+On Linux:
+
+- The tray needs the AppIndicator library: `libayatana-appindicator3-1` on Debian or
+  Ubuntu, `libayatana-appindicator-gtk3` on Fedora, `libayatana-appindicator` on Arch.
+  GNOME shows tray icons only with the AppIndicator extension. Without the library
+  the app runs without a tray, and closing the window quits.
+- Wayland does not let apps register global shortcuts. Bind `secretary --capture` to
+  a key in your desktop's own settings (GNOME: Settings -> Keyboard -> Custom
+  Shortcuts; KDE: System Settings -> Shortcuts -> Custom Shortcuts). Use the full path
+  of the AppImage if that is how you run it. The key opens Capture in the running app,
+  or starts Secretary with Capture open.
+
 ### Permissions the secretary needs
 
 It acts as you, so it can do only what your account can.
@@ -124,6 +158,8 @@ It acts as you, so it can do only what your account can.
 | Jira Cloud search fails with 410 | Update: the old search endpoint was retired and the app uses the new one. |
 | "The model's answer was not usable" | The model could not produce an answer that passed its checks. Bind a stronger model to the strong tier, or try another model. Settings -> Models -> Evaluation replay compares models on your own decided items. |
 | Sprint positions ("sprint 2 of Q3") missing | Run a Full resync so each board's sprint history is read; your account needs to see the board. |
+| No tray icon, or closing the window quits | Settings -> General -> Capture and tray says why. On Linux install the AppIndicator library (see Quick capture above) and, on GNOME, the AppIndicator extension. |
+| The capture shortcut does nothing | Settings -> General -> Capture and tray shows whether it is registered. Another app may own the combination; pick another. On Wayland, bind `secretary --capture` in the desktop's keyboard settings. |
 | Offline | Cached tickets, threads and drafts keep working; syncing and model calls resume when the network returns. |
 | Tickets look out of date | Settings -> Jira -> Full resync, or Settings -> Data -> Clear Jira cache. |
 | Something else | Settings -> Data -> Logs -> Show. Logs are redacted. |
@@ -149,8 +185,53 @@ SECRETARY_EVAL_KIND=openai-compatible \
 SECRETARY_EVAL_BASE_URL=https://openrouter.ai/api/v1 \
 SECRETARY_EVAL_API_KEY=... \
 SECRETARY_EVAL_STANDARD_MODEL=z-ai/glm-5.3-flash \
+SECRETARY_EVAL_PROVIDER=deepinfra/fp4,streamlake/fp8,novita/fp8 \
 bun test src/test/eval
 ```
+
+Optional variables:
+
+| Variable | Effect |
+|---|---|
+| `SECRETARY_EVAL_FAST_MODEL` | Also compares the fast and standard tiers on single-item cases |
+| `SECRETARY_EVAL_CASE` | Runs only intake cases whose name contains this text (and skips the other live tests) |
+| `SECRETARY_EVAL_CONCURRENCY` | Intake cases run at once, default 6; 1 runs them one after another |
+| `SECRETARY_EVAL_EFFORT` | The provider's effort setting (`low` to `max`); unset is "Provider default", which sends nothing. OpenAI-compatible providers get it as `reasoning_effort` |
+| `SECRETARY_EVAL_PROVIDER` | OpenRouter only: upstream providers in order, comma-separated, for example `deepinfra/fp4,streamlake/fp8,novita/fp8`. Requests go to the first and fall back down the list, never outside it (`provider.order` and `provider.only`); one slug pins that provider. Unset lets OpenRouter route |
+
+Every intake case runs in its own in-memory database and prints a line when it
+finishes (pass or fail, seconds, model calls). The run ends with each case's
+result, then wall time, model calls, tokens, the five slowest cases and how many
+responses each upstream provider served, so a fallback shows. The drafting, chat, planning, report and vault
+tests run at the same time. If the first three cases all fail with the same
+provider error (timeout, rate limit, server error), or any case gets 401/403, the
+run stops and says what to check.
+
+OpenRouter's default routing can land on a slow provider: a reasoning model then
+spends over a minute per call and hits the app's 120 s timeout. Pin a fast provider
+with `SECRETARY_EVAL_PROVIDER`, or add the `:nitro` suffix to the model
+(`z-ai/glm-5.3-flash:nitro`, OpenRouter's fastest-provider routing), or lower the
+effort with `SECRETARY_EVAL_EFFORT=low`. A pinned provider can also turn requests
+away (429, "temporarily rate-limited upstream"). OpenRouter sends the app's
+schema-bound requests only to listed providers that support structured outputs,
+so it does not move down the list by itself; the eval does: after a 429 it asks
+the rest of the list at once, and only when the last provider is busy too does it
+wait with backoff (inside the app's timeout) and start again from the first. The
+summary counts the 429s per provider, how many moved on and how many were waited
+out. On a provider with
+capacity a classify call answers in 10 to 20 s, so a full run should take a few
+minutes, and it costs a few cents on GLM 5.3 Flash.
+
+A debug build on Linux runs as its own instance, so `bun run tauri dev` starts beside
+an installed Secretary instead of handing over to it. On macOS and Windows quit the
+installed app first. Both builds use the same data folder.
+
+On macOS 26, start `bun run tauri dev` from the built-in Terminal app. Started from
+some other terminal apps, the dev window shows but never becomes active: there is no
+Dock icon and typing goes to the previous app. The cause is macOS activation, not
+the app, and the installed app is not affected. If a desktop piece is ever in doubt,
+`SECRETARY_NO_TRAY=1`, `SECRETARY_NO_SHORTCUT=1` and `SECRETARY_NO_SINGLE_INSTANCE=1`
+start without the tray icon, the global shortcut and the single-instance check.
 
 Read `docs/requirements.md` and `docs/design.md` (decisions in section 12) before
 changing things; `docs/implementation-plan.md` is the build history and

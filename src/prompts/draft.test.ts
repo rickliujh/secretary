@@ -128,3 +128,19 @@ describe("buildDraftPrompt", () => {
 
   test("longDate", () => expect(longDate("2026-09-05T10:00:00Z")).toBe("5 September 2026"));
 });
+
+describe("a recipient who is away (D47)", () => {
+  test("the prompt says so, with the date and what not to do", () => {
+    const r = base.recipient;
+    if (r?.kind !== "person") throw new Error("fixture");
+    const { system, prompt } = buildDraftPrompt({
+      ...base,
+      recipient: { ...r, awayUntil: "2026-10-14" },
+    });
+    expect(prompt).toContain("Away (out of office) until 14 October 2026");
+    expect(system).toContain(
+      "They are away until 14 October 2026 and will read this when they are back",
+    );
+    expect(buildDraftPrompt(base).prompt).not.toContain("Away (out of office)");
+  });
+});

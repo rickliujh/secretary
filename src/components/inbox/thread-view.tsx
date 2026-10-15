@@ -30,8 +30,10 @@ import { inboxDetail, type ProposalView, type ThreadMessage } from "@/services/i
 import type { Source } from "@/services/intake";
 import type { MessagePart } from "@/services/intake/thread";
 import { describePayload } from "@/services/proposals/schema";
+import { executedRefs, groupSmallAsks } from "@/services/small-asks/bundle";
 import { Composer, type ComposerMessage } from "./composer";
 import { ProposalCard } from "./proposal-card";
+import { SmallAskRow } from "./small-ask-row";
 import { useDecisions, useReply } from "./use-inbox";
 
 function PastedText({ text, source }: { text: string; source: string | null }) {
@@ -98,17 +100,17 @@ function ReadOnlyNote({ origin }: { origin: "planner" | "rules" }) {
     <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
       {origin === "planner" ? (
         <>
-          This thread holds a sprint plan. Approve or reject the moves here; change the plan on the{" "}
-          <Link to="/planning" className="underline">
-            Planning page
+          This thread holds a sprint plan. Approve or reject the moves here; change the plan in{" "}
+          <Link to="/sprint" search={{ tab: "plan" }} className="underline">
+            Sprint &gt; Plan
           </Link>
           .
         </>
       ) : (
         <>
-          Approve or reject the suggested rules here; edit rules on the{" "}
-          <Link to="/memory" search={{ tab: "memories" }} className="underline">
-            Memory page
+          Approve or reject the suggested rules here; edit rules in{" "}
+          <Link to="/context" search={{ tab: "memory", list: "memories" }} className="underline">
+            Context &gt; Memory
           </Link>
           .
         </>
@@ -156,11 +158,14 @@ function AssistantTurn({
   proposals,
   lookups,
   answeringId,
+  created,
 }: {
   summary: string | null;
   proposals: ProposalView[];
   lookups: Lookups;
   answeringId: string | null;
+  /** `$new` refs the thread already created, from any turn. */
+  created: ReadonlySet<string>;
 }) {
   const shown = proposals.filter((p) => p.status !== "superseded");
   const replaced = proposals.filter((p) => p.status === "superseded");
@@ -170,13 +175,23 @@ function AssistantTurn({
         <Sparkles className="size-3.5 shrink-0" />
         {summary ?? (shown.length ? "Here is what I propose." : "Nothing to do here.")}
       </p>
-      {shown.map((p) =>
-        p.kind === "needs_clarification" ? (
+      {groupSmallAsks(shown, created).map((entry) => {
+        if (entry.type === "track")
+          return (
+            <SmallAskRow
+              key={entry.create.id}
+              create={entry.create}
+              members={entry.members}
+              lookups={lookups}
+            />
+          );
+        const p = entry.proposal;
+        return p.kind === "needs_clarification" ? (
           <QuestionCard key={p.id} proposal={p} answering={p.id === answeringId} />
         ) : (
           <ProposalCard key={p.id} proposal={p} lookups={lookups} />
-        ),
-      )}
+        );
+      })}
       {replaced.length > 0 && (
         <details className="text-xs text-muted-foreground">
           <summary className="cursor-pointer">{replaced.length} replaced by a later reply</summary>
@@ -217,6 +232,7 @@ export function ThreadView({ id }: { id: string }) {
     .filter((p) => p.kind === "needs_clarification" && p.status === "pending")
     .at(-1);
   const answering = openQuestion && openQuestion.id !== skipAnswer ? openQuestion : null;
+  const created = executedRefs(d.proposals);
   const last = d.messages.at(-1);
   const firstUser = d.messages.find((m) => m.role === "user");
   const origin = firstUser?.role === "user" ? firstUser.origin : null;
@@ -243,6 +259,7 @@ export function ThreadView({ id }: { id: string }) {
         proposals={byMessage.get(m.id) ?? []}
         lookups={lookups}
         answeringId={answering?.id ?? null}
+        created={created}
       />
     );
 
@@ -293,6 +310,7 @@ export function ThreadView({ id }: { id: string }) {
               proposals={byMessage.get(null) ?? []}
               lookups={lookups}
               answeringId={answering?.id ?? null}
+              created={created}
             />
           )}
           {sending && (

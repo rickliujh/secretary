@@ -66,7 +66,7 @@ type FormValues = z.infer<typeof Form>;
 
 const defaults = () => DEFAULT_SUGGESTED_PROMPTS.map((p) => ({ ...p }));
 
-/** Edits the dashboard's one-click chat questions (D42). */
+/** Edits the chat's one-click questions (D42; on the Chat page only since D49). */
 export function PromptsCard() {
   const { data: settings } = useSettings();
   const update = useUpdateSettings();
@@ -112,10 +112,10 @@ export function PromptsCard() {
           <CardTitle>Suggested prompts</CardTitle>
           <CardDescription>
             One-click questions on the{" "}
-            <Link to="/" className="underline">
-              dashboard
-            </Link>
-            . Each starts a new chat with its message. Drag to reorder.
+            <Link to="/chat" className="underline">
+              Chat
+            </Link>{" "}
+            page. Each starts a new chat with its message. Drag to reorder.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
@@ -170,7 +170,7 @@ export function PromptsCard() {
           </DndContext>
           {fields.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              No suggested prompts. The dashboard card shows a link back here.
+              No suggested prompts. The Chat page offers none until you add some.
             </p>
           )}
           <div className="flex items-center gap-2">

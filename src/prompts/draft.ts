@@ -26,6 +26,8 @@ export type DraftContext = {
           responsiveness?: string;
           tone?: string;
         };
+        /** Their last day away while they are away (D47); else null or absent. */
+        awayUntil?: string | null;
       }
     | {
         kind: "team";
@@ -132,6 +134,8 @@ export function buildDraftPrompt(c: DraftContext) {
           r.profile.detail && PROFILE_HINTS.detail?.[r.profile.detail],
           r.profile.responsiveness && PROFILE_HINTS.responsiveness?.[r.profile.responsiveness],
           r.profile.tone && `Tone notes from the user: ${r.profile.tone}`,
+          r.awayUntil &&
+            `They are away until ${longDate(r.awayUntil)} and will read this when they are back: do not ask for anything before then, and do not chase as if they were late.`,
         ].filter(Boolean)
       : ["Neutral and professional; the message goes to a team, so do not assume one reader."];
 
@@ -151,7 +155,7 @@ ${style.map((s) => `  - ${s}`).join("\n") || "  - Neutral and professional."}
   const blocks: string[] = [];
   if (r?.kind === "person")
     blocks.push(
-      `## Recipient\n${[r.name, r.title, r.team && `team ${r.team}`].filter(Boolean).join(", ")}${r.responsibilities ? `\nResponsible for: ${r.responsibilities}` : ""}`,
+      `## Recipient\n${[r.name, r.title, r.team && `team ${r.team}`].filter(Boolean).join(", ")}${r.responsibilities ? `\nResponsible for: ${r.responsibilities}` : ""}${r.awayUntil ? `\nAway (out of office) until ${longDate(r.awayUntil)}` : ""}`,
     );
   else if (r?.kind === "team")
     blocks.push(

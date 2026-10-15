@@ -37,10 +37,15 @@ export function FollowupDialog({
   dependencyId,
   open,
   onOpenChange,
+  title = "Log a follow-up",
+  description = "Record that you chased, and when to chase next.",
 }: {
   dependencyId: string;
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  /** Today's "log a reply" (D49) uses the same dialog with its own words. */
+  title?: string;
+  description?: string;
 }) {
   const { data: settings } = useSettings();
   const days = settings?.dependencies.followupDays ?? 3;
@@ -77,8 +82,8 @@ export function FollowupDialog({
           )}
         >
           <DialogHeader className="mb-4">
-            <DialogTitle>Log a follow-up</DialogTitle>
-            <DialogDescription>Record that you chased, and when to chase next.</DialogDescription>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Controller

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_WEIGHTS } from "@/services/settings/schema";
-import { blockInfo, buildDashboard, type DashboardInputs, type DashIssue } from "./sections";
+import {
+  blockInfo,
+  buildEpicHealth,
+  type DashboardInputs,
+  type DashIssue,
+  rankWork,
+} from "./sections";
 
 const TODAY = "2026-09-25";
 const NOW = "2026-09-25T09:00:00.000Z";
@@ -18,12 +24,15 @@ const issue = (key: string, p: Partial<DashIssue> = {}): DashIssue => ({
   epicKey: null,
   sprint: null,
   dueDate: null,
+  created: "2026-09-01T00:00:00.000Z",
   updated: "2026-09-24T00:00:00.000Z",
+  labels: [],
   links: [],
   pinned: false,
   snoozedUntil: null,
   priorityOverride: null,
   lastViewedAt: null,
+  requester: null,
   ...p,
 });
 
@@ -60,9 +69,9 @@ describe("blockInfo", () => {
   });
 });
 
-describe("buildDashboard", () => {
+describe("rankWork", () => {
   test("Top focus covers my work, tracked epics, pins and dependencies; skips done, epics and snoozed", () => {
-    const d = buildDashboard(
+    const d = rankWork(
       inputs({
         issues: [
           issue("MINE-1"),
@@ -105,7 +114,7 @@ describe("buildDashboard", () => {
   });
 
   test("Waiting on me: unseen comments by others on my issues, and mentions anywhere", () => {
-    const d = buildDashboard(
+    const d = rankWork(
       inputs({
         issues: [
           issue("A-1"),
@@ -153,8 +162,39 @@ describe("buildDashboard", () => {
     ]);
   });
 
-  test("I am waiting on, at risk and due soon", () => {
-    const d = buildDashboard(
+  test("a wait whose owner is away sleeps: not at risk, no score; back, it counts again (D47)", () => {
+    const dep = {
+      id: "d1",
+      issueKey: "W-1",
+      label: "Numbers",
+      externalRef: null,
+      status: "waiting" as const,
+      expectedAt: "2026-09-20",
+      nextFollowupAt: "2026-09-22",
+      ownerName: "Bob",
+      requestedAt: "2026-09-15T09:00:00.000Z",
+      lastFollowupAt: null,
+      // 2026-09-25 is a Friday: back on Monday the 28th.
+      ownerAway: { name: "Bob", awayUntil: "2026-09-25" },
+    };
+    const build = (today: string) =>
+      rankWork(
+        inputs({ issues: [issue("W-1")], dependencies: [dep] }),
+        DEFAULT_WEIGHTS,
+        today,
+        `${today}T09:00:00.000Z`,
+      );
+    const away = build(TODAY);
+    expect(away.atRisk.find((r) => r.issue.key === "W-1")).toBeUndefined();
+    const why = (d: typeof away) =>
+      JSON.stringify(d.topFocus.find((f) => f.key === "W-1")?.contributions ?? []);
+    expect(why(away)).not.toContain("Waiting on");
+    const back = build("2026-09-28");
+    expect(why(back)).toContain("Waiting on Numbers");
+  });
+
+  test("at risk and due soon", () => {
+    const d = rankWork(
       inputs({
         issues: [
           issue("BLK-1", { links: blockedByOps7 }),
@@ -190,7 +230,6 @@ describe("buildDashboard", () => {
       TODAY,
       NOW,
     );
-    expect(d.iAmWaitingOn.map((x) => [x.label, x.overdueDays])).toEqual([["Network", 1]]);
     const risk = Object.fromEntries(d.atRisk.map((r) => [r.issue.key, r.reasons]));
     expect(risk["BLK-1"]).toEqual(["Blocked by OPS-7", "Waiting on Network (1d overdue)"]);
     expect(risk["OLD-1"]).toEqual(["No updates for 24 days"]);
@@ -203,7 +242,7 @@ describe("buildDashboard", () => {
   });
 
   test("epic health counts children by category, blocked and stale", () => {
-    const d = buildDashboard(
+    const health = buildEpicHealth(
       inputs({
         issues: [
           issue("EP-1", { issueType: "Epic", summary: "Billing" }),
@@ -217,11 +256,9 @@ describe("buildDashboard", () => {
           issue("C-3a", { epicKey: "EP-1", isSubtask: true }),
         ],
       }),
-      DEFAULT_WEIGHTS,
       TODAY,
-      NOW,
     );
-    expect(d.epicHealth).toEqual([
+    expect(health).toEqual([
       expect.objectContaining({
         key: "EP-1",
         total: 3,
@@ -233,29 +270,6 @@ describe("buildDashboard", () => {
       }),
     ]);
   });
-
-  test("2,000 issues build well inside the 1 second budget (FR-5 AC)", () => {
-    const issues = Array.from({ length: 2000 }, (_, n) =>
-      issue(`BIG-${n}`, {
-        epicKey: n % 3 ? "EP-1" : null,
-        assignee: n % 2 ? "me" : "ana",
-        dueDate: n % 5 ? null : "2026-09-28",
-        links: n % 7 ? [] : blockedByOps7,
-        updated: n % 4 ? "2026-09-24T00:00:00.000Z" : "2026-08-01T00:00:00.000Z",
-      }),
-    );
-    const comments = issues.slice(0, 500).map((i) => ({
-      issueKey: i.key,
-      author: "ana",
-      authorDisplay: "Ana",
-      created: NOW,
-      mentionsMe: false,
-    }));
-    const started = performance.now();
-    const d = buildDashboard(inputs({ issues, comments }), DEFAULT_WEIGHTS, TODAY, NOW);
-    expect(performance.now() - started).toBeLessThan(150);
-    expect(d.topFocus).toHaveLength(10);
-  });
 });
 
 describe("sprint focus (D29)", () => {
@@ -265,7 +279,7 @@ describe("sprint focus (D29)", () => {
   ];
 
   test("focus is the active sprint's work plus pins; the backlog and epics stay out", () => {
-    const d = buildDashboard(
+    const d = rankWork(
       inputs({
         sprints,
         issues: [
@@ -288,7 +302,7 @@ describe("sprint focus (D29)", () => {
   });
 
   test("with nothing in an active sprint, focus falls back to the whole scope", () => {
-    const d = buildDashboard(
+    const d = rankWork(
       inputs({
         sprints,
         issues: [

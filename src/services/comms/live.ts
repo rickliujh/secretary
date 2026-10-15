@@ -19,6 +19,7 @@ import {
   validateDraft,
 } from "@/prompts/draft";
 import { bindDb, Db } from "@/services/db";
+import { isAway } from "@/services/directory/away";
 import { Llm } from "@/services/llm";
 import type { MESSAGE_INTENTS } from "@/services/proposals/schema";
 import { Settings, settingsOrDefault } from "@/services/settings";
@@ -121,6 +122,8 @@ const make = Effect.gen(function* () {
               team: team?.name ?? null,
               responsibilities: person.responsibilities,
               profile: person.profile,
+              // While away, the draft is told (D47); a past date is ignored.
+              awayUntil: isAway(person.awayUntil, today) ? person.awayUntil : null,
             }
           : team
             ? {

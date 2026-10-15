@@ -1,8 +1,13 @@
 import { z } from "zod";
-import { DEPENDENCY_KINDS, IsoDate, IssueKey } from "@/services/proposals/schema";
+import {
+  DEPENDENCY_KINDS,
+  FOLLOWUP_CHANNELS,
+  IsoDate,
+  IssueKey,
+} from "@/services/proposals/schema";
 
+export { FOLLOWUP_CHANNELS };
 export const DEPENDENCY_STATUSES = ["open", "waiting", "blocked", "resolved"] as const;
-export const FOLLOWUP_CHANNELS = ["teams", "email", "meeting", "phone", "jira", "other"] as const;
 
 export const DependencyInputSchema = z
   .object({

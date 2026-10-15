@@ -7,7 +7,7 @@ import type { ProposalKind, ProposalPayload } from "@/services/proposals/schema"
 export type Expected = {
   kind: ProposalKind;
   target?: string;
-  /** The date the proposal must set: dueDate, or expectedAt for a dependency. */
+  /** The date the proposal must set: dueDate, or expectedAt (else nextFollowupAt) for a dependency. */
   date?: string;
   /** Fields the payload must have, e.g. { issueType: "Bug", assignee: "ana.b" }. */
   fields?: Record<string, unknown>;
@@ -22,6 +22,7 @@ const dateOf = (p: ProposalPayload): string | null | undefined => {
   if (p.kind === "create_issue") return p.dueDate;
   if (p.kind === "update_issue") return p.changes.dueDate;
   if (p.kind === "link_dependency") return p.expectedAt;
+  if (p.kind === "update_dependency") return p.expectedAt ?? p.nextFollowupAt;
   return undefined;
 };
 
@@ -40,9 +41,13 @@ function payloadTarget(p: ProposalPayload): string | undefined {
     case "transition_issue":
     case "move_to_sprint":
     case "link_dependency":
+    case "link_issues":
       return p.target;
     case "create_issue":
       return p.epic ?? p.projectKey;
+    case "update_dependency":
+      // The dependency id is made in each run; its ticket is stable.
+      return p.issueKey ?? undefined;
     case "update_person":
       return p.personId;
     case "update_team":

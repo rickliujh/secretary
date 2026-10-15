@@ -8,7 +8,7 @@ import {
   type MessagePart,
   UserContentSchema,
 } from "@/services/intake/thread";
-import type { ProposalPayload } from "@/services/proposals/schema";
+import { type ProposalPayload, parsePayload } from "@/services/proposals/schema";
 
 export type InboxListItem = {
   id: string;
@@ -154,7 +154,13 @@ export const inboxDetail = (id: string) =>
         .where(eq(proposals.inboxItemId, id))
         .orderBy(asc(proposals.seq))
         .all(),
-    )) as ProposalView[];
+    )).map(
+      (p): ProposalView => ({
+        ...p,
+        payload: parsePayload(p.payload),
+        editedPayload: p.editedPayload ? parsePayload(p.editedPayload) : null,
+      }),
+    );
     const messages = yield* query((d) =>
       d
         .select()

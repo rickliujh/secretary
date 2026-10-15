@@ -12,12 +12,13 @@ import {
   type ReportOutput,
   validateReport,
 } from "@/prompts/report";
+import { parseBlockers } from "@/services/blockers/logic";
 import { loadDashboardInputs } from "@/services/dashboard/data";
-import { blockInfo, buildDashboard } from "@/services/dashboard/sections";
+import { blockInfo, FACT_LIMIT, rankWork } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
 import { listDependencies } from "@/services/dependencies/queries";
 import { JiraClient } from "@/services/jira";
-import { IssueLinkSchema } from "@/services/jira/schemas";
+import { parseIssueLinks } from "@/services/jira/schemas";
 import { Llm } from "@/services/llm";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, parseSprintState, SYNC_KEYS, setState } from "@/services/sync/state";
@@ -40,12 +41,6 @@ const HISTORY_CONCURRENCY = 4;
 const Cached = z.custom<Report>(
   (v) => typeof v === "object" && v !== null && "talkTrack" in v && "tickets" in v,
 );
-
-const linksOf = (value: unknown) =>
-  readJson(value, z.array(z.unknown()), []).flatMap((l) => {
-    const r = IssueLinkSchema.safeParse(l);
-    return r.success ? [r.data] : [];
-  });
 
 const make = Effect.gen(function* () {
   const llm = yield* Llm;
@@ -93,10 +88,12 @@ const make = Effect.gen(function* () {
           .where(eq(jiraIssues.stale, false))
           .all(),
       );
+      // Blocker states read after sync win over the status embedded in links (D45).
+      const fresh = parseBlockers(yield* withDb(getState(SYNC_KEYS.blockers)));
       const issues: (RecapIssue & { assigneeDisplay: string | null })[] = rows.map(
         ({ links, ...r }) => ({
           ...r,
-          blockedBy: blockInfo(linksOf(links)).blockedBy,
+          blockedBy: blockInfo(parseIssueLinks(links), fresh).blockedBy,
         }),
       );
       const sprints = parseSprintState(yield* withDb(getState(SYNC_KEYS.sprints))).sprints;
@@ -156,7 +153,8 @@ const make = Effect.gen(function* () {
       const inputs = yield* withDb(loadDashboardInputs(now)).pipe(
         Effect.provideService(Settings, settingsSvc),
       );
-      const dashboard = buildDashboard(inputs, settings.scoring, today, now.toISOString());
+      const work = rankWork(inputs, settings.scoring, today, now.toISOString());
+      const waitingOnMe = work.waitingOnMe.slice(0, FACT_LIMIT);
       const mySprint =
         active.find((s) => issues.some((i) => i.sprint === s.name && i.assignee === me)) ?? null;
 
@@ -178,8 +176,8 @@ const make = Effect.gen(function* () {
         : [];
       logged.sort((a, b) => a.at.localeCompare(b.at));
 
-      // Older asks from the dashboard, quoting the latest comment by someone else.
-      const askKeys = dashboard.waitingOnMe.map((w) => w.issue.key);
+      // Older asks waiting on the user (Today's new comments), quoting the latest comment by someone else.
+      const askKeys = waitingOnMe.map((w) => w.issue.key);
       const askComments = askKeys.length
         ? yield* q((d) =>
             d
@@ -196,7 +194,7 @@ const make = Effect.gen(function* () {
           )
         : [];
       // Only questions and mentions are asks; other unread comments are in the tickets.
-      const asks = dashboard.waitingOnMe.flatMap((w) => {
+      const asks = waitingOnMe.flatMap((w) => {
         const latest = askComments
           .filter((c) => c.issueKey === w.issue.key && c.author !== me)
           .sort((a, b) => b.created.localeCompare(a.created))[0];
@@ -221,7 +219,7 @@ const make = Effect.gen(function* () {
         activeSprints,
         sprintOnly,
         sprint: mySprint,
-        focus: dashboard.topFocus.map((f) => f.key),
+        focus: work.topFocus.map((f) => f.key),
         issues,
         comments,
         history,
@@ -237,6 +235,7 @@ const make = Effect.gen(function* () {
           followups: logged
             .filter((f) => f.dependencyId === x.id)
             .map((f) => ({ at: f.at, channel: f.channel, summary: f.summary })),
+          ownerAway: x.ownerAway,
         })),
         asks,
       });

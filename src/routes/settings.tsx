@@ -3,21 +3,27 @@ import { z } from "zod";
 import { SETTINGS_TABS, type SettingsTab } from "@/app/settings-tabs";
 import { PageHeader } from "@/components/page";
 import { AtlassianSection } from "@/components/settings/atlassian-section";
+import { CaptureSection } from "@/components/settings/capture-section";
 import { DataSection } from "@/components/settings/data-section";
 import { GeneralSection } from "@/components/settings/general-section";
 import { JiraSyncSection } from "@/components/settings/jira-sync-section";
-import { ModelsSection } from "@/components/settings/models-section";
+import { ModelsSection, ReplaySection, RoutingSection } from "@/components/settings/models-section";
 import { NetworkSection } from "@/components/settings/network-section";
 import { PromptsCard } from "@/components/settings/prompts-card";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RankingSection } from "@/components/settings/ranking-section";
+import { SmallAsksSection } from "@/components/settings/small-asks-section";
 import { SourcesSection } from "@/components/settings/sources-section";
 import { UsageSection } from "@/components/settings/usage-section";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Search = z.object({
   tab: z
-    .enum(SETTINGS_TABS.map((t) => t.value) as [SettingsTab, ...SettingsTab[]])
+    .union([
+      z.enum(SETTINGS_TABS.map((t) => t.value) as [SettingsTab, ...SettingsTab[]]),
+      // The Ranking tab's weights moved to Advanced (D50).
+      z.literal("ranking").transform((): SettingsTab => "advanced"),
+    ])
     .catch("general"),
 });
 
@@ -48,6 +54,7 @@ function SettingsPage() {
         </TabsList>
         <TabsContent value="general" className="flex flex-col gap-4">
           <GeneralSection />
+          <CaptureSection />
           <PromptsCard />
           <NetworkSection />
         </TabsContent>
@@ -57,12 +64,10 @@ function SettingsPage() {
         <TabsContent value="models">
           <ModelsSection />
         </TabsContent>
-        <TabsContent value="ranking">
-          <RankingSection />
-        </TabsContent>
         <TabsContent value="jira" className="flex flex-col gap-4">
           <AtlassianSection product="jira" />
           <JiraSyncSection />
+          <SmallAsksSection />
         </TabsContent>
         <TabsContent value="confluence">
           <AtlassianSection product="confluence" />
@@ -75,6 +80,11 @@ function SettingsPage() {
         </TabsContent>
         <TabsContent value="data">
           <DataSection />
+        </TabsContent>
+        <TabsContent value="advanced" className="flex flex-col gap-4">
+          <RoutingSection />
+          <RankingSection />
+          <ReplaySection />
         </TabsContent>
       </Tabs>
     </div>

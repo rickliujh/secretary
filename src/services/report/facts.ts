@@ -5,7 +5,7 @@
  * two per ticket; every style is rendered from these facts.
  */
 import { daysBetween } from "@/lib/dates";
-import { timing } from "@/services/dependencies/logic";
+import { type OwnerAway, timing } from "@/services/dependencies/logic";
 import type {
   ReportDependency,
   ReportEpic,
@@ -65,6 +65,8 @@ export type RecapDependency = {
   nextFollowupAt: string | null;
   /** Oldest first. */
   followups: { at: string; channel: string | null; summary: string | null }[];
+  /** The person owner's away date (D47): a sleeping wait is not overdue. */
+  ownerAway?: OwnerAway | null;
 };
 
 /** Who and what a report covers (D37, D40). */
@@ -104,7 +106,7 @@ export type RecapInputs = {
   activeSprints: ReadonlySet<string>;
   /** The active sprint holding the user's work, for sprint health. */
   sprint: { name: string; start: string | null; end: string | null } | null;
-  /** Dashboard focus order, best first, to order "next". */
+  /** Top focus order (D29), best first, to order "next". */
   focus: readonly string[];
   /** Every cached issue (epics too, for names and progress). */
   issues: readonly RecapIssue[];
@@ -113,7 +115,7 @@ export type RecapInputs = {
   /** History in the period, by issue key. */
   history: ReadonlyMap<string, readonly HistoryEntry[]>;
   dependencies: readonly RecapDependency[];
-  /** People waiting on the user (dashboard "Waiting on me"). */
+  /** People waiting on the user (new comments and mentions, as on Today). */
   asks: readonly { key: string; who: string; what: string; at: string }[];
 };
 
@@ -290,7 +292,7 @@ export function buildRecapFacts(input: RecapInputs): RecapFacts {
   for (const d of input.dependencies)
     if (d.status !== "resolved") depsBy.set(d.issueKey, [...(depsBy.get(d.issueKey) ?? []), d]);
   // Asks: questions and mentions from others in the period on the user's tickets,
-  // then older unanswered ones the dashboard knows about.
+  // then older unanswered ones Today knows about.
   const mentions = [`[~${me}]`, `[~accountid:${me}]`];
   const asks = new Map<string, { key: string; who: string; what: string; at: string }>();
   for (const c of input.comments) {
@@ -314,7 +316,7 @@ export function buildRecapFacts(input: RecapInputs): RecapFacts {
   const focusRank = new Map(input.focus.map((k, n) => [k, n]));
 
   const dependencyOf = (d: RecapDependency): ReportDependency => {
-    const t = timing(d, today);
+    const t = timing({ ...d, lastFollowupAt: d.followups.at(-1)?.at ?? null }, today);
     return {
       label: d.label,
       owner: d.owner,

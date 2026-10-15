@@ -106,6 +106,39 @@ export const IssueLinkSchema = z.object({
 });
 export type IssueLink = z.infer<typeof IssueLinkSchema>;
 
+/**
+ * An issue's `issuelinks`, from the raw field (an array) or `json_extract` text;
+ * a link in an unexpected shape is skipped.
+ */
+export function parseIssueLinks(value: unknown): IssueLink[] {
+  let list: unknown = value;
+  if (typeof value === "string") {
+    try {
+      list = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((l) => {
+    const r = IssueLinkSchema.safeParse(l);
+    return r.success ? [r.data] : [];
+  });
+}
+
+/** One issue link type (`GET /issueLinkType`, same on Cloud and Data Center). */
+export const IssueLinkTypeSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  inward: z.string(),
+  outward: z.string(),
+});
+export type IssueLinkType = z.infer<typeof IssueLinkTypeSchema>;
+
+export const IssueLinkTypesSchema = z
+  .object({ issueLinkTypes: z.array(IssueLinkTypeSchema).default([]) })
+  .transform((r) => r.issueLinkTypes);
+
 export const AttachmentSchema = z.object({
   id: z.string(),
   filename: z.string(),

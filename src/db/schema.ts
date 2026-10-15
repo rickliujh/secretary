@@ -91,6 +91,16 @@ export const issueMeta = sqliteTable("issue_meta", {
   snoozedUntil: text("snoozed_until"),
   lastViewedAt: text("last_viewed_at"),
   health: text("health"),
+  /** The contact who asked for this issue, for a small ask (FR-10.4, D44). */
+  requesterPersonId: text("requester_person_id"),
+  /** Keys of the issue's open blockers at the last sync; null before the first (D45). */
+  openBlockers: text("open_blockers", { mode: "json" }).$type<string[]>(),
+  /** When the last open blocker closed (the issue "woke up"); cleared if one reopens (D45). */
+  unblockedAt: text("unblocked_at"),
+  /** The blocker whose closing woke the issue. */
+  unblockedBy: text("unblocked_by"),
+  /** When the one OS notification for the wake-up was sent. */
+  unblockNotifiedAt: text("unblock_notified_at"),
 });
 
 export const issueNotes = sqliteTable(
@@ -141,6 +151,12 @@ export const people = sqliteTable(
     responsibilities: text("responsibilities"),
     profile: text("profile", { mode: "json" }).$type<CommunicationProfile>().notNull().default({}),
     notesMd: text("notes_md"),
+    /**
+     * Last day away (YYYY-MM-DD, local), set by hand or from an out-of-office reply
+     * (D47). Their waits sleep until the first working day after it. A past date is
+     * ignored, not cleared.
+     */
+    awayUntil: text("away_until"),
   },
   (t) => [
     index("people_team_idx").on(t.teamId),

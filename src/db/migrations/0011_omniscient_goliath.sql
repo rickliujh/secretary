@@ -1,0 +1,1 @@
+ALTER TABLE `issue_meta` ADD `requester_person_id` text;

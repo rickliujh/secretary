@@ -19,8 +19,8 @@ import { query } from "@/services/db";
 import { Llm } from "@/services/llm";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, setState } from "@/services/sync/state";
-import { loadDashboardInputs } from "./data";
-import { buildDashboard, type Dashboard } from "./sections";
+import { loadToday } from "./data";
+import { dueWaits, type Today, type WaitRow } from "./today";
 
 const CACHE_KEY = "brief.cache";
 const CHANGE_LIMIT = 15;
@@ -56,17 +56,17 @@ const readCache = Effect.map(getState(CACHE_KEY), (v) =>
   readJson(v, CachedBriefSchema.nullable(), null),
 );
 
-const collectFacts = (
-  dashboard: Dashboard,
-  since: string | null,
-  today: string,
-  outputLanguage: string,
-) =>
+const collectFacts = (t: Today, since: string | null, today: string, outputLanguage: string) =>
   Effect.gen(function* () {
+    const f = t.facts;
+    // A wait on a snoozed ticket sleeps with it, so the brief leaves it out too.
+    const waits = t.theirMove.filter(
+      (r): r is WaitRow => r.kind === "wait" && r.state !== "asleep",
+    );
     const inScope = new Set([
-      ...dashboard.topFocus.map((t) => t.key),
-      ...dashboard.dueSoon.map((d) => d.key),
-      ...dashboard.atRisk.map((a) => a.issue.key),
+      ...f.topFocus.map((x) => x.key),
+      ...f.dueSoon.map((d) => d.key),
+      ...f.atRisk.map((a) => a.issue.key),
     ]);
     const changedRows = since
       ? yield* query((d) =>
@@ -110,29 +110,31 @@ const collectFacts = (
           status: r.status,
           note: commented.has(r.key) ? "new comments" : "updated",
         })),
-      topFocus: dashboard.topFocus.slice(0, 5).map((t) => ({
-        key: t.key,
-        summary: t.summary,
-        why: t.contributions.slice(0, 3).map((c) => c.reason),
+      topFocus: f.topFocus.slice(0, 5).map((x) => ({
+        key: x.key,
+        summary: x.summary,
+        why: x.contributions.slice(0, 3).map((c) => c.reason),
       })),
-      dueSoon: dashboard.dueSoon.map((d) => ({
+      dueSoon: f.dueSoon.map((d) => ({
         key: d.key,
         summary: d.summary,
         daysLeft: d.daysLeft,
       })),
-      overdueDependencies: dashboard.iAmWaitingOn
-        .filter((d) => d.overdueDays > 0)
-        .map((d) => ({
+      overdueDependencies: waits
+        .filter((w) => w.timing.overdueDays > 0)
+        .map(({ dependency: d, timing }) => ({
           issueKey: d.issueKey,
           label: d.label,
           ref: d.externalRef,
           owner: d.ownerName,
-          overdueDays: d.overdueDays,
+          overdueDays: timing.overdueDays,
         })),
-      followupsDue: dashboard.iAmWaitingOn
-        .filter((d) => d.followupDue)
-        .map((d) => ({ issueKey: d.issueKey, label: d.label, owner: d.ownerName })),
-      waitingOnMe: dashboard.waitingOnMe.map((w) => ({
+      followupsDue: dueWaits(t).map(({ dependency: d }) => ({
+        issueKey: d.issueKey,
+        label: d.label,
+        owner: d.ownerName,
+      })),
+      waitingOnMe: f.waitingOnMe.map((w) => ({
         key: w.issue.key,
         summary: w.issue.summary,
         why: w.reasons[0] ?? "",
@@ -142,39 +144,31 @@ const collectFacts = (
     return facts;
   });
 
-/** Current dashboard, and the cached brief with whether it still matches the data. */
-export const dashboardWithBrief = (now = new Date()) =>
+/** Today, and the cached brief with whether it still matches the data. */
+export const todayWithBrief = (now = new Date()) =>
   Effect.gen(function* () {
     const settings = yield* settingsOrDefault(yield* Settings);
-    const today = localDate(now);
-    const inputs = yield* loadDashboardInputs(now);
-    const dashboard = buildDashboard(inputs, settings.scoring, today, now.toISOString());
+    const today = yield* loadToday(now);
     const cached = yield* readCache;
-    if (!cached) return { dashboard, brief: null, briefFresh: false };
+    if (!cached) return { today, brief: null, briefFresh: false };
     // Fresh while nothing changed since the brief and the other facts still match.
     const facts = yield* collectFacts(
-      dashboard,
-      cached.generatedAt,
       today,
+      cached.generatedAt,
+      localDate(now),
       settings.general.outputLanguage,
     );
-    return { dashboard, brief: cached, briefFresh: cached.hash === briefHash(facts) };
+    return { today, brief: cached, briefFresh: cached.hash === briefHash(facts) };
   });
 
 /** Generates and caches a new brief. With nothing to report, no model call is made. */
 export const generateBrief = (now = new Date()) =>
   Effect.gen(function* () {
     const settings = yield* settingsOrDefault(yield* Settings);
-    const today = localDate(now);
-    const dashboard = buildDashboard(
-      yield* loadDashboardInputs(now),
-      settings.scoring,
-      today,
-      now.toISOString(),
-    );
+    const t = yield* loadToday(now);
     const previous = yield* readCache;
     const since = previous?.generatedAt ?? new Date(now.getTime() - 24 * 3_600_000).toISOString();
-    const facts = yield* collectFacts(dashboard, since, today, settings.general.outputLanguage);
+    const facts = yield* collectFacts(t, since, localDate(now), settings.general.outputLanguage);
     let sections: CachedBrief["sections"];
     let model: string | null = null;
     let tier: string | null = null;

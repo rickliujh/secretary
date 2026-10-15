@@ -18,11 +18,17 @@ export const queryKeys = {
   /** Under `tickets`, so a sync or a viewed ticket refreshes the order. */
   ticketPicker: ["tickets", "picker"] as const,
   ticketRows: ["tickets", "rows"] as const,
-  /** Under "tickets" so sync, decisions and dependency changes refresh it. */
-  dashboard: ["tickets", "dashboard"] as const,
+  /** Today (D49); under "tickets" so sync, decisions and dependency changes refresh it. */
+  today: ["tickets", "today"] as const,
+  /** Sprint > Epics (D50); under "tickets" like Today. */
+  epicHealth: ["tickets", "epic-health"] as const,
+  /** When the sweep's weekly pass over untouched asks last ran (D49). */
+  sweepStale: ["sweep", "stale"] as const,
   ticketSearch: (q: string) => ["tickets", "search", q] as const,
   ticketDetail: (key: string) => ["tickets", "detail", key] as const,
   transitions: (key: string) => ["tickets", "transitions", key] as const,
+  /** Transitions into a done status (D49), read when Done is pressed. */
+  doneTransitions: (key: string) => ["tickets", "done-transitions", key] as const,
   epics: (project: string) => ["tickets", "epics", project] as const,
   priorities: ["jira", "priorities"] as const,
   fieldInfo: ["jira", "fields"] as const,

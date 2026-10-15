@@ -2,7 +2,7 @@
  * Dependencies and follow-ups (FR-3). Local writes are the user's own actions;
  * mirroring to Jira goes through the Executor.
  */
-import { and, asc, desc, eq, inArray, isNotNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { communications, dependencies, followups, jiraIssues, people, teams } from "@/db/schema";
 import { addBusinessDays, localDate } from "@/lib/dates";
@@ -15,7 +15,9 @@ import {
   type DependencyStatus,
   mirrorGlobalId,
   mirrorUrl,
+  type OwnerAway,
   type OwnerRef,
+  timing,
 } from "./logic";
 import {
   type DependencyInput,
@@ -30,8 +32,19 @@ export type DependencyRow = Dependency & {
   issueSummary: string | null;
   issueStatus: string | null;
   owner: OwnerRef;
+  /** The person owner's away date (D47), for `timing`; null for teams and when not set. */
+  ownerAway: OwnerAway | null;
   lastFollowupAt: string | null;
   followupCount: number;
+};
+
+/** A person owner's away date for `timing` (D47); teams have none. */
+export const ownerAwayOf = (
+  ownerPersonId: string | null,
+  people: ReadonlyMap<string, { name: string; awayUntil: string | null }>,
+): OwnerAway | null => {
+  const p = ownerPersonId ? people.get(ownerPersonId) : undefined;
+  return p?.awayUntil ? { name: p.name, awayUntil: p.awayUntil } : null;
 };
 
 const ownerOf = (
@@ -73,12 +86,15 @@ export const listDependencies = (opts: { includeResolved?: boolean; issueKey?: s
           .all(),
       )).map((i) => [i.key, i]),
     );
+    const persons = yield* query((d) =>
+      d
+        .select({ id: people.id, name: people.displayName, awayUntil: people.awayUntil })
+        .from(people)
+        .all(),
+    );
+    const away = new Map(persons.map((p) => [p.id, p]));
     const names = {
-      person: new Map(
-        (yield* query((d) =>
-          d.select({ id: people.id, n: people.displayName }).from(people).all(),
-        )).map((p) => [p.id, p.n]),
-      ),
+      person: new Map(persons.map((p) => [p.id, p.name])),
       team: new Map(
         (yield* query((d) => d.select({ id: teams.id, n: teams.name }).from(teams).all())).map(
           (t) => [t.id, t.n],
@@ -110,6 +126,7 @@ export const listDependencies = (opts: { includeResolved?: boolean; issueKey?: s
         issueSummary: issues.get(r.issueKey)?.summary ?? null,
         issueStatus: issues.get(r.issueKey)?.status ?? null,
         owner: ownerOf(r, names),
+        ownerAway: ownerAwayOf(r.ownerPersonId, away),
         lastFollowupAt: stats.get(r.id)?.last ?? null,
         followupCount: Number(stats.get(r.id)?.n ?? 0),
       }),
@@ -130,7 +147,28 @@ export const getDependency = (id: string) =>
         .orderBy(desc(followups.at))
         .all(),
     );
-    return { dependency: dep, timeline };
+    const owner = dep.ownerPersonId
+      ? yield* query((d) =>
+          d
+            .select({ name: people.displayName, awayUntil: people.awayUntil })
+            .from(people)
+            .where(eq(people.id, dep.ownerPersonId ?? ""))
+            .get(),
+        )
+      : undefined;
+    return {
+      dependency: dep,
+      timeline,
+      /** What `timing` needs beyond the row (D47). */
+      timingInput: {
+        ...dep,
+        lastFollowupAt: timeline[0]?.at ?? null,
+        ownerAway: ownerAwayOf(
+          dep.ownerPersonId,
+          new Map(owner ? [[dep.ownerPersonId ?? "", owner]] : []),
+        ),
+      },
+    };
   });
 
 const notFound = () =>
@@ -222,8 +260,15 @@ export const createDependency = (input: DependencyInput) =>
     return id;
   });
 
-/** Updates fields; a mirrored dependency's remote link is refreshed. */
-export const updateDependency = (id: string, input: DependencyInput) =>
+/** Whether a write refreshes the Jira remote link of a mirrored dependency (default yes). */
+type MirrorOption = { mirror?: boolean };
+
+/**
+ * Updates fields; a mirrored dependency's remote link is refreshed unless
+ * `mirror` is false (the Executor refreshes it itself, so a Jira failure is a
+ * warning after the local write, D46).
+ */
+export const updateDependency = (id: string, input: DependencyInput, opts: MirrorOption = {}) =>
   Effect.gen(function* () {
     const v = DependencyInputSchema.parse(input);
     const existing = yield* query((d) =>
@@ -237,10 +282,38 @@ export const updateDependency = (id: string, input: DependencyInput) =>
         .set({ ...v, resolvedAt })
         .where(eq(dependencies.id, id)),
     );
-    yield* mirror(id, "refresh");
+    if (opts.mirror !== false) yield* mirror(id, "refresh");
   });
 
-export const setStatus = (id: string, status: DependencyStatus) =>
+/**
+ * Reschedules a dependency: a new expected date and/or next follow-up (a key
+ * left out keeps its value). A mirrored remote link is refreshed unless
+ * `mirror` is false.
+ */
+export const setDates = (
+  id: string,
+  dates: { expectedAt?: string | null; nextFollowupAt?: string | null },
+  opts: MirrorOption = {},
+) =>
+  Effect.gen(function* () {
+    const set = Object.fromEntries(Object.entries(dates).filter(([, v]) => v !== undefined));
+    if (Object.keys(set).length === 0) return;
+    const existing = yield* query((d) =>
+      d.select({ id: dependencies.id }).from(dependencies).where(eq(dependencies.id, id)).get(),
+    );
+    if (!existing) return yield* notFound();
+    // A new follow-up date is a new reminder.
+    const notified = "nextFollowupAt" in set ? { notifiedOn: null } : {};
+    yield* query((d) =>
+      d
+        .update(dependencies)
+        .set({ ...set, ...notified })
+        .where(eq(dependencies.id, id)),
+    );
+    if (opts.mirror !== false) yield* mirror(id, "refresh");
+  });
+
+export const setStatus = (id: string, status: DependencyStatus, opts: MirrorOption = {}) =>
   Effect.gen(function* () {
     yield* query((d) =>
       d
@@ -248,7 +321,7 @@ export const setStatus = (id: string, status: DependencyStatus) =>
         .set({ status, resolvedAt: status === "resolved" ? nowIso() : null })
         .where(eq(dependencies.id, id)),
     );
-    yield* mirror(id, "refresh");
+    if (opts.mirror !== false) yield* mirror(id, "refresh");
   });
 
 export const deleteDependency = (id: string) =>
@@ -334,27 +407,25 @@ export const requestChaseDraft = (id: string) =>
     return communicationId;
   });
 
-/** Open dependencies whose follow-up is due and that have not been announced today. */
+/**
+ * Open dependencies whose follow-up is due by `timing` (so not while the owner
+ * is away, and due once they are back, D47) and that have not been announced
+ * today, earliest due first, with the reason to show ("Bob is back").
+ */
 export const dueForReminder = (today = localDate()) =>
-  query((d) =>
-    d
-      .select({
-        id: dependencies.id,
-        issueKey: dependencies.issueKey,
-        label: dependencies.label,
-        nextFollowupAt: dependencies.nextFollowupAt,
-      })
-      .from(dependencies)
-      .where(
-        and(
-          ne(dependencies.status, "resolved"),
-          isNotNull(dependencies.nextFollowupAt),
-          lte(dependencies.nextFollowupAt, today),
-          or(sql`${dependencies.notifiedOn} IS NULL`, ne(dependencies.notifiedOn, today)),
-        ),
-      )
-      .orderBy(asc(dependencies.nextFollowupAt))
-      .all(),
+  Effect.map(listDependencies(), (rows) =>
+    rows
+      .filter((r) => r.notifiedOn !== today)
+      .map((r) => ({ r, t: timing(r, today) }))
+      .filter(({ t }) => t.followupDue)
+      .sort((a, b) => (a.t.followupOn ?? "").localeCompare(b.t.followupOn ?? ""))
+      .map(({ r, t }) => ({
+        id: r.id,
+        issueKey: r.issueKey,
+        label: r.label,
+        nextFollowupAt: r.nextFollowupAt,
+        reason: t.reason,
+      })),
   );
 
 export const markNotified = (ids: readonly string[], today = localDate()) =>

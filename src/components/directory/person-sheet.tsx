@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Mail, Pencil, Trash2 } from "lucide-react";
+import { Mail, Pencil, PenLine, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
+import { useDraftPanel } from "@/components/drafts/use-draft-panel";
 import { Markdown } from "@/components/markdown";
 import { StatusBadge } from "@/components/tickets/status-badge";
 import { TicketLink } from "@/components/tickets/ticket-link";
@@ -28,6 +29,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { localDate } from "@/lib/dates";
+import { awayLabel } from "@/services/directory/away";
 import { deletePerson, getPerson } from "@/services/directory/queries";
 import type { Profile } from "@/services/directory/schema";
 import { ContextNotes } from "./context-notes";
@@ -80,6 +83,7 @@ export function PersonSheet({
     enabled: !!personId,
   });
   const remove = useDirectoryMutation((id: string) => deletePerson(id), "Contact deleted");
+  const drafts = useDraftPanel();
   const d = detail.data;
   return (
     <Sheet open={!!personId} onOpenChange={(o) => !o && onClose()}>
@@ -88,9 +92,22 @@ export function PersonSheet({
           <SheetDescription>
             {[d?.person.title, d?.team?.name].filter(Boolean).join(" · ") || "Contact"}
           </SheetDescription>
-          <SheetTitle className="text-lg">{d?.person.displayName}</SheetTitle>
+          <SheetTitle className="flex items-center gap-2 text-lg">
+            {d?.person.displayName}
+            {awayLabel(d?.person.awayUntil, localDate()) && (
+              <Badge variant="secondary">{awayLabel(d?.person.awayUntil, localDate())}</Badge>
+            )}
+          </SheetTitle>
           {d && (
             <div className="flex gap-2 pt-2">
+              <Button
+                size="sm"
+                onClick={() =>
+                  drafts.open({ prefill: { recipient: { type: "person", id: d.person.id } } })
+                }
+              >
+                <PenLine /> Draft a message
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
                 <Pencil /> Edit
               </Button>
@@ -151,7 +168,11 @@ export function PersonSheet({
                   <dt className="text-muted-foreground">Team</dt>
                   <dd>
                     {d.team ? (
-                      <Link to="/teams" search={{ id: d.team.id }} className="underline">
+                      <Link
+                        to="/context"
+                        search={{ tab: "teams", id: d.team.id }}
+                        className="underline"
+                      >
                         {d.team.name}
                       </Link>
                     ) : (

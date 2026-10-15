@@ -44,6 +44,11 @@ describe("Settings schema", () => {
       obsidian: { cliPath: "" },
       report: { style: "talk_track" },
       storage: { limitMb: 1024, autoCleanup: true },
+      capture: {
+        shortcut: "CommandOrControl+Shift+Space",
+        closeToTray: true,
+        trayNoticeShown: false,
+      },
       scoring: {
         priority: 3,
         due: 4,
@@ -52,6 +57,12 @@ describe("Settings schema", () => {
         stale: 1,
         dependency: 3,
         pinned: 10,
+      },
+      smallAsks: {
+        projectKey: "",
+        label: "small-ask",
+        joinActiveSprint: true,
+        hintDismissed: false,
       },
       network: {
         proxyMode: "system",
@@ -62,6 +73,28 @@ describe("Settings schema", () => {
     });
     // Defaults are fresh objects, not one shared instance.
     expect(defaultSettings().jira.trackedEpics).not.toBe(defaultSettings().jira.trackedEpics);
+  });
+
+  test("small-asks home: defaults, and labels without spaces (D44)", () => {
+    expect(SettingsSchema.parse({ smallAsks: { projectKey: "ASK" } }).smallAsks).toEqual({
+      projectKey: "ASK",
+      label: "small-ask",
+      joinActiveSprint: true,
+      hintDismissed: false,
+    });
+    expect(SettingsSchema.safeParse({ smallAsks: { label: "small ask" } }).success).toBe(false);
+    expect(SettingsSchema.safeParse({ smallAsks: { projectKey: "ask" } }).success).toBe(false);
+  });
+
+  test("the tray notice flag defaults to unsent and survives a stored capture section", () => {
+    expect(SettingsSchema.parse({ capture: { closeToTray: false } }).capture).toEqual({
+      shortcut: "CommandOrControl+Shift+Space",
+      closeToTray: false,
+      trayNoticeShown: false,
+    });
+    expect(
+      SettingsSchema.parse({ capture: { trayNoticeShown: true } }).capture.trayNoticeShown,
+    ).toBe(true);
   });
 
   test("partial data keeps stored values and fills the rest", async () => {

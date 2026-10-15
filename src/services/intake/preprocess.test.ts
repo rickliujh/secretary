@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cleanInput, extractReferences, needsSegmentation } from "./preprocess";
+import { cleanInput, extractReferences, jiraHost, needsSegmentation } from "./preprocess";
 
 describe("cleanInput", () => {
   test("drops quoted reply history and > lines", () => {
@@ -45,10 +45,22 @@ describe("extractReferences", () => {
   test("issue keys, browse URLs and ServiceNow numbers; ignores look-alikes", () => {
     const r = extractReferences(
       "PAY-2 blocked by INC0012345 (see https://jira.example.com/browse/OPS-7). UTF-8 and ISO-8601 are not keys. RITM0001234 too.",
+      [],
+      { jiraHost: jiraHost("https://JIRA.example.com/context") },
     );
     expect(r.issueKeys).toEqual(["PAY-2", "OPS-7"]);
     expect(r.tickets).toEqual(["INC0012345", "RITM0001234"]);
     expect(r.urls).toEqual(["https://jira.example.com/browse/OPS-7"]);
+  });
+
+  test("a key in a link counts only as /browse/KEY on the configured Jira site", () => {
+    const text =
+      "See https://evil.example.net/browse/PLAT-9, https://github.com/org/repo/pull/OPS-3 and https://jira.example.com/browse/OPS-7 about PAY-2";
+    expect(
+      extractReferences(text, [], { jiraHost: jiraHost("https://jira.example.com") }).issueKeys,
+    ).toEqual(["PAY-2", "OPS-7"]);
+    // Without a Jira site set, no link names a ticket; plain keys still do.
+    expect(extractReferences(text).issueKeys).toEqual(["PAY-2"]);
   });
 
   test("contacts by full name, email, @username, and unique first name only", () => {

@@ -1,7 +1,9 @@
 # Secretary: Implementation Plan (handover to Claude Opus 5.5)
 
-> **Status:** All phases are built. This plan is history; later changes are
-> decisions D19–D28 in design.md section 12 and entries in CHANGELOG.md.
+> **Status:** Phases 0–8 are built and are history; later changes are decisions
+> D19–D43 in design.md section 12 and entries in CHANGELOG.md. Phases 11–16
+> (small asks, approved 2026-10-03) are at the end of this file and are built too
+> (2026-10-03); what changed on the way is in D44–D51 and CHANGELOG.md.
 
 Read `requirements.md` and `design.md` first, then `../CLAUDE.md`. Work phase by
 phase. Each phase ends with its checklist passing, a short entry appended to
@@ -213,3 +215,168 @@ Checklist
   coherent commits when the phase checklist passes, merge to `main` locally, and
   never mention Claude, Anthropic or AI assistance in commit messages or trailers.
   Full rules in `../CLAUDE.md`, section Git workflow.
+
+---
+
+# Part 2: Small asks (Phases 11–16)
+
+Approved 2026-10-03. What: requirements.md FR-10 to FR-13 and the additions to FR-2
+and FR-3. How: design.md D44–D50; where this plan and a decision differ, the decision
+wins, and where a decision proves wrong, change the decision first. Phases 9 and 10
+were the cleanup and the sprint planner (see CHANGELOG.md).
+
+All phases land on `feat/11-small-asks`, one squashed commit per phase. Order:
+11, 14 and 15 may run side by side; then 12, then 13, then 16.
+
+Rules for every phase
+- The hard rules in `../CLAUDE.md` hold. In particular: a Jira write that comes from
+  pasted or typed input is a proposal the user approves; a write the user makes with
+  a button (Done, snooze, resolve) goes through the `Executor` as the ticket view's
+  actions do; UI never calls `JiraClient` write methods.
+- The model picks from lists the code built. Every new field in the classify output
+  follows the portable schema (D21): flat, nullable as "(none)", enums from
+  candidates, checked in code, repair on failure.
+- Stored data keeps parsing: new payload fields have defaults; schema changes are
+  drizzle migrations (`bun run db:generate`); settings fields use `.prefault`/defaults.
+- Tests with each task: unit tests for pure logic, service tests over the in-memory
+  Db and fixture fetch, scripted-model tests for prompts, and eval cases in
+  `src/test/eval/cases.ts` for each new intake behaviour. `scripts/mock-jira.ts`
+  learns each new endpoint.
+- Done means `bun run typecheck`, `bun test` and `bun run lint` are green, the
+  phase's checklist is covered by tests where a test can cover it, and
+  `docs/CHANGELOG.md` has the phase's entry (built, decisions and defaults, known
+  limits). Say plainly what was not verified, above all anything only a running
+  desktop app can show.
+
+## Phase 11: Small-asks home (FR-10, D44)
+
+Tasks
+1. Settings `smallAsks { projectKey, label, joinActiveSprint }` and a Small asks
+   section in Settings: project picker from the synced projects, label, sprint
+   switch, and on save a check of the create metadata that lists required fields the
+   app cannot fill.
+2. Canonical `create_issue` payload: `labels`, `smallAsk`, `requesterPersonId`,
+   `joinSprint`. Jira mapping sends labels. Old proposals still parse.
+3. Classify (new prompt version): the `smallAsk` field and the rule for when an ask
+   is a small ask; `requesterPersonId` from candidate people; mapping to the
+   canonical payload applies the home (project, label, assignee, sprint flag, type
+   default, requester from the thread's sender first) and appends the "Asked by"
+   line and quoted evidence to the description.
+4. Executor: after the create, store `issue_meta.requester_person_id` (migration)
+   and, when `joinSprint`, move the issue into the active sprint chosen at execution
+   time; a failed move is a warning on an executed proposal.
+5. Inbox: the compact Track row for a small-ask create and the pending proposals of
+   the same item that target its `$new` ref; type and epic selects (reuse the pickers
+   of the proposal edit dialog); Track approves in order; expand shows the cards;
+   row changes are recorded as edits. The one-time hint when no home is set.
+6. Eval cases: an ask with no ticket (small ask), an ask that belongs to a candidate
+   story (sub-task), planned work (not a small ask), an ask with a sender (requester).
+
+Checklist
+- With a home set, the FR-10 AC passes against the mock Jira: one row, one click,
+  ticket in the home project with label, assignee, sprint, due date and requester.
+- With no home set, existing intake tests pass unchanged.
+- A proposal stored before this phase still loads, edits and executes.
+
+## Phase 12: Jira links and blocker wake-up (FR-3.8, D45)
+
+Tasks
+1. Jira client: `GET /issueLinkType`, `POST /issueLink`, `DELETE /issueLink/{id}`;
+   sync stores the "blocks" type in `jira.linkTypes`. Mock Jira serves them.
+2. Proposal kind `link_issues` end to end: canonical schema, classify field and rule
+   ("when X is done", "after X ships", "blocked by X"), validation (distinct, both
+   candidates, not already linked), Executor with the direction check, proposal card,
+   compact row inside a Track bundle.
+3. A key named in the text but missing from the cache is read once and offered as a
+   candidate.
+4. Post-sync blocker step: `jira.blockers` map, `issue_meta.open_blockers`,
+   `unblocked_at`, `unblocked_by` (migration); readers of block state use the map.
+5. One notification per newly unblocked ticket in the reminder loop.
+6. Eval cases: "once PLAT-1 is deployed tell the vendor" (small ask blocked by
+   PLAT-1), an existing ticket blocked by another.
+
+Checklist
+- FR-3.8 AC passes in a service test: link created, blocker closed in the mock, next
+  sync sets `unblocked_at` and one reminder is due; a reopened blocker clears it.
+- The direction check is tested with a mock that stores the link reversed.
+
+## Phase 13: Waits: update from intake, away dates (FR-3.6, FR-3.7, D46, D47)
+
+Tasks
+1. Retrieval: open dependencies as candidates (sender, sender's team, candidate
+   tickets, wording), capped, in the prompt with id, ticket, label, owner and dates.
+2. Proposal kind `update_dependency` end to end, executing through the dependency
+   functions the Waiting page uses; no duplicate `link_dependency` for a listed wait.
+3. `people.away_until` (migration), the field on the person form and a badge;
+   `update_person.awayUntil`; the classify rule for out-of-office text.
+4. Dependency timing with the owner's away date (pure, unit-tested): asleep, then
+   "is back"; used by the Waiting page, reminders, scoring and the chat's
+   `waiting_on` tool. The draft prompt and the draft composer know the recipient is
+   away.
+5. Eval cases: an answer that resolves a wait, a partial answer that logs a reply,
+   an out-of-office reply that sets the away date.
+
+Checklist
+- FR-3 AC passes: "Bob sent the numbers" from Bob proposes resolving Bob's wait.
+- A wait whose owner is away until tomorrow is not due today and is due, with the
+  reason, on the first working day after.
+
+## Phase 14: Quick capture and tray (FR-11, D48)
+
+Tasks
+1. Rust: global-shortcut and single-instance plugins, tray icon with Open, Capture
+   and Quit, hide on close when the setting is on and the tray exists, Dock reopen on
+   macOS, `--capture` forwarded from a second launch. Capabilities updated.
+2. Settings `capture { shortcut, closeToTray }` with a Capture section that shows
+   whether the shortcut and tray are available and, if not, why and what to do
+   (`secretary --capture` bound in the desktop's own shortcuts).
+3. The Capture dialog (the Inbox composer in a shadcn Dialog) mounted at the app
+   root; opened by Ctrl+K "Capture", the tray, the shortcut and `--capture`; submit
+   files the thread, triages in the background, re-hides the window when capture
+   showed it, and notifies when a hidden capture ends with pending proposals.
+4. README: the tray library on Linux, the shortcut, the Wayland binding.
+
+Checklist
+- `cargo check` passes; typecheck, tests and lint are green; a test covers the
+  capture submit path and the open-capture event.
+- The window controls of D36 still close, minimise and maximise correctly with the
+  setting on and off (by code review; state what was not run).
+
+## Phase 15: Navigation (FR-13, D50)
+
+Tasks
+1. Sidebar: Today, Inbox, Tickets, Waiting on, Sprint, Chat, Context.
+2. `/sprint` with tabs Plan, Report and Epics (the epic health rollup moves here);
+   `/context` with People, Teams and Memory; tab as a search parameter; redirects
+   from `/planning`, `/report`, `/people`, `/teams`, `/memory`; every link in the app
+   and in the command palette updated.
+3. The draft composer as a Sheet opened from a ticket, a dependency (chase), a
+   person and Ctrl+K; `/drafts` kept; setting `general.draftsInSidebar` (default
+   off).
+4. Settings: an Advanced tab with task routing, ranking weights and evaluation
+   replay.
+
+Checklist
+- Every old path lands on the right tab; no dead link (`grep` for the old paths).
+- Route tests or component tests cover the redirects and the tab parameter.
+
+## Phase 16: Today and the sweep (FR-12, D49)
+
+Needs Phases 11, 12, 13 and 15.
+
+Tasks
+1. `buildToday` replacing `buildDashboard`, with unit tests for each list, the
+   ordering rules, sleeping waits, woken tickets and the 2,000-issue timing.
+2. The Today page: capture box, three lists, header counts, brief button, plan
+   banner; row actions (Done, snooze presets, draft, log reply, resolve) through the
+   Executor and the dependency functions.
+3. The sweep dialog with its keys and the weekly stale pass.
+4. Chat: `pending_decisions` lists open small asks with requester, age and state;
+   `waiting_on` shows blockers and away owners.
+5. Remove what Today replaces: the old dashboard sections and the prompts card on
+   the dashboard (the chat keeps suggested prompts).
+
+Checklist
+- FR-12 AC passes; each list has a test for a fixture that mixes small asks, waits,
+  blockers and sprint work.
+- Done on a small ask transitions it in the mock Jira and the row leaves the list.

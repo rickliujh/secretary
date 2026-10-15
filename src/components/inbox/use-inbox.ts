@@ -23,7 +23,7 @@ const DECISION_KEYS = [
   queryKeys.memories,
 ];
 
-function useInvalidateAfterDecision() {
+export function useInvalidateAfterDecision() {
   const client = useQueryClient();
   return () => {
     for (const key of DECISION_KEYS) void client.invalidateQueries({ queryKey: key });
@@ -108,8 +108,19 @@ export function useDecisions() {
   const dismiss = useDecisionMutation(
     withProposals((p, inboxItemId: string) => p.dismiss(inboxItemId)),
   );
+  /** Track (D44): the small-ask create and what hangs on it, in order. */
+  const track = useDecisionMutation(
+    withProposals(
+      (p, i: { ids: readonly string[]; edits?: Readonly<Record<string, ProposalPayload>> }) =>
+        p.track(i.ids, i.edits),
+    ),
+  );
+  /** Keeps a row change on a pending proposal, so any approve uses it (D44). */
+  const saveEdit = useDecisionMutation(
+    withProposals((p, i: { id: string; edited: ProposalPayload }) => p.saveEdit(i.id, i.edited)),
+  );
   const retriage = useDecisionMutation((inboxItemId: string) =>
     Effect.flatMap(Intake, (i) => i.retriage(inboxItemId)),
   );
-  return { approve, reject, approveAll, dismiss, retriage };
+  return { approve, reject, approveAll, track, saveEdit, dismiss, retriage };
 }

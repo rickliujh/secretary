@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { ProposalPayloadSchema } from "@/services/proposals/schema";
-import { fromFormValues, isEditable, issueOptions, toFormValues } from "./proposal-fields";
+import { ProposalPayloadSchema, parsePayload } from "@/services/proposals/schema";
+import {
+  fromFormValues,
+  isEditable,
+  issueOptions,
+  toFormValues,
+  viewPayload,
+} from "./proposal-fields";
 
 describe("proposal edit form values", () => {
   test("round trip keeps unchanged payloads identical", () => {
@@ -109,5 +115,49 @@ describe("issueOptions", () => {
   test("parents exclude epics and sub-tasks; any means every synced ticket", () => {
     expect(issueOptions(tickets, "parent").map((o) => o.value)).toEqual(["OPS-4", "PAY-2"]);
     expect(issueOptions(tickets, "any")).toHaveLength(6);
+  });
+});
+
+describe("viewPayload (stored payloads that no longer parse)", () => {
+  test("missing arrays and nested objects read as empty", () => {
+    // A lower-case project key keeps it from parsing, so no defaults are filled in.
+    const create = parsePayload({
+      kind: "create_issue",
+      ref: "$new:1",
+      projectKey: "ops",
+      issueType: "Task",
+      summary: "Old proposal",
+    });
+    expect("labels" in create).toBe(false);
+    expect(viewPayload(create)).toMatchObject({ summary: "Old proposal", labels: [] });
+    expect(viewPayload(parsePayload({ kind: "update_issue", target: "PAY-1" }))).toMatchObject({
+      changes: {},
+    });
+    expect(
+      viewPayload(parsePayload({ kind: "draft_message", channel: "teams", intent: "nope" })),
+    ).toMatchObject({ issueKeys: [] });
+    // A payload that parses is unchanged.
+    const ok = ProposalPayloadSchema.parse({ kind: "add_comment", target: "PAY-1", bodyMd: "x" });
+    expect(viewPayload(ok)).toBe(ok);
+  });
+});
+
+describe("link_issues edit form (D45)", () => {
+  test("target and blocker round trip, and a changed blocker parses", () => {
+    const p = ProposalPayloadSchema.parse({
+      kind: "link_issues",
+      target: "$new:1",
+      blocker: "PLAT-1",
+    });
+    expect(isEditable(p)).toBe(true);
+    const values = toFormValues(p);
+    expect(values).toEqual({ target: "$new:1", blocker: "PLAT-1" });
+    expect(ProposalPayloadSchema.parse(fromFormValues(p, values))).toEqual(p);
+    const edited = fromFormValues(p, { ...values, blocker: "PAY-2" });
+    expect(ProposalPayloadSchema.parse(edited)).toMatchObject({ blocker: "PAY-2" });
+    // The same issue on both ends does not parse.
+    expect(
+      ProposalPayloadSchema.safeParse(fromFormValues(p, { ...values, blocker: "$new:1" })).success,
+    ).toBe(false);
   });
 });

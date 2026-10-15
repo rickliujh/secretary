@@ -6,6 +6,7 @@ import { z } from "zod";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { Composer, toTriageInput } from "@/components/inbox/composer";
+import { SmallAsksHint } from "@/components/inbox/small-asks-hint";
 import { ThreadView } from "@/components/inbox/thread-view";
 import { useTriage } from "@/components/inbox/use-inbox";
 import { EmptyState } from "@/components/page";
@@ -99,6 +100,7 @@ function NewThread({ onStarted }: { onStarted: (id: string) => void }) {
   const triage = useTriage(onStarted);
   return (
     <div className="flex h-full flex-col justify-end gap-6">
+      <SmallAsksHint />
       <EmptyState
         className="border-0"
         icon={MessagesSquare}

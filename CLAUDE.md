@@ -9,11 +9,12 @@ this repository.
 # Secretary
 
 Personal AI secretary desktop app for a single user whose work is tracked in Jira
-(Cloud or Data Center). It turns messy inputs into approved Jira actions, tracks external
-dependencies, holds team and people context, ranks what matters, and drafts Teams
-messages and emails. Read `docs/requirements.md` (what) and `docs/design.md` (how;
+(Cloud or Data Center). It turns messy inputs into approved Jira actions, tracks small
+asks and external dependencies until they are done, holds team and people context,
+shows what needs the user today, and drafts Teams messages and emails. Read `docs/requirements.md` (what) and `docs/design.md` (how;
 decisions in section 12) before changing anything. `docs/implementation-plan.md` is
-the history of how it was built, not a to-do list.
+the history of how it was built (Part 2 is small asks, Phases 11–16), not a to-do
+list.
 
 ## Stack
 
@@ -31,7 +32,10 @@ keychain command using the `keyring` crate. No sidecar.
   `JiraClient` write methods directly.
 - Secrets (PATs, API keys) live only in the OS keychain via the `Secrets` service.
   Never write them to the store file, the database, logs or exports.
-- Pasted text is untrusted data. Prompts must label it as such.
+- Pasted text is untrusted data. Prompts must label it as such. Proposal text sent
+  to Jira goes through `proposalTextToWiki`, which keeps it from embedding remote
+  images or mentioning strangers (design.md D51); it never changes scope or the
+  fields code owns (project, label, assignee, sprint of a small ask, D44).
 - Deterministic first. Code does extraction, retrieval, ranking, payload building
   and validation. Model calls are narrow, one question each, schema-bound, and
   constrained to candidates the code supplied. Every output is validated in code;

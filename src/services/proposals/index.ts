@@ -11,7 +11,13 @@ export class ProposalError extends Data.TaggedError("ProposalError")<{
   readonly message: string;
 }> {}
 
-export type DecisionResult = { status: "executed" | "failed"; message: string; issueKey?: string };
+export type DecisionResult = {
+  status: "executed" | "failed";
+  message: string;
+  issueKey?: string;
+  /** Set when it ran but part of it did not happen, such as a sprint move (D44). */
+  warning?: string;
+};
 
 export interface ProposalsShape {
   /** Approves (optionally with edits) and executes one proposal. Execution failures are recorded, not thrown. */
@@ -24,6 +30,24 @@ export interface ProposalsShape {
   readonly approveAll: (
     inboxItemId: string,
   ) => Effect.Effect<DecisionResult[], ProposalError | DbError>;
+  /**
+   * Track (D44): approves a small-ask bundle in the order given, the create
+   * first, with the user's row changes as edits. Stops when the create fails, so
+   * nothing that hangs on it runs.
+   */
+  readonly track: (
+    ids: readonly string[],
+    edits?: Readonly<Record<string, ProposalPayload>>,
+  ) => Effect.Effect<DecisionResult[], ProposalError | DbError>;
+  /**
+   * Keeps an edit on a pending proposal without approving it, so every way of
+   * approving it later (its card, Approve all, Track) uses the edit (D44). An edit
+   * equal to the proposal clears it. The correction is recorded at approval.
+   */
+  readonly saveEdit: (
+    id: string,
+    edited: ProposalPayload,
+  ) => Effect.Effect<void, ProposalError | DbError>;
   /** Marks the inbox item dismissed and rejects its pending proposals without recording corrections. */
   readonly dismiss: (inboxItemId: string) => Effect.Effect<void, DbError>;
 }

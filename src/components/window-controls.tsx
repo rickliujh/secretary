@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * Minimise, maximise and close for Windows and Linux, where the native title bar
- * is off (D36). macOS keeps its own traffic lights.
+ * is off (D36). macOS keeps its own traffic lights. Close is a close request like
+ * Alt+F4: the native side hides the window to the tray when that is on (D48).
  */
 export function WindowControls({ className }: { className?: string }) {
   if (!ownWindowButtons) return null;

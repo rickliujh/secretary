@@ -29,7 +29,10 @@ const STATUS_TONE: Record<DraftListItem["status"], string> = {
   sent: TONE.success,
 };
 
-/** Drafts (FR-6): Teams messages and emails in each recipient's style. */
+/**
+ * Drafts (FR-6): Teams messages and emails in each recipient's style. In the
+ * sidebar; drafts also open as a panel from tickets, people and Waiting on (D50).
+ */
 function DraftsPage() {
   const { id, write } = Route.useSearch();
   const navigate = useNavigate({ from: "/drafts" });
@@ -98,7 +101,7 @@ function DraftsPage() {
                 yourself.
               </p>
             </div>
-            <DraftComposer />
+            <DraftComposer onCreated={(next) => navigate({ search: { id: next, write: true } })} />
           </div>
         )}
       </section>

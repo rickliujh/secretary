@@ -20,6 +20,7 @@ export const ProviderSchema = z.object({
   // Anthropic-compatible options. Proxies may reject thinking/effort, so both are opt-in.
   authStyle: z.enum(["x-api-key", "bearer"]).default("x-api-key"),
   thinking: z.enum(["default", "adaptive", "disabled"]).default("default"),
+  /** Both kinds; OpenAI-compatible servers get it as `reasoning_effort` (D52). Opt-in. */
   effort: z.enum(["default", "low", "medium", "high", "xhigh", "max"]).default("default"),
   structuredOutputMode: z.enum(["auto", "outputFormat", "jsonTool"]).default("auto"),
   // OpenAI-compatible options.
@@ -89,7 +90,7 @@ export const ScoringWeightsSchema = z.object({
 export type ScoringWeights = z.infer<typeof ScoringWeightsSchema>;
 export const DEFAULT_WEIGHTS: ScoringWeights = ScoringWeightsSchema.parse({});
 
-/** A one-click question for the chat, shown on the dashboard (D42). */
+/** A one-click question for the chat, shown on the Chat page (D42, D49). */
 export const SuggestedPromptSchema = z.object({
   id: z.string().min(1),
   title: z.string().trim().min(1).max(40),
@@ -125,6 +126,29 @@ export const DataSourceSchema = z.object({
 });
 export type DataSource = z.infer<typeof DataSourceSchema>;
 
+/** A Jira label: no spaces (Jira splits on them). */
+export const JiraLabel = z
+  .string()
+  .trim()
+  .min(1, "Enter a label")
+  .max(255)
+  .regex(/^\S+$/, "Labels cannot contain spaces");
+
+/**
+ * The small-asks home (FR-10, D44): where small asks become tickets. An empty
+ * project key means no home; intake then behaves as before.
+ */
+export const SmallAsksSettingsSchema = z.object({
+  projectKey: z.union([z.literal(""), z.string().regex(/^[A-Z][A-Z0-9_]+$/)]).default(""),
+  label: JiraLabel.default("small-ask"),
+  joinActiveSprint: z.boolean().default(true),
+  /** The Inbox points to this setting once while no home is set. */
+  hintDismissed: z.boolean().default(false),
+});
+export type SmallAsksSettings = z.infer<typeof SmallAsksSettingsSchema>;
+
+export const DEFAULT_CAPTURE_SHORTCUT = "CommandOrControl+Shift+Space";
+
 export const SettingsSchema = z.object({
   version: z.literal(1).default(1),
   providers: z.array(ProviderSchema).default([]),
@@ -154,8 +178,9 @@ export const SettingsSchema = z.object({
     })
     .prefault({}),
   scoring: ScoringWeightsSchema.prefault({}),
+  smallAsks: SmallAsksSettingsSchema.prefault({}),
   dataSources: z.array(DataSourceSchema).default([]),
-  /** Dashboard questions for the chat, in order (D42). */
+  /** Suggested questions for the chat, in order (D42). */
   suggestedPrompts: z.array(SuggestedPromptSchema).max(12).default(DEFAULT_SUGGESTED_PROMPTS),
   obsidian: z
     .object({
@@ -175,6 +200,16 @@ export const SettingsSchema = z.object({
       limitMb: z.number().int().min(100).max(100_000).default(1024),
       /** Daily cleanup of caches and old derived data (D34). */
       autoCleanup: z.boolean().default(true),
+    })
+    .prefault({}),
+  capture: z
+    .object({
+      /** Global shortcut for the Capture dialog, as a Tauri accelerator; blank turns it off (D48). */
+      shortcut: z.string().trim().max(60).default(DEFAULT_CAPTURE_SHORTCUT),
+      /** Closing the window keeps the app running in the tray (D48). */
+      closeToTray: z.boolean().default(true),
+      /** The one-time notice that closing kept the app running in the tray was sent (D48). */
+      trayNoticeShown: z.boolean().default(false),
     })
     .prefault({}),
   network: z

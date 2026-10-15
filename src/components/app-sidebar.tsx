@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { CONTEXT_NAV, type NavItem, SETTINGS_NAV, WORK_NAV } from "@/app/nav";
+import { MAIN_NAV, type NavItem, SETTINGS_NAV } from "@/app/nav";
 import { macOverlay } from "@/app/platform";
 import { usePendingCount } from "@/app/queries";
 import logo from "@/assets/logo.svg";
@@ -9,7 +9,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuBadge,
@@ -67,19 +66,12 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Work</SidebarGroupLabel>
           <SidebarGroupContent>
             <NavList
-              items={WORK_NAV}
+              items={MAIN_NAV}
               pathname={pathname}
               badges={{ "/inbox": pending.data ?? 0 }}
             />
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Context</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <NavList items={CONTEXT_NAV} pathname={pathname} />
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>

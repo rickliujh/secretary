@@ -17,6 +17,7 @@ import { isSubmitEnter } from "@/lib/keys";
 import { dateTime, relativeTime } from "@/lib/time";
 import { type DraftDetail, draftDetail } from "@/services/comms/queries";
 import { HandoffButton, HandoffHint } from "./handoff-button";
+import { RecipientAway } from "./recipient-away";
 import { useDraftActions } from "./use-drafts";
 
 type Variant = "short" | "standard";
@@ -62,6 +63,7 @@ export function DraftEditor({
         <h2 className="text-lg font-semibold">
           {intentLabel(d.draft.intent)} to {recipient}
         </h2>
+        <RecipientAway name={d.person?.displayName} awayUntil={d.person?.awayUntil} />
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {d.draft.issueKeys.map((k) => (
             <TicketLink key={k} ticketKey={k} className="font-mono text-xs underline">

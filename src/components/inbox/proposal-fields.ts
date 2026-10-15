@@ -12,6 +12,7 @@ import {
   MESSAGE_INTENTS,
   type ProposalKind,
   type ProposalPayload,
+  WAIT_ACTIONS,
 } from "@/services/proposals/schema";
 
 /** Which tickets an issue field offers: epics, possible sub-task parents, or any. */
@@ -96,6 +97,8 @@ export const FIELD_SPECS: Record<EditableKind, FieldSpec[]> = {
     { path: "priority", label: "Priority", type: "text" },
     { path: "assignee", label: "Assignee (Jira user)", type: "text", mono: true },
     { path: "dueDate", label: "Due", type: "date" },
+    { path: "labels", label: "Labels (comma separated)", type: "list", mono: true },
+    { path: "requesterPersonId", label: "Asked by", type: "select", options: peopleOpts },
   ],
   update_issue: [
     target,
@@ -128,8 +131,19 @@ export const FIELD_SPECS: Record<EditableKind, FieldSpec[]> = {
     { path: "expectedAt", label: "Expected", type: "date" },
     { path: "nextFollowupAt", label: "Next follow-up", type: "date" },
   ],
+  update_dependency: [
+    { path: "action", label: "Do", type: "select", options: opts(WAIT_ACTIONS) },
+    { path: "summary", label: "What they said", type: "textarea" },
+    { path: "expectedAt", label: "Expected", type: "date" },
+    { path: "nextFollowupAt", label: "Ask again on", type: "date" },
+  ],
+  link_issues: [
+    { path: "target", label: "Waits (is blocked)", type: "issue", issues: "any" },
+    { path: "blocker", label: "Until this is done", type: "issue", issues: "any" },
+  ],
   update_person: [
     { path: "personId", label: "Contact", type: "select", options: peopleOpts },
+    { path: "changes.awayUntil", label: "Away until", type: "date", optionalChange: true },
     { path: "changes.title", label: "Title", type: "text", optionalChange: true },
     {
       path: "changes.responsibilities",
@@ -251,4 +265,28 @@ export function fromFormValues(original: ProposalPayload, values: Record<string,
   if (changes?.profile && Object.keys(changes.profile as object).length === 0)
     delete changes.profile;
   return out;
+}
+
+/**
+ * A payload as the card shows it. `parsePayload` returns a stored payload that no
+ * longer parses as it was stored, so fields added later (labels) or required
+ * nested objects may be missing; they read as empty here instead of crashing.
+ */
+export function viewPayload(p: ProposalPayload): ProposalPayload {
+  const v = p as Record<string, unknown>;
+  const arr = (x: unknown) =>
+    Array.isArray(x) ? x.filter((y): y is string => typeof y === "string") : [];
+  const obj = (x: unknown) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
+  switch (p.kind) {
+    case "create_issue":
+      return { ...p, labels: arr(v.labels) };
+    case "draft_message":
+      return { ...p, issueKeys: arr(v.issueKeys) };
+    case "update_issue":
+    case "update_person":
+    case "update_team":
+      return { ...p, changes: obj(v.changes) } as ProposalPayload;
+    default:
+      return p;
+  }
 }

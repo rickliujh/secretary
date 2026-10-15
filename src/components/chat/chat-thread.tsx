@@ -92,7 +92,7 @@ function Thread({
                 Ask for a change and it prepares proposals in the Inbox for you to approve.
               </p>
               <div className="flex flex-wrap justify-center gap-2">
-                {/* The same suggested prompts as the dashboard, from Settings (D42). */}
+                {/* The suggested prompts from Settings (D42); only here since D49. */}
                 {(settings?.suggestedPrompts ?? []).map((p) => (
                   <Button key={p.id} variant="outline" size="sm" onClick={() => send(p.message)}>
                     {p.title}

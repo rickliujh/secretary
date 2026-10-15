@@ -6,22 +6,28 @@
  * works with strict structured-output modes across providers.
  */
 import { z } from "zod";
+import { awayDateProblem } from "@/services/directory/away";
 import { CHANNELS, DETAIL, FORMALITY, RESPONSIVENESS } from "@/services/directory/schema";
+import { isCancelStatus } from "@/services/jira/cancel";
 import { NONE } from "@/services/llm/portable";
 import {
   DEPENDENCY_KINDS,
+  FOLLOWUP_CHANNELS,
   ISO_DATE_RE,
   MEMORY_KINDS,
   MESSAGE_INTENTS,
   NEW_REF_RE,
   type ProposalPayload,
   ProposalPayloadSchema,
+  WAIT_ACTIONS,
 } from "@/services/proposals/schema";
 import type { Reason } from "@/services/retrieval/ranking";
+import { sameWaitSubject } from "@/services/retrieval/waits";
+import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small-asks/home";
 import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 6;
+export const CLASSIFY_PROMPT_VERSION = 10;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -40,6 +46,36 @@ export type CandidateIssue = {
   updated: string;
   /** Why retrieval picked it. */
   reasons: Reason[];
+  /** Issues it is already blocked by in Jira, whatever their status (prompt version 8, D45). */
+  blockedBy?: string[];
+};
+
+/** Why retrieval offered an open dependency (D46). */
+export type WaitReason = "sender" | "team" | "named" | "ticket" | "wording";
+
+/**
+ * An open dependency the input may answer (prompt version 9, D46): owned by the
+ * sender or the sender's team, by a contact the input names, on a candidate
+ * ticket, or sharing words with the input. update_dependency picks one by id.
+ */
+export type WaitCandidate = {
+  id: string;
+  issueKey: string;
+  label: string;
+  kind: string;
+  /** The owner's name (person or team), or null. */
+  owner: string | null;
+  ownerPersonId: string | null;
+  ownerTeamId: string | null;
+  externalRef: string | null;
+  status: string;
+  /** YYYY-MM-DD the wait was opened. */
+  requestedOn: string | null;
+  expectedAt: string | null;
+  nextFollowupAt: string | null;
+  /** The owner's last day away while they are away (D47); else null. */
+  awayUntil: string | null;
+  reasons: WaitReason[];
 };
 
 /**
@@ -61,12 +97,34 @@ export type ThreadContext = {
   others?: { summary: string | null; quote: string }[];
 };
 
+/**
+ * The small-asks home (D44) as code applies it. The model only sees the types
+ * and the rule; project, label, assignee and sprint are never its choice.
+ */
+export type SmallAskHomeSnapshot = {
+  projectKey: string;
+  label: string;
+  joinSprint: boolean;
+  /** Types a small ask may take in the home; empty when Jira's metadata is not synced yet. */
+  issueTypes: string[];
+  defaultType: string | null;
+};
+
 /** Everything the model sees for one item, stored on the item for replay. */
 export type ItemSnapshot = {
+  /** Set when a small-asks home is configured (prompt version 7, D44). */
+  smallAsks?: SmallAskHomeSnapshot | null;
+  /**
+   * The instance's "blocks" link type name when sync found one (prompt version 8,
+   * D45); link_issues is offered only then.
+   */
+  blockLinkType?: string | null;
   /** Sprint calendar around today (D23); absent in snapshots before prompt version 5. */
   sprints?: PromptSprint[];
   promptVersion: number;
   today: string;
+  /** The day the item's input arrived; a revision keeps it for "Asked ... on" (D44). */
+  askedOn?: string;
   me: { username: string } | null;
   outputLanguage: string;
   source: string;
@@ -84,7 +142,14 @@ export type ItemSnapshot = {
    * `complete` when issue types and statuses come from Jira's project metadata;
    * otherwise they are only what the cached issues happen to use.
    */
-  projects: { key: string; issueTypes: string[]; statuses: string[]; complete?: boolean }[];
+  projects: {
+    key: string;
+    issueTypes: string[];
+    statuses: string[];
+    complete?: boolean;
+    /** Types Jira flags as sub-tasks; absent when unknown (cache only, or older metadata). */
+    subtaskTypes?: string[];
+  }[];
   priorities: string[];
   jiraUsers: { username: string; displayName: string }[];
   teams: { id: string; name: string; function: string | null; contactFor: string | null }[];
@@ -94,8 +159,13 @@ export type ItemSnapshot = {
     title: string | null;
     team: string | null;
     jiraUsername: string | null;
+    /** Their last day away while away (prompt version 9, D47). */
+    awayUntil?: string | null;
   }[];
+  /** Open dependencies on candidate tickets; the prompt lists them only for snapshots without `waits`. */
   dependencies: { issueKey: string; label: string; status: string }[];
+  /** Open dependencies update_dependency may pick from (prompt version 9, D46). */
+  waits?: WaitCandidate[];
   memories: { kind: string; content: string }[];
   examples: { input: string; proposed: string; corrected: string | null }[];
   notes: { about: string; title: string; excerpt: string }[];
@@ -109,28 +179,57 @@ const nullableEnum = (values: readonly string[]) =>
 const nullableText = (description?: string) =>
   description ? z.string().nullish().describe(description) : z.string().nullish();
 
-/** Fields each proposal kind must fill; the rest stay null (checked in `validateItemOutput`). */
+const YES_NO = ["yes", "no"] as const;
+
+/**
+ * Fields each proposal kind must fill; the rest stay null (checked in
+ * `validateItemOutput`). The order is the order the kinds are listed to the model.
+ */
 const REQUIRED_FIELDS: Record<string, readonly string[]> = {
   create_issue: ["ref", "projectKey", "issueType", "summary"],
   update_issue: ["target"],
   add_comment: ["target", "body"],
   transition_issue: ["target", "toStatus"],
   link_dependency: ["target", "dependencyKind", "label"],
+  update_dependency: ["dependencyId", "waitAction"],
+  link_issues: ["target", "blocker"],
   update_person: ["personId"],
   update_team: ["teamId"],
   remember: ["memoryKind", "content"],
   draft_message: ["channel", "intent", "notes"],
 };
 
+/**
+ * Kinds offered only when the item's context allows them; the others are always
+ * offered. A kind that is not offered has no enum value, and fields only it uses
+ * are left out of the schema, so the prompt is unchanged without it.
+ */
+const OFFERED: Partial<Record<string, (s: ItemSnapshot) => boolean>> = {
+  create_issue: (s) => s.projects.length > 0,
+  update_person: (s) => s.people.length > 0,
+  update_team: (s) => s.teams.length > 0,
+  link_issues: (s) => !!s.blockLinkType,
+  update_dependency: (s) => !!s.waits?.length,
+};
+
+/** The kinds the model may propose for this item. */
+export const offeredKinds = (s: ItemSnapshot) =>
+  Object.keys(REQUIRED_FIELDS).filter((k) => OFFERED[k]?.(s) ?? true);
+
 /** Kinds that read each field the generic checks in `validateItemOutput` look at. */
 const FIELD_KINDS: Record<string, readonly string[]> = {
-  target: ["add_comment", "update_issue", "transition_issue", "link_dependency"],
+  target: ["add_comment", "update_issue", "transition_issue", "link_dependency", "link_issues"],
+  blocker: ["link_issues"],
   parent: ["create_issue"],
   epic: ["create_issue"],
   dueDate: ["create_issue", "update_issue"],
-  expectedAt: ["link_dependency"],
+  expectedAt: ["link_dependency", "update_dependency"],
+  nextFollowupAt: ["update_dependency"],
   assignee: ["create_issue", "update_issue"],
 };
+
+/** Fields checked as issue references: a candidate key or a ref created in this answer. */
+const REF_FIELDS = ["target", "blocker", "parent", "epic"] as const;
 
 /**
  * Builds the per-item output schema from the snapshot's candidates. Each
@@ -151,20 +250,61 @@ export function buildItemSchema(s: ItemSnapshot) {
   const personIds = s.people.map((p) => p.id);
   const teamIds = s.teams.map((t) => t.id);
 
-  const kinds = Object.keys(REQUIRED_FIELDS).filter(
-    (k) =>
-      (k !== "create_issue" || projects.length > 0) &&
-      (k !== "update_person" || personIds.length > 0) &&
-      (k !== "update_team" || teamIds.length > 0),
-  );
-  const uses = (...ks: string[]) => `Used by ${ks.join(", ")}.`;
+  const kinds = offeredKinds(s);
+  const offered = (k: string) => kinds.includes(k);
+  const uses = (...ks: string[]) => `Used by ${ks.filter(offered).join(", ")}.`;
+  const home = s.smallAsks ?? null;
+  const needs = (k: string) =>
+    k === "create_issue" && home
+      ? "ref, summary, smallAsk; projectKey and issueType too when smallAsk is no"
+      : REQUIRED_FIELDS[k]?.join(", ");
+  // Only with a home configured (D44); without one the schema is as before.
+  const smallAskFields = home
+    ? {
+        smallAsk: nullableEnum(YES_NO).describe(
+          `yes for a small ask (see the rules), no for planned work. ${uses("create_issue")}`,
+        ),
+        ...(personIds.length
+          ? {
+              requesterPersonId: nullableEnum(personIds).describe(
+                `For a small ask: the contact who asked, when it was not the sender of the input. ${uses("create_issue")}`,
+              ),
+            }
+          : {}),
+      }
+    : {};
+  // Only with open dependencies to pick from (D46).
+  const waitFields = offered("update_dependency")
+    ? {
+        dependencyId: nullableEnum((s.waits ?? []).map((w) => w.id)).describe(
+          `The open wait, by its id in the Open waits list. ${uses("update_dependency")}`,
+        ),
+        waitAction: nullableEnum(WAIT_ACTIONS).describe(
+          `resolve: what was waited for arrived or is no longer needed; log_reply: they answered but it is not done; reschedule: only its date changes. ${uses("update_dependency")}`,
+        ),
+        reply: nullableText(
+          `What they said or what changed, in one sentence, for the wait's timeline. ${uses("update_dependency")}`,
+        ),
+        nextFollowupAt: nullableText(
+          `YYYY-MM-DD: when to ask again, only if the input says. ${uses("update_dependency")}`,
+        ),
+      }
+    : {};
+  // Only when the instance has a "blocks" link type (D45).
+  const linkFields = offered("link_issues")
+    ? {
+        blocker: nullableEnum(targets).describe(
+          `The ticket the target waits for: the target is blocked by it until it is done. ${uses("link_issues")}`,
+        ),
+      }
+    : {};
 
   const proposal = z.object({
     kind: enumOf(kinds).describe(
-      `The action. Fields each kind needs: ${kinds.map((k) => `${k}: ${REQUIRED_FIELDS[k]?.join(", ")}`).join("; ")}. Leave other fields empty.`,
+      `The action. Fields each kind needs: ${kinds.map((k) => `${k}: ${needs(k)}`).join("; ")}. Leave other fields empty.`,
     ),
     target: nullableEnum(targets).describe(
-      `The issue acted on. ${uses("add_comment", "update_issue", "transition_issue", "link_dependency")}`,
+      `The issue acted on; for link_issues the issue that waits. ${uses("add_comment", "update_issue", "transition_issue", "link_dependency", "link_issues")}`,
     ),
     // create_issue
     ref: nullableEnum(NEW_REFS).describe(
@@ -185,6 +325,7 @@ export function buildItemSchema(s: ItemSnapshot) {
       `Jira user id from the list. ${uses("create_issue", "update_issue")}`,
     ),
     dueDate: nullableText(`YYYY-MM-DD. ${uses("create_issue", "update_issue")}`),
+    ...smallAskFields,
     // add_comment
     body: nullableText(`Comment text in Markdown. ${uses("add_comment")}`),
     // transition_issue
@@ -197,7 +338,13 @@ export function buildItemSchema(s: ItemSnapshot) {
     ownerPersonId: nullableEnum(personIds).describe(uses("link_dependency")),
     ownerTeamId: nullableEnum(teamIds).describe(uses("link_dependency")),
     externalRef: nullableText(`For incidents: the ServiceNow number. ${uses("link_dependency")}`),
-    expectedAt: nullableText(`YYYY-MM-DD. ${uses("link_dependency")}`),
+    expectedAt: nullableText(
+      `YYYY-MM-DD: when it is expected. ${uses("link_dependency", "update_dependency")}`,
+    ),
+    // update_dependency
+    ...waitFields,
+    // link_issues
+    ...linkFields,
     // remember
     memoryKind: nullableEnum(MEMORY_KINDS).describe(uses("remember")),
     content: nullableText(
@@ -222,6 +369,9 @@ export function buildItemSchema(s: ItemSnapshot) {
     responsiveness: nullableEnum(RESPONSIVENESS).describe(uses("update_person")),
     preferredChannel: nullableEnum(CHANNELS).describe(uses("update_person")),
     tone: nullableText(uses("update_person")),
+    awayUntil: nullableText(
+      `YYYY-MM-DD: the person's last day away, from an out-of-office or leave notice: the day itself for "until" a day, the day before for "back on" a day. ${uses("update_person")}`,
+    ),
     // update_team
     teamId: nullableEnum(teamIds).describe(uses("update_team")),
     function: nullableText(uses("update_team")),
@@ -267,9 +417,74 @@ const defined = <T extends Record<string, unknown>>(o: T) =>
     Object.entries(o).filter(([, v]) => v !== null && v !== undefined),
   ) as Partial<T>;
 
+/**
+ * Whether a type is a sub-task type: Jira's flag from a project that has the type
+ * and stored flags, else the name (D44).
+ */
+function isSubtaskIn(s: ItemSnapshot, type: string): boolean {
+  const flagged = s.projects.filter((p) => p.subtaskTypes && p.issueTypes.includes(type));
+  if (flagged.length) return flagged.some((p) => p.subtaskTypes?.includes(type));
+  return isSubtaskType(type);
+}
+
+/** A create_issue the model marked as a small ask, with a home configured (D44). */
+const isSmallAsk = (p: Record<string, unknown>, s?: ItemSnapshot) =>
+  p.kind === "create_issue" && !!s?.smallAsks && p.smallAsk === "yes";
+
+/**
+ * Where a small ask goes and what it is, decided in code (D44): the model's type
+ * or the home's default; a sub-task goes into its parent's project, anything
+ * else into the home.
+ */
+function smallAskPlacement(p: Record<string, unknown>, s: ItemSnapshot) {
+  const home = s.smallAsks as SmallAskHomeSnapshot;
+  const issueType = str(p.issueType) ?? home.defaultType ?? "Task";
+  const subtask = isSubtaskIn(s, issueType);
+  const parent = subtask ? s.candidates.find((c) => c.key === p.parent) : undefined;
+  return { home, issueType, subtask, projectKey: parent?.projectKey ?? home.projectKey };
+}
+
+/** Maps a small ask (D44): code sets project, label, assignee, sprint flag and requester. */
+function smallAskPayload(p: ItemOutput["proposals"][number], s: ItemSnapshot): ProposalPayload {
+  const { home, issueType, subtask, projectKey } = smallAskPlacement(p, s);
+  const named = s.people.find((x) => x.id === str(p.requesterPersonId));
+  // The sender asked, unless nobody sent it; then the contact the model picked.
+  const requester = s.sender ?? named ?? null;
+  return ProposalPayloadSchema.parse({
+    kind: "create_issue",
+    ref: p.ref,
+    projectKey,
+    issueType,
+    summary: p.summary,
+    descriptionMd: withProvenance(str(p.description), {
+      requester: requester?.displayName ?? null,
+      source: s.source,
+      date: s.askedOn ?? s.today,
+      quote: s.quote,
+    }),
+    parent: subtask ? str(p.parent) : null,
+    epic: subtask ? null : str(p.epic),
+    priority: str(p.priority),
+    assignee: s.me?.username ?? null,
+    dueDate: str(p.dueDate),
+    labels: [home.label],
+    smallAsk: true,
+    requesterPersonId: requester?.id ?? null,
+    // Sub-tasks follow their parent's sprint.
+    joinSprint: home.joinSprint && !subtask,
+  });
+}
+
+/** The timeline channel of a reply, from the input's source (D46). */
+const followupChannel = (source: string | undefined): (typeof FOLLOWUP_CHANNELS)[number] =>
+  (FOLLOWUP_CHANNELS as readonly string[]).includes(source ?? "")
+    ? (source as (typeof FOLLOWUP_CHANNELS)[number])
+    : "other";
+
 /** Maps one model proposal to a canonical payload (throws on shapes the schema should have prevented). */
-function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
+function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): ProposalPayload {
   const g = (k: string) => p[k];
+  if (s && isSmallAsk(p, s)) return smallAskPayload(p, s);
   switch (p.kind) {
     case "create_issue":
       return ProposalPayloadSchema.parse({
@@ -319,6 +534,27 @@ function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
         externalRef: str(g("externalRef")),
         expectedAt: str(g("expectedAt")),
       });
+    case "link_issues":
+      return ProposalPayloadSchema.parse({
+        kind: "link_issues",
+        target: g("target"),
+        blocker: g("blocker"),
+      });
+    case "update_dependency": {
+      // The wait's ticket and label for the card, and the timeline channel, are code's.
+      const wait = s?.waits?.find((w) => w.id === g("dependencyId"));
+      return ProposalPayloadSchema.parse({
+        kind: "update_dependency",
+        dependencyId: g("dependencyId"),
+        action: g("waitAction"),
+        summary: str(g("reply")),
+        expectedAt: str(g("expectedAt")),
+        nextFollowupAt: str(g("nextFollowupAt")),
+        channel: followupChannel(s?.source),
+        issueKey: wait?.issueKey ?? null,
+        label: wait?.label ?? null,
+      });
+    }
     case "update_person":
       return ProposalPayloadSchema.parse({
         kind: "update_person",
@@ -326,6 +562,7 @@ function toPayload(p: ItemOutput["proposals"][number]): ProposalPayload {
         changes: defined({
           title: str(g("title")),
           responsibilities: str(g("responsibilities")),
+          awayUntil: str(g("awayUntil")),
           profile: (() => {
             const profile = defined({
               formality: str(g("formality")),
@@ -377,14 +614,122 @@ const validDate = (v: unknown) =>
   v === undefined ||
   (typeof v === "string" && ISO_DATE_RE.test(v) && !Number.isNaN(Date.parse(v)));
 
+/** The checks for a small ask (D44): its type and, for a sub-task, its parent. */
+function validateSmallAsk(
+  p: ItemOutput["proposals"][number],
+  s: ItemSnapshot,
+  at: string,
+): string[] {
+  const errors: string[] = [];
+  const { home, issueType, subtask, projectKey } = smallAskPlacement(p, s);
+  if (subtask) {
+    const parent = s.candidates.find((c) => c.key === p.parent);
+    if (!parent || parent.issueType === "Epic" || isSubtaskIn(s, parent.issueType))
+      errors.push(
+        `${at}: a small ask can be a Sub-task only under an existing candidate story or task; set parent to it, or pick another type.`,
+      );
+    const proj = s.projects.find((x) => x.key === projectKey);
+    if (parent && proj?.complete && !proj.issueTypes.includes(issueType))
+      errors.push(`${at}: ${projectKey} has no issue type ${issueType}.`);
+  } else if (/epic/i.test(issueType)) {
+    errors.push(`${at}: a small ask cannot be an Epic.`);
+  } else if (p.parent) {
+    errors.push(`${at}: only a Sub-task has a parent; use epic for epics.`);
+  } else if (home.issueTypes.length > 0 && !home.issueTypes.includes(issueType)) {
+    errors.push(
+      `${at}: a small ask in ${home.projectKey} can be ${home.issueTypes.join(", ")}, not ${issueType}.`,
+    );
+  }
+  return errors;
+}
+
+/** The checks for a "blocked by" link (D45): two different issues, not linked already. */
+function validateLink(
+  p: ItemOutput["proposals"][number],
+  index: number,
+  out: ItemOutput,
+  s: ItemSnapshot,
+  at: string,
+): string[] {
+  const errors: string[] = [];
+  const target = typeof p.target === "string" ? p.target : null;
+  const blocker = typeof p.blocker === "string" ? p.blocker : null;
+  if (!target || !blocker) return errors;
+  if (target === blocker) errors.push(`${at}: an issue cannot be blocked by itself.`);
+  const candidate = s.candidates.find((c) => c.key === target);
+  if (candidate?.blockedBy?.includes(blocker))
+    errors.push(`${at}: ${target} is already blocked by ${blocker} in Jira; leave it out.`);
+  // The reverse link already in Jira would make a cycle neither issue wakes from.
+  if (s.candidates.find((c) => c.key === blocker)?.blockedBy?.includes(target))
+    errors.push(
+      `${at}: ${blocker} is already blocked by ${target} in Jira, so ${target} cannot also wait for ${blocker}; leave it out or swap target and blocker if the input says ${blocker} waits for ${target}.`,
+    );
+  const first = out.proposals.findIndex(
+    (o) => o.kind === "link_issues" && o.target === target && o.blocker === blocker,
+  );
+  if (first < index) errors.push(`${at}: ${target} blocked by ${blocker} is proposed twice.`);
+  if (
+    out.proposals.some(
+      (o) => o.kind === "link_issues" && o.target === blocker && o.blocker === target,
+    )
+  )
+    errors.push(`${at}: ${target} and ${blocker} cannot block each other.`);
+  return errors;
+}
+
+/**
+ * The checks for a change to an open dependency (D46): one of the listed waits,
+ * once per answer, a reschedule with a date, and dates from today on.
+ */
+function validateWaitUpdate(
+  p: ItemOutput["proposals"][number],
+  index: number,
+  out: ItemOutput,
+  s: ItemSnapshot,
+  at: string,
+): string[] {
+  const errors: string[] = [];
+  const id = typeof p.dependencyId === "string" ? p.dependencyId : null;
+  if (!id) return errors;
+  if (!s.waits?.some((w) => w.id === id))
+    errors.push(`${at}: dependencyId ${id} is not one of the open waits.`);
+  const first = out.proposals.findIndex(
+    (o) => o.kind === "update_dependency" && o.dependencyId === id,
+  );
+  if (first < index) errors.push(`${at}: wait ${id} is updated twice; propose one change for it.`);
+  if (p.waitAction === "reschedule" && !str(p.expectedAt) && !str(p.nextFollowupAt))
+    errors.push(`${at}: a reschedule needs expectedAt or nextFollowupAt.`);
+  for (const field of ["expectedAt", "nextFollowupAt"]) {
+    const v = str(p[field]);
+    if (v && ISO_DATE_RE.test(v) && v < s.today)
+      errors.push(`${at}: ${field} ${v} is in the past (today is ${s.today}).`);
+  }
+  return errors;
+}
+
+/**
+ * A new dependency the listed waits already cover (D46): the same ticket, the
+ * same owner or reference, and about the same thing (the same reference, or
+ * labels sharing a meaningful word). It should be an update_dependency, or
+ * nothing. A different ask of the same owner on the same ticket is a new wait.
+ */
+function coveringWait(p: ItemOutput["proposals"][number], s: ItemSnapshot) {
+  const ref = str(p.externalRef);
+  const proposed = { label: str(p.label), externalRef: ref };
+  return s.waits?.find(
+    (w) =>
+      w.issueKey === p.target &&
+      ((!!w.ownerPersonId && w.ownerPersonId === p.ownerPersonId) ||
+        (!!w.ownerTeamId && w.ownerTeamId === p.ownerTeamId) ||
+        (!!w.externalRef && !!ref && w.externalRef.toLowerCase() === ref.toLowerCase())) &&
+      sameWaitSubject(w, proposed, w.owner),
+  );
+}
+
 /**
  * Business-rule checks the schema cannot express (design.md 7.0 rule 4).
  * Returns error strings for the repair prompt; empty means valid.
  */
-/** Statuses that end a ticket without doing it; moving there needs a comment saying why. */
-const CANCEL_STATUS =
-  /cancel|won'?t\s*(do|fix)|wontfix|abandon|reject|declin|obsolete|duplicate|invalid|not\s*needed|descoped/i;
-
 export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   const errors: string[] = [];
   const candidates = new Map(s.candidates.map((c) => [c.key, c]));
@@ -402,7 +747,12 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
 
   out.proposals.forEach((p, i) => {
     const at = `Proposal ${i + 1} (${p.kind})`;
-    const missing = (REQUIRED_FIELDS[p.kind] ?? []).filter((f) => {
+    const small = isSmallAsk(p, s);
+    // Code places a small ask, so the model need not name its project or type (D44).
+    const required = (REQUIRED_FIELDS[p.kind] ?? []).filter(
+      (f) => !small || (f !== "projectKey" && f !== "issueType"),
+    );
+    const missing = required.filter((f) => {
       const v = p[f];
       return v === null || v === undefined || (typeof v === "string" && !v.trim());
     });
@@ -410,20 +760,23 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
     // Fields a kind does not use are ignored: in the flat schema a model may fill them
     // with leftovers, and toPayload never reads them.
     const used = (field: string) => FIELD_KINDS[field]?.includes(p.kind) ?? false;
-    for (const field of ["target", "parent", "epic"].filter(used)) {
+    for (const field of REF_FIELDS.filter(used)) {
       const v = p[field];
       if (typeof v === "string" && NEW_REF_RE.test(v) && !created.has(v))
         errors.push(`${at}: ${field} ${v} is not created by any create_issue in this answer.`);
       if (typeof v === "string" && !NEW_REF_RE.test(v) && !candidates.has(v))
         errors.push(`${at}: ${field} ${v} is not one of the candidate issues.`);
     }
-    for (const field of ["dueDate", "expectedAt"].filter(used)) {
+    for (const field of ["dueDate", "expectedAt", "nextFollowupAt"].filter(used)) {
       if (!validDate(p[field])) errors.push(`${at}: ${field} must be YYYY-MM-DD or null.`);
     }
     if (used("assignee") && typeof p.assignee === "string" && !knownUsers.has(p.assignee))
       errors.push(`${at}: assignee ${p.assignee} is not a known Jira user.`);
 
-    if (p.kind === "create_issue") {
+    if (p.kind === "create_issue" && s.smallAsks && p.smallAsk !== "yes" && p.smallAsk !== "no")
+      errors.push(`${at}: set smallAsk to yes or no.`);
+    if (small) errors.push(...validateSmallAsk(p, s, at));
+    if (p.kind === "create_issue" && !small) {
       const proj = project(String(p.projectKey));
       if (
         proj?.complete &&
@@ -433,10 +786,12 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
         errors.push(
           `${at}: issue type ${p.issueType} is not available in ${p.projectKey} (${proj.issueTypes.join(", ")}).`,
         );
-      const subtask = /sub-?task/i.test(String(p.issueType));
+      const subtask = isSubtaskIn(s, String(p.issueType));
       if (subtask && !p.parent) errors.push(`${at}: a Sub-task needs a parent.`);
       if (!subtask && p.parent)
         errors.push(`${at}: only a Sub-task has a parent; use epic for epics.`);
+    }
+    if (p.kind === "create_issue") {
       if (typeof p.epic === "string" && !isEpic(p.epic))
         errors.push(`${at}: epic ${p.epic} is not an Epic.`);
       if (p.issueType === "Epic" && p.epic) errors.push(`${at}: an Epic cannot belong to an epic.`);
@@ -455,7 +810,7 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       if (c && c.status === p.toStatus) errors.push(`${at}: ${c.key} is already ${c.status}.`);
       // A cancelled ticket without a word about why leaves its watchers guessing.
       if (
-        CANCEL_STATUS.test(String(p.toStatus)) &&
+        isCancelStatus(String(p.toStatus)) &&
         !out.proposals.some((o) => o.kind === "add_comment" && o.target === p.target && str(o.body))
       )
         errors.push(
@@ -478,9 +833,22 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
     if (p.kind === "draft_message" && !p.recipientPersonId && !p.recipientTeamId)
       errors.push(`${at}: draft_message needs a recipient person or team.`);
     if (p.kind === "add_comment" && !str(p.body)) errors.push(`${at}: comment body is empty.`);
+    if (p.kind === "link_issues") errors.push(...validateLink(p, i, out, s, at));
+    if (p.kind === "update_dependency") errors.push(...validateWaitUpdate(p, i, out, s, at));
+    if (p.kind === "link_dependency") {
+      const wait = coveringWait(p, s);
+      if (wait)
+        errors.push(
+          `${at}: open wait ${wait.id} already tracks ${wait.label} on ${wait.issueKey}; use update_dependency for it, or leave this out.`,
+        );
+    }
+    if (p.kind === "update_person" && str(p.awayUntil)) {
+      const problem = awayDateProblem(String(str(p.awayUntil)), s.today);
+      if (problem) errors.push(`${at}: awayUntil ${problem}.`);
+    }
     // A structurally valid proposal must also map cleanly to a payload.
     try {
-      toPayload(p);
+      toPayload(p, s);
     } catch (e) {
       errors.push(
         `${at}: ${e instanceof z.ZodError ? e.issues.map((x) => `${x.path.join(".")}: ${x.message}`).join("; ") : String(e)}`,
@@ -510,12 +878,15 @@ export function fromPayload(
         projectKey: p.projectKey,
         issueType: p.issueType,
         summary: p.summary,
-        description: p.descriptionMd,
+        // A small ask's provenance is code's; the model sees and returns its own words.
+        description: p.smallAsk ? stripProvenance(p.descriptionMd) : p.descriptionMd,
         parent: r(p.parent),
         epic: r(p.epic),
         priority: p.priority,
-        assignee: p.assignee,
+        // Code assigns a small ask; the user may not be in this item's list of Jira users.
+        assignee: p.smallAsk ? null : p.assignee,
         dueDate: p.dueDate,
+        ...(p.smallAsk ? { smallAsk: "yes", requesterPersonId: p.requesterPersonId } : {}),
       };
     case "update_issue":
       return {
@@ -541,10 +912,22 @@ export function fromPayload(
         externalRef: p.externalRef,
         expectedAt: p.expectedAt,
       };
+    case "link_issues":
+      return { kind: p.kind, target: r(p.target), blocker: r(p.blocker) };
+    case "update_dependency":
+      return {
+        kind: p.kind,
+        dependencyId: p.dependencyId,
+        waitAction: p.action,
+        reply: p.summary,
+        expectedAt: p.expectedAt,
+        nextFollowupAt: p.nextFollowupAt,
+      };
     case "update_person":
       return {
         kind: p.kind,
         personId: p.personId,
+        awayUntil: p.changes.awayUntil ?? null,
         title: p.changes.title ?? null,
         responsibilities: p.changes.responsibilities ?? null,
         formality: p.changes.profile?.formality ?? null,
@@ -586,9 +969,9 @@ export function fromPayload(
  * `quote` stands in for missing evidence: a model that forgets to quote has not
  * made the action wrong, so it is not worth a repair or a question.
  */
-export function mapItemOutput(out: ItemOutput, quote = ""): MappedProposal[] {
+export function mapItemOutput(out: ItemOutput, quote = "", s?: ItemSnapshot): MappedProposal[] {
   return out.proposals.map((p) => ({
-    payload: toPayload(p),
+    payload: toPayload(p, s),
     rationale: p.rationale,
     evidence: p.evidence?.trim() || quote.slice(0, 300),
     confidence: clamp01(p.confidence),
@@ -611,7 +994,35 @@ ${HARD_RULES}
 - When the input asks to cancel, close, drop or stop a ticket, propose a transition_issue to the project's status for that: a cancel-like status (Cancelled, Won't Do, Rejected, Obsolete) if the project lists one, otherwise its done or closed status. A comment alone does not close a ticket.
 - When you move an issue to a closing status (cancelled, won't do, rejected, duplicate, obsolete, done or closed) for a reason in the input, also add an add_comment on the same issue that says why, in one or two sentences drawn from the input, so people reading the ticket know. When the closing status is a done status but the work was not done, the comment says the ticket was closed without being done. A cancellation always gets that comment.
 - Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
-- Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
+${
+  s.waits?.length
+    ? `- Open waits lists what the user already waits on. When the input answers or moves one of them, propose update_dependency with its dependencyId: resolve when what was waited for arrived or is no longer needed ("Bob sent the numbers"); log_reply when they answered but it is not done yet, with what they said in reply and expectedAt when they give a date; reschedule when only the date changes (expectedAt, or nextFollowupAt for when to ask again). Never propose link_dependency for a wait that list already has; update it instead.
+`
+    : ""
+}${
+  s.people.length
+    ? `- When the input is an out-of-office or leave notice, propose update_person for that person with awayUntil: their last day away as YYYY-MM-DD, worked out from today's date${s.sprints?.length ? " (and the Sprints list when it names a sprint)" : ""}. "Until", "through" or "out until" a day means they are away that whole day, so awayUntil is that day ("out of office until 14 Oct" gives 14 Oct). "Back on", "returning" or "back in the office" a day means that is their first day back, so awayUntil is the day before it ("back on 14 Oct" gives 13 Oct). The person is the sender of the input, or the contact from the People list it is about. Their waits pause until they are back, so do not resolve or reschedule a wait only because they are away.
+`
+    : ""
+}${
+  s.blockLinkType
+    ? `- When the input says something can only happen when or after a Jira ticket is done ("when PLAT-1 is done", "after X ships", "once X is deployed", "blocked by X"), propose link_issues: target is the issue that waits (a candidate, or the ref of an issue you create), blocker is the candidate ticket it waits for. Use link_dependency instead when it waits on a person, a team or something that is not a candidate ticket. Do not link issues the candidate list already shows as blocked by that ticket.
+`
+    : ""
+}${
+  s.smallAsks
+    ? `- A small ask is a small task for the user that arrives beside planned work: a reply they owe, something to send, a question to answer, something to chase or check, a document to update. When the input holds one that no candidate issue covers, propose create_issue with smallAsk yes. Write the summary as the action ("Send Dana the Q3 numbers"), set dueDate when a deadline is given, pick issueType from the small-asks home's types (leave it empty for the default), and set epic only when a candidate epic clearly fits. Do not choose its project, assignee or labels; code sets them and records who asked.
+- When a small ask belongs to an existing candidate story or task, make it a Sub-task of that issue (issueType Sub-task, parent that issue, smallAsk yes). When a candidate issue already covers the ask, act on that issue instead of creating one.
+- Planned work (a feature, a bug, a project task, an epic) is not a small ask: create_issue with smallAsk no, choosing projectKey and issueType yourself.
+- When the input says the small ask waits on someone or something, add a link_dependency whose target is the new issue's ref.${
+        s.blockLinkType
+          ? `
+- When the small ask can only be done after a candidate ticket is done, add a link_issues whose target is the new issue's ref and whose blocker is that ticket.`
+          : ""
+      }
+`
+    : ""
+}- Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
 - Use remember for rules and preferences the user states about how to handle future work.
 - The user reviews and can edit every proposal before it runs, so a sensible proposal with a stated assumption beats a question. Decide details yourself: the priority (from urgency, deadlines, blocking and customer impact), wording, and which listed value fits. Say what you assumed in the rationale.
 - Ask a question only when you cannot tell which issue, person or kind of action the input is about. Never ask the user to pick a value you could reasonably choose, such as a priority.
@@ -656,7 +1067,7 @@ ${
       s.people
         .map(
           (p) =>
-            `- ${p.id}: ${line([p.displayName, p.title, p.team, p.jiraUsername && `jira ${p.jiraUsername}`])}`,
+            `- ${p.id}: ${line([p.displayName, p.title, p.team, p.jiraUsername && `jira ${p.jiraUsername}`, p.awayUntil && `away until ${p.awayUntil}`])}`,
         )
         .join("\n") || "- none"
     }\nJira users: ${s.jiraUsers.map((u) => `${u.username} (${u.displayName})`).join(", ") || "none"}`,
@@ -666,8 +1077,13 @@ ${
       `## Notes\n${s.notes.map((n) => `- About ${n.about}: ${n.title}\n  ${n.excerpt}`).join("\n")}`,
     );
   }
+  const home = s.smallAsks;
   blocks.push(
-    `## Projects\n${s.projects.map((p) => `- ${p.key}: issue types ${p.issueTypes.join(", ") || "unknown"}; statuses ${p.statuses.join(", ") || "unknown"}`).join("\n") || "- none"}\nPriorities (highest first): ${s.priorities.join(", ") || "unknown"}`,
+    `## Projects\n${s.projects.map((p) => `- ${p.key}: issue types ${p.issueTypes.join(", ") || "unknown"}; statuses ${p.statuses.join(", ") || "unknown"}`).join("\n") || "- none"}\nPriorities (highest first): ${s.priorities.join(", ") || "unknown"}${
+      home
+        ? `\nSmall-asks home: project ${home.projectKey}; issue types ${home.issueTypes.join(", ") || "unknown"}${home.defaultType ? `; default ${home.defaultType}` : ""}`
+        : ""
+    }`,
   );
   if (s.sprints?.length) {
     blocks.push(
@@ -684,11 +1100,34 @@ ${
       s.candidates
         .map(
           (c) =>
-            `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}${c.priority ? `, priority ${c.priority}` : ""}${c.dueDate ? `, due ${c.dueDate}` : ""}] ${c.summary} (${c.reasons.join(", ")})`,
+            `- ${c.key} [${c.issueType}, ${c.status}${c.epicKey ? `, epic ${c.epicKey}` : ""}${c.parentKey ? `, parent ${c.parentKey}` : ""}${c.assignee ? `, assignee ${c.assignee}` : ""}${c.priority ? `, priority ${c.priority}` : ""}${c.dueDate ? `, due ${c.dueDate}` : ""}${s.blockLinkType && c.blockedBy?.length ? `, blocked by ${c.blockedBy.join(", ")}` : ""}] ${c.summary} (${c.reasons.join(", ")})`,
         )
         .join("\n") || "- none found"
-    }${s.dependencies.length ? `\nOpen dependencies:\n${s.dependencies.map((d) => `- ${d.issueKey} waits on ${d.label} (${d.status})`).join("\n")}` : ""}`,
+    }${
+      // Snapshots before prompt version 9 list open dependencies here; later ones as Open waits.
+      !s.waits && s.dependencies.length
+        ? `\nOpen dependencies:\n${s.dependencies.map((d) => `- ${d.issueKey} waits on ${d.label} (${d.status})`).join("\n")}`
+        : ""
+    }`,
   );
+  if (s.waits?.length) {
+    blocks.push(
+      `## Open waits (what the user is waiting on from others; update_dependency picks one by id)\n${s.waits
+        .map(
+          (w) =>
+            `- ${w.id}: ${w.issueKey} waits on ${w.label} [${line([
+              w.owner && `owner ${w.owner}`,
+              w.externalRef,
+              w.status,
+              w.requestedOn && `asked ${w.requestedOn}`,
+              w.expectedAt && `expected ${w.expectedAt}`,
+              w.nextFollowupAt && `next chase ${w.nextFollowupAt}`,
+              w.awayUntil && `owner away until ${w.awayUntil}`,
+            ])}] (${w.reasons.join(", ")})`,
+        )
+        .join("\n")}`,
+    );
+  }
   blocks.push(
     `## Input\n${untrusted(s.quote, {
       source: s.source,

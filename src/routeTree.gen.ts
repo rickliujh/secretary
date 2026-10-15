@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChatRouteImport } from './routes/chat'
+import { Route as ContextRouteImport } from './routes/context'
 import { Route as DraftsRouteImport } from './routes/drafts'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as MemoryRouteImport } from './routes/memory'
@@ -18,6 +19,7 @@ import { Route as PeopleRouteImport } from './routes/people'
 import { Route as PlanningRouteImport } from './routes/planning'
 import { Route as ReportRouteImport } from './routes/report'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SprintRouteImport } from './routes/sprint'
 import { Route as TeamsRouteImport } from './routes/teams'
 import { Route as TicketsRouteImport } from './routes/tickets'
 import { Route as WaitingRouteImport } from './routes/waiting'
@@ -30,6 +32,11 @@ const IndexRoute = IndexRouteImport.update({
 const ChatRoute = ChatRouteImport.update({
   id: '/chat',
   path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ContextRoute = ContextRouteImport.update({
+  id: '/context',
+  path: '/context',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DraftsRoute = DraftsRouteImport.update({
@@ -67,6 +74,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SprintRoute = SprintRouteImport.update({
+  id: '/sprint',
+  path: '/sprint',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TeamsRoute = TeamsRouteImport.update({
   id: '/teams',
   path: '/teams',
@@ -86,6 +98,7 @@ const WaitingRoute = WaitingRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
+  '/context': typeof ContextRoute
   '/drafts': typeof DraftsRoute
   '/inbox': typeof InboxRoute
   '/memory': typeof MemoryRoute
@@ -93,6 +106,7 @@ export interface FileRoutesByFullPath {
   '/planning': typeof PlanningRoute
   '/report': typeof ReportRoute
   '/settings': typeof SettingsRoute
+  '/sprint': typeof SprintRoute
   '/teams': typeof TeamsRoute
   '/tickets': typeof TicketsRoute
   '/waiting': typeof WaitingRoute
@@ -100,6 +114,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
+  '/context': typeof ContextRoute
   '/drafts': typeof DraftsRoute
   '/inbox': typeof InboxRoute
   '/memory': typeof MemoryRoute
@@ -107,6 +122,7 @@ export interface FileRoutesByTo {
   '/planning': typeof PlanningRoute
   '/report': typeof ReportRoute
   '/settings': typeof SettingsRoute
+  '/sprint': typeof SprintRoute
   '/teams': typeof TeamsRoute
   '/tickets': typeof TicketsRoute
   '/waiting': typeof WaitingRoute
@@ -115,6 +131,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
+  '/context': typeof ContextRoute
   '/drafts': typeof DraftsRoute
   '/inbox': typeof InboxRoute
   '/memory': typeof MemoryRoute
@@ -122,6 +139,7 @@ export interface FileRoutesById {
   '/planning': typeof PlanningRoute
   '/report': typeof ReportRoute
   '/settings': typeof SettingsRoute
+  '/sprint': typeof SprintRoute
   '/teams': typeof TeamsRoute
   '/tickets': typeof TicketsRoute
   '/waiting': typeof WaitingRoute
@@ -131,6 +149,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/chat'
+    | '/context'
     | '/drafts'
     | '/inbox'
     | '/memory'
@@ -138,6 +157,7 @@ export interface FileRouteTypes {
     | '/planning'
     | '/report'
     | '/settings'
+    | '/sprint'
     | '/teams'
     | '/tickets'
     | '/waiting'
@@ -145,6 +165,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/chat'
+    | '/context'
     | '/drafts'
     | '/inbox'
     | '/memory'
@@ -152,6 +173,7 @@ export interface FileRouteTypes {
     | '/planning'
     | '/report'
     | '/settings'
+    | '/sprint'
     | '/teams'
     | '/tickets'
     | '/waiting'
@@ -159,6 +181,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/chat'
+    | '/context'
     | '/drafts'
     | '/inbox'
     | '/memory'
@@ -166,6 +189,7 @@ export interface FileRouteTypes {
     | '/planning'
     | '/report'
     | '/settings'
+    | '/sprint'
     | '/teams'
     | '/tickets'
     | '/waiting'
@@ -174,6 +198,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ChatRoute: typeof ChatRoute
+  ContextRoute: typeof ContextRoute
   DraftsRoute: typeof DraftsRoute
   InboxRoute: typeof InboxRoute
   MemoryRoute: typeof MemoryRoute
@@ -181,6 +206,7 @@ export interface RootRouteChildren {
   PlanningRoute: typeof PlanningRoute
   ReportRoute: typeof ReportRoute
   SettingsRoute: typeof SettingsRoute
+  SprintRoute: typeof SprintRoute
   TeamsRoute: typeof TeamsRoute
   TicketsRoute: typeof TicketsRoute
   WaitingRoute: typeof WaitingRoute
@@ -200,6 +226,13 @@ declare module '@tanstack/react-router' {
       path: '/chat'
       fullPath: '/chat'
       preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/context': {
+      id: '/context'
+      path: '/context'
+      fullPath: '/context'
+      preLoaderRoute: typeof ContextRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/drafts': {
@@ -251,6 +284,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sprint': {
+      id: '/sprint'
+      path: '/sprint'
+      fullPath: '/sprint'
+      preLoaderRoute: typeof SprintRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/teams': {
       id: '/teams'
       path: '/teams'
@@ -278,6 +318,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChatRoute: ChatRoute,
+  ContextRoute: ContextRoute,
   DraftsRoute: DraftsRoute,
   InboxRoute: InboxRoute,
   MemoryRoute: MemoryRoute,
@@ -285,6 +326,7 @@ const rootRouteChildren: RootRouteChildren = {
   PlanningRoute: PlanningRoute,
   ReportRoute: ReportRoute,
   SettingsRoute: SettingsRoute,
+  SprintRoute: SprintRoute,
   TeamsRoute: TeamsRoute,
   TicketsRoute: TicketsRoute,
   WaitingRoute: WaitingRoute,

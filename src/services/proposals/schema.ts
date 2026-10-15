@@ -17,6 +17,10 @@ export const IsoDate = z.string().regex(ISO_DATE_RE, "Use YYYY-MM-DD");
 
 export const ISSUE_TYPES = ["Epic", "Story", "Task", "Sub-task", "Bug"] as const;
 export const DEPENDENCY_KINDS = ["person", "team", "incident", "external"] as const;
+/** How a follow-up on a dependency happened (its timeline, FR-3.1). */
+export const FOLLOWUP_CHANNELS = ["teams", "email", "meeting", "phone", "jira", "other"] as const;
+/** What intake may do to an open dependency (D46). */
+export const WAIT_ACTIONS = ["log_reply", "reschedule", "resolve"] as const;
 export const MEMORY_KINDS = ["rule", "fact", "preference"] as const;
 export const MESSAGE_INTENTS = [
   "chase",
@@ -39,6 +43,16 @@ export const CreateIssue = z.object({
   priority: z.string().nullable().default(null),
   assignee: z.string().nullable().default(null),
   dueDate: IsoDate.nullable().default(null),
+  /** Jira labels sent on create; a small ask carries the home's label (D44). */
+  labels: z
+    .array(z.string().trim().min(1).regex(/^\S+$/, "Labels cannot contain spaces"))
+    .default([]),
+  /** A small ask (FR-10): code set the project, label, assignee and sprint flag. */
+  smallAsk: z.boolean().default(false),
+  /** The contact who asked; stored on the created issue's `issue_meta` (FR-10.4). */
+  requesterPersonId: z.string().min(1).nullable().default(null),
+  /** Move the created issue into the user's active sprint (D44); sub-tasks follow their parent. */
+  joinSprint: z.boolean().default(false),
 });
 
 export const UpdateIssue = z.object({
@@ -90,6 +104,45 @@ export const LinkDependency = z.object({
   nextFollowupAt: IsoDate.nullable().default(null),
 });
 
+/**
+ * "target is blocked by blocker" as a Jira issue link (FR-3.8, D45): the target
+ * waits until the blocker is done. Both are candidates or `$new` refs.
+ */
+export const LinkIssues = z
+  .object({
+    kind: z.literal("link_issues"),
+    target: IssueRef,
+    blocker: IssueRef,
+  })
+  .refine((p) => p.target !== p.blocker, {
+    message: "An issue cannot block itself",
+    path: ["blocker"],
+  });
+
+/**
+ * A change to an open dependency from intake (FR-3.7, D46): log their reply on
+ * its timeline, give it a new date, or resolve it. The id is one of the open
+ * dependencies retrieval offered; `issueKey`, `label` and `channel` are set by
+ * code from that dependency and the input's source, for the card and timeline.
+ */
+export const UpdateDependency = z
+  .object({
+    kind: z.literal("update_dependency"),
+    dependencyId: z.string().min(1),
+    action: z.enum(WAIT_ACTIONS),
+    /** What they said or what changed: the timeline entry. */
+    summary: z.string().trim().min(1).max(2000).nullable().default(null),
+    expectedAt: IsoDate.nullable().default(null),
+    nextFollowupAt: IsoDate.nullable().default(null),
+    channel: z.enum(FOLLOWUP_CHANNELS).default("other"),
+    issueKey: IssueKey.nullable().default(null),
+    label: z.string().nullable().default(null),
+  })
+  .refine((p) => p.action !== "reschedule" || !!p.expectedAt || !!p.nextFollowupAt, {
+    message: "A reschedule needs a new expected date or follow-up date",
+    path: ["expectedAt"],
+  });
+
 export const UpdatePerson = z.object({
   kind: z.literal("update_person"),
   personId: z.string().min(1),
@@ -98,6 +151,8 @@ export const UpdatePerson = z.object({
       title: z.string().trim().min(1).max(200).optional(),
       responsibilities: z.string().trim().min(1).max(2000).optional(),
       profile: ProfileSchema.optional(),
+      /** Last day away, from an out-of-office reply (D47). */
+      awayUntil: IsoDate.optional(),
     })
     .default({}),
   noteAppend: z.string().trim().min(1).nullable().default(null),
@@ -147,6 +202,8 @@ export const ProposalPayloadSchema = z.discriminatedUnion("kind", [
   TransitionIssue,
   MoveToSprint,
   LinkDependency,
+  LinkIssues,
+  UpdateDependency,
   UpdatePerson,
   UpdateTeam,
   Remember,
@@ -154,6 +211,8 @@ export const ProposalPayloadSchema = z.discriminatedUnion("kind", [
   NeedsClarification,
 ]);
 export type ProposalPayload = z.infer<typeof ProposalPayloadSchema>;
+/** A payload as it may be stored: fields added later can be missing (they have defaults). */
+export type StoredProposalPayload = z.input<typeof ProposalPayloadSchema>;
 export type ProposalKind = ProposalPayload["kind"];
 export type PayloadOf<K extends ProposalKind> = Extract<ProposalPayload, { kind: K }>;
 
@@ -164,6 +223,8 @@ export const PROPOSAL_LABELS: Record<ProposalKind, string> = {
   transition_issue: "Move",
   move_to_sprint: "Move to sprint",
   link_dependency: "Track dependency",
+  link_issues: "Blocked by",
+  update_dependency: "Update wait",
   update_person: "Update contact",
   update_team: "Update team",
   remember: "Remember",
@@ -171,11 +232,21 @@ export const PROPOSAL_LABELS: Record<ProposalKind, string> = {
   needs_clarification: "Question",
 };
 
+/**
+ * A stored payload with the defaults of fields added since it was stored, so
+ * proposals made before a schema change still load, edit and execute. A value
+ * that no longer parses is returned as it is; approving it fails validation.
+ */
+export function parsePayload(value: unknown): ProposalPayload {
+  const r = ProposalPayloadSchema.safeParse(value);
+  return r.success ? r.data : (value as ProposalPayload);
+}
+
 /** The payload that runs: the user's edit when there is one, else the proposal as made. */
 export const effectivePayload = (row: {
   readonly payload: unknown;
   readonly editedPayload: unknown;
-}): ProposalPayload => (row.editedPayload ?? row.payload) as ProposalPayload;
+}): ProposalPayload => parsePayload(row.editedPayload ?? row.payload);
 
 export type IssueRefsOptions = {
   /** `"new"` keeps only `$new:n` refs, `"keys"` only real issue keys. */
@@ -203,6 +274,12 @@ export function issueRefs(p: ProposalPayload, opts: IssueRefsOptions = {}): stri
     case "link_dependency":
       values.push(p.target);
       break;
+    case "link_issues":
+      values.push(p.target, p.blocker);
+      break;
+    case "update_dependency":
+      values.push(p.issueKey);
+      break;
     case "draft_message":
       values.push(...p.issueKeys);
       break;
@@ -229,6 +306,8 @@ export function resolveRefs(
     case "transition_issue":
     case "link_dependency":
       return { ...p, target: r(p.target) ?? p.target };
+    case "link_issues":
+      return { ...p, target: r(p.target) ?? p.target, blocker: r(p.blocker) ?? p.blocker };
     case "draft_message":
       return { ...p, issueKeys: p.issueKeys.map((k) => r(k) ?? k) };
     default:
@@ -251,8 +330,12 @@ export function describePayload(p: ProposalPayload): string {
       return `Move ${p.target} to sprint ${p.sprintName}`;
     case "link_dependency":
       return `${p.target} waits on ${p.label}`;
+    case "link_issues":
+      return `${p.target} is blocked by ${p.blocker}`;
+    case "update_dependency":
+      return describeWaitUpdate(p);
     case "update_person":
-      return "Update contact profile";
+      return p.changes.awayUntil ? `Away until ${p.changes.awayUntil}` : "Update contact profile";
     case "update_team":
       return "Update team";
     case "remember":
@@ -261,6 +344,24 @@ export function describePayload(p: ProposalPayload): string {
       return `Draft ${p.intent.replace("_", " ")} (${p.channel})`;
     case "needs_clarification":
       return p.question;
+  }
+}
+
+/** "Resolve: PAY-2 waits on numbers from finance" (D46). */
+export function describeWaitUpdate(p: PayloadOf<"update_dependency">): string {
+  const what = p.label ? `${p.issueKey ? `${p.issueKey} waits on ` : ""}${p.label}` : "a wait";
+  switch (p.action) {
+    case "resolve":
+      return `Resolve: ${what}`;
+    case "log_reply":
+      return `Log reply on ${what}${p.expectedAt ? `, expected ${p.expectedAt}` : ""}`;
+    case "reschedule":
+      return `Reschedule ${what}: ${[
+        p.expectedAt && `expected ${p.expectedAt}`,
+        p.nextFollowupAt && `ask again ${p.nextFollowupAt}`,
+      ]
+        .filter(Boolean)
+        .join(", ")}`;
   }
 }
 

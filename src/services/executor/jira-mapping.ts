@@ -3,9 +3,11 @@
  * (design.md 7.3).
  */
 import { markdownToWiki } from "@/lib/wiki";
+import { balanceBlockMarkers, sanitiseProposalWiki, type WikiSafety } from "@/lib/wiki-safe";
 import type { Deployment } from "@/services/atlassian/deployment";
 import type { EditMeta, JiraWrite } from "@/services/jira";
 import type { FieldIds } from "@/services/jira/fields";
+import { literalWiki, provenanceLineWiki, splitProvenance } from "@/services/small-asks/home";
 import type { JiraAction } from "./actions";
 
 export type MappingContext = {
@@ -49,7 +51,8 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
       return {
         method: "POST",
         path: issuePath(action.issueKey, "/comment"),
-        body: { body: markdownToWiki(action.bodyMarkdown) },
+        // A proposal's body arrives converted and made safe (D51); the user's own is converted here.
+        body: { body: action.bodyWiki ?? markdownToWiki(action.bodyMarkdown) },
       };
     case "transition":
       return {
@@ -126,6 +129,25 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
       };
     case "move_to_sprint":
       return buildMoveToSprint(action.sprintId, [action.issueKey]);
+    case "link_issues": {
+      // On the target, Jira lists the blocker as its `inwardIssue` ("is blocked
+      // by"); posting it as the inward issue is meant to create that. Some
+      // instances store it the other way, so the Executor checks and swaps (D45).
+      const [inward, outward] = action.swapped
+        ? [action.issueKey, action.blockerKey]
+        : [action.blockerKey, action.issueKey];
+      return {
+        method: "POST",
+        path: "issueLink",
+        body: {
+          type: { name: action.linkType },
+          inwardIssue: { key: inward },
+          outwardIssue: { key: outward },
+        },
+      };
+    }
+    case "delete_issue_link":
+      return { method: "DELETE", path: `issueLink/${encodeURIComponent(action.linkId)}` };
   }
 }
 
@@ -137,6 +159,8 @@ export type CreateIssueInput = {
   projectKey: string;
   issueTypeId: string;
   issueTypeName: string;
+  /** Jira's sub-task flag for the type (create metadata); the name decides only when it is unknown. */
+  subtask?: boolean;
   summary: string;
   descriptionMd: string | null;
   /** Resolved keys (no `$new` refs). */
@@ -145,10 +169,14 @@ export type CreateIssueInput = {
   priority: string | null;
   assignee: string | null;
   dueDate: string | null;
+  /** Sent when the create screen has a Labels field (D44). */
+  labels?: readonly string[];
 };
 
 export type CreateContext = {
   deployment?: Deployment;
+  /** Jira users a mention in the description may name (D51); others become text. */
+  knownUsers?: readonly (string | null)[];
   fieldIds: FieldIds;
   /** Create metadata for the project and issue type. */
   fields: readonly {
@@ -159,11 +187,77 @@ export type CreateContext = {
   }[];
 };
 
+/** Values asked for that the create screen has no field for, so they were not sent. */
+export type DroppedFields = {
+  labels: string[];
+  assignee: string | null;
+  description: boolean;
+};
+
 export type CreatePlan = {
   request: JiraWrite;
   /** Epic to link after creation when Jira does not accept it on the create screen. */
   epicAfterCreate: string | null;
+  dropped: DroppedFields;
+  /** What making the description safe changed (D51). */
+  safety: Pick<WikiSafety, "images" | "mentions">;
 };
+
+/**
+ * "The Task create screen in OPS has no Labels or Assignee field, so ..." (D44),
+ * or null when nothing was dropped.
+ */
+export function droppedFieldsWarning(
+  d: DroppedFields,
+  issueType: string,
+  projectKey: string,
+): string | null {
+  const parts: [string, string][] = [];
+  if (d.labels.length) parts.push(["Labels", `the label ${d.labels.join(", ")} was not set`]);
+  if (d.assignee) parts.push(["Assignee", `it was not assigned to ${d.assignee}`]);
+  if (d.description) parts.push(["Description", "the description (with who asked) was not sent"]);
+  if (!parts.length) return null;
+  const names = parts.map(([n]) => n);
+  const fields =
+    names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`;
+  return `The ${issueType} create screen in ${projectKey} has no ${fields} field, so ${parts
+    .map(([, what]) => what)
+    .join(" and ")}.`;
+}
+
+/**
+ * A create's Markdown description as wiki markup. The provenance block's quote
+ * is pasted text (untrusted), so it goes to Jira as a literal `{noformat}` block:
+ * it cannot embed remote images, mention users or run macros (D44). The "Asked
+ * by" line is escaped, since the requester's name may come from a sender. The
+ * model's part before it keeps only balanced `{code}` / `{noformat}` blocks, so
+ * a marker it leaves open cannot pair with the quote's opener and turn the line
+ * literal and the quote live (D51).
+ */
+export function descriptionToWiki(descriptionMd: string): string {
+  const block = splitProvenance(descriptionMd);
+  if (!block) return markdownToWiki(descriptionMd);
+  return [
+    block.base && balanceBlockMarkers(markdownToWiki(block.base)),
+    provenanceLineWiki(block.line),
+    block.quote && literalWiki(block.quote),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * The one conversion of proposal text (a create's description, a comment's body)
+ * to wiki markup: Markdown converted, a small ask's quote kept literal (D44), then
+ * remote images turned into links and unknown mentions into text (D51). Text the
+ * user types in the ticket view does not come through here.
+ */
+export function proposalTextToWiki(
+  markdown: string,
+  knownUsers: readonly (string | null)[],
+): WikiSafety {
+  return sanitiseProposalWiki(descriptionToWiki(markdown), knownUsers);
+}
 
 // Fields Jira fills itself or that the app always sends.
 const IMPLICIT_FIELDS = new Set(["project", "issuetype", "summary", "reporter"]);
@@ -175,16 +269,31 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
     issuetype: { id: input.issueTypeId },
     summary: input.summary,
   };
+  /** Sets a field the create screen has; false when it has none, so the value is dropped. */
   const set = (fieldId: string, value: unknown) => {
-    if (allowed.has(fieldId)) fields[fieldId] = value;
+    if (!allowed.has(fieldId)) return false;
+    fields[fieldId] = value;
+    return true;
   };
-  if (input.descriptionMd) set("description", markdownToWiki(input.descriptionMd));
+  const dropped: DroppedFields = { labels: [], assignee: null, description: false };
+  const safety: CreatePlan["safety"] = { images: [], mentions: [] };
+  if (input.descriptionMd) {
+    const safe = proposalTextToWiki(input.descriptionMd, ctx.knownUsers ?? []);
+    dropped.description = !set("description", safe.wiki);
+    if (!dropped.description)
+      Object.assign(safety, { images: safe.images, mentions: safe.mentions });
+  }
   if (input.priority) set("priority", { name: input.priority });
-  if (input.assignee)
-    set("assignee", ctx.deployment === "cloud" ? { id: input.assignee } : { name: input.assignee });
+  if (
+    input.assignee &&
+    !set("assignee", ctx.deployment === "cloud" ? { id: input.assignee } : { name: input.assignee })
+  )
+    dropped.assignee = input.assignee;
   if (input.dueDate) set("duedate", input.dueDate);
+  const labels = [...new Set(input.labels ?? [])];
+  if (labels.length && !set("labels", labels)) dropped.labels = labels;
 
-  const isSubtask = /sub-?task/i.test(input.issueTypeName);
+  const isSubtask = input.subtask ?? /sub-?task/i.test(input.issueTypeName);
   if (isSubtask) {
     if (!input.parent) throw new MappingError("A sub-task needs a parent issue.");
     fields.parent = { key: input.parent };
@@ -220,5 +329,10 @@ export function buildCreateIssue(input: CreateIssueInput, ctx: CreateContext): C
       `Jira requires ${missing.join(", ")} for a ${input.issueTypeName} in ${input.projectKey}. Create it in Jira, or edit the proposal once these can be set.`,
     );
   }
-  return { request: { method: "POST", path: "issue", body: { fields } }, epicAfterCreate };
+  return {
+    request: { method: "POST", path: "issue", body: { fields } },
+    epicAfterCreate,
+    dropped,
+    safety,
+  };
 }

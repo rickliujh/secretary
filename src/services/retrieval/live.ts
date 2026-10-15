@@ -16,10 +16,16 @@ import {
   type ItemSnapshot,
 } from "@/prompts/classify";
 import { takeWithinBudget } from "@/prompts/common";
+import { parseLinkTypes } from "@/services/blockers/logic";
+import { blockLinks } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
+import { listDependencies } from "@/services/dependencies/queries";
+import { isAway } from "@/services/directory/away";
 import { normalizeUsername } from "@/services/directory/schema";
+import { parseIssueLinks } from "@/services/jira/schemas";
 import { describeCorrection, describeStoredPayload } from "@/services/proposals/schema";
 import { Settings, settingsOrDefault } from "@/services/settings";
+import { defaultSmallAskType, smallAskTypes } from "@/services/small-asks/home";
 import { promptSprints } from "@/services/sprints/calendar";
 import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { BUDGETS, CANDIDATE_LIMIT, Retrieval, type SnapshotRequest } from ".";
@@ -31,6 +37,7 @@ import {
   rankMemories,
   retrievalFtsQuery,
 } from "./ranking";
+import { pickWaits } from "./waits";
 
 const FTS_LIMIT = 15;
 const RECENT_LIMIT = 5;
@@ -155,6 +162,12 @@ const make = Effect.gen(function* () {
             dueDate: row.dueDate,
             updated: row.updated,
             reasons,
+            // Existing "blocked by" links, so the model does not propose them again (D45).
+            blockedBy: blockLinks(
+              parseIssueLinks((row.raw as { issuelinks?: unknown } | null)?.issuelinks),
+            )
+              .filter((l) => l.direction === "blockedBy")
+              .map((l) => l.key),
           })),
         (c) => `${c.key} ${c.summary} ${c.status} ${c.issueType}`,
         BUDGETS.candidates,
@@ -180,6 +193,24 @@ const make = Effect.gen(function* () {
         p.statuses.add(status);
         projects.set(key, p);
       }
+      // The small-asks home is a project to create in even with none of its issues cached (D44).
+      const homeKey = settings.smallAsks.projectKey;
+      if (homeKey && !projects.has(homeKey))
+        projects.set(homeKey, { key: homeKey, issueTypes: new Set(), statuses: new Set() });
+      const homeTypes = homeKey
+        ? (projectMeta[homeKey]?.issueTypes ?? [...(projects.get(homeKey)?.issueTypes ?? [])])
+        : [];
+      // Jira's sub-task flag where sync stored it; the name decides only without it.
+      const homeSubtasks = homeKey ? (projectMeta[homeKey]?.subtaskTypes ?? null) : null;
+      const smallAsks = homeKey
+        ? {
+            projectKey: homeKey,
+            label: settings.smallAsks.label,
+            joinSprint: settings.smallAsks.joinActiveSprint,
+            issueTypes: smallAskTypes(homeTypes, homeSubtasks).sort(),
+            defaultType: defaultSmallAskType([...homeTypes].sort(), homeSubtasks),
+          }
+        : null;
       const priorities = orderPriorities(
         (yield* q((d) =>
           d.all<[string]>(
@@ -228,6 +259,8 @@ const make = Effect.gen(function* () {
           title: p.title,
           team: p.teamId ? (teamName.get(p.teamId) ?? null) : null,
           jiraUsername: p.jiraUsername,
+          // Only while away, so the model does not propose the date again (D47).
+          ...(isAway(p.awayUntil, req.today) ? { awayUntil: p.awayUntil } : {}),
         })),
         (p) => `${p.id} ${p.displayName} ${p.title ?? ""} ${p.team ?? ""}`,
         BUDGETS.people,
@@ -264,6 +297,37 @@ const make = Effect.gen(function* () {
               .all(),
           )
         : [];
+
+      // --- open waits update_dependency may pick (D46) ------------------------
+      const personTeam = new Map(allPeople.map((p) => [p.id, p.teamId]));
+      const waits = pickWaits(
+        (yield* withDb(listDependencies())).map((d) => ({
+          id: d.id,
+          issueKey: d.issueKey,
+          label: d.label,
+          kind: d.kind,
+          externalRef: d.externalRef,
+          status: d.status,
+          ownerPersonId: d.ownerPersonId,
+          ownerTeamId: d.ownerTeamId,
+          owner: d.owner.type === "none" ? null : d.owner.name,
+          ownerPersonTeamId: d.ownerPersonId ? (personTeam.get(d.ownerPersonId) ?? null) : null,
+          ownerAwayUntil: d.ownerAway?.awayUntil ?? null,
+          requestedAt: d.requestedAt,
+          expectedAt: d.expectedAt,
+          nextFollowupAt: d.nextFollowupAt,
+          issueSummary: d.issueSummary,
+        })),
+        {
+          senderPersonId: sender?.id ?? null,
+          senderTeamId: sender?.teamId ?? null,
+          namedPersonIds: req.references.contactIds,
+          candidateKeys: candidates.map((c) => c.key),
+          mentionedKeys: req.references.issueKeys,
+          quote: req.quote,
+          today: req.today,
+        },
+      );
 
       // --- memories and correction examples (D26) ---------------------------
       const memoryRows = yield* q((d) =>
@@ -368,6 +432,7 @@ const make = Effect.gen(function* () {
       return {
         promptVersion: CLASSIFY_PROMPT_VERSION,
         today: req.today,
+        askedOn: req.askedOn ?? req.today,
         me: me ? { username: me } : null,
         outputLanguage: settings.general.outputLanguage,
         source: req.source,
@@ -393,7 +458,13 @@ const make = Effect.gen(function* () {
           .map((p) => {
             const meta = projectMeta[p.key];
             return meta
-              ? { key: p.key, issueTypes: meta.issueTypes, statuses: meta.statuses, complete: true }
+              ? {
+                  key: p.key,
+                  issueTypes: meta.issueTypes,
+                  statuses: meta.statuses,
+                  complete: true,
+                  ...(meta.subtaskTypes ? { subtaskTypes: meta.subtaskTypes } : {}),
+                }
               : {
                   key: p.key,
                   issueTypes: [...p.issueTypes].sort(),
@@ -406,10 +477,14 @@ const make = Effect.gen(function* () {
         teams: teamsOut,
         people: peopleOut,
         dependencies: deps,
+        waits,
         memories: rules,
         examples,
         notes,
         sprints,
+        smallAsks,
+        blockLinkType:
+          parseLinkTypes(yield* withDb(getState(SYNC_KEYS.linkTypes))).blocks?.name ?? null,
       } satisfies ItemSnapshot;
     });
 

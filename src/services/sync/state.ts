@@ -17,10 +17,19 @@ export const SYNC_KEYS = {
   fieldsSynced: "jira.fieldsSynced",
   timeZone: "jira.timeZone",
   username: "jira.username",
-  /** JSON { [projectKey]: { issueTypes: string[], statuses: string[] } } from /project/{key}/statuses. */
+  /**
+   * JSON { [projectKey]: { issueTypes, statuses, subtaskTypes } } from /project/{key}/statuses.
+   * `subtaskTypes` (Jira's sub-task flag) is missing in metadata stored before it was kept.
+   */
   projectMeta: "jira.projectMeta",
   /** JSON SprintState: every known sprint with dates, for the sprint calendar (D23). */
   sprints: "jira.sprints",
+  /** JSON LinkTypes: the instance's "blocks" issue link type, from GET /issueLinkType (D45). */
+  linkTypes: "jira.linkTypes",
+  /** JSON BlockerMap: fresh status of the blockers of the user's open issues, after each sync (D45). */
+  blockers: "jira.blockers",
+  /** JSON UnreadBlockers: blockers Jira answered 404 or 403 for, so they are not read every sync (D45). */
+  blockersUnread: "jira.blockersUnread",
   /** JSON CleanupResult of the last storage cleanup (D34). */
   lastCleanup: "app.lastCleanup",
 } as const;
@@ -54,6 +63,8 @@ const ProjectMetaSchema = z.record(
   z.object({
     issueTypes: z.array(z.string()).default([]),
     statuses: z.array(z.string()).default([]),
+    /** Types Jira flags as sub-tasks; absent in older metadata, where the name decides. */
+    subtaskTypes: z.array(z.string()).optional(),
   }),
 );
 export type ProjectMeta = z.infer<typeof ProjectMetaSchema>;

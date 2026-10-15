@@ -1,6 +1,14 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect, Either, Layer } from "effect";
-import { inboxItems, inboxMessages, intakeItems, memories, people, proposals } from "@/db/schema";
+import {
+  inboxItems,
+  inboxMessages,
+  intakeItems,
+  jiraIssues,
+  memories,
+  people,
+  proposals,
+} from "@/db/schema";
 import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
@@ -9,6 +17,7 @@ import {
   buildItemSchema,
   fromPayload,
   type ItemOutput,
+  type ItemSnapshot,
   type MappedProposal,
   mapItemOutput,
   type ThreadContext,
@@ -30,6 +39,8 @@ import { bindDb, Db } from "@/services/db";
 import { Llm } from "@/services/llm";
 import { describePayload, effectivePayload, issueRefs } from "@/services/proposals/schema";
 import { Retrieval } from "@/services/retrieval";
+import { Settings, settingsOrDefault } from "@/services/settings";
+import { Sync } from "@/services/sync";
 import {
   Intake,
   IntakeError,
@@ -39,7 +50,13 @@ import {
   type TriageResult,
 } from ".";
 import { mergeItemProposals } from "./merge";
-import { cleanInput, extractReferences, needsSegmentation, type References } from "./preprocess";
+import {
+  cleanInput,
+  extractReferences,
+  jiraHost,
+  needsSegmentation,
+  type References,
+} from "./preprocess";
 import { partsOf, splitMessage, UserContentSchema, withLinkedItems } from "./thread";
 
 const UNSURE_QUESTION =
@@ -57,12 +74,17 @@ type ItemRow = typeof intakeItems.$inferSelect;
 type Progress = (message: string) => void;
 
 /** One item to classify in this turn. */
+/** Most tickets missing from the cache read from Jira for one item. */
+const MAX_KEY_READS = 5;
+
 type Job = {
   idx: number;
   quote: string;
   instructions: string[];
   /** Undecided proposals being revised; empty for new input. */
   revising: ProposalRow[];
+  /** The day the item first arrived, for a revision (D44: "Asked ... on" keeps it). */
+  askedOn?: string;
 };
 
 type Classified = {
@@ -85,7 +107,42 @@ const mergeRefs = (a: References, b: References): References => ({
 const make = Effect.gen(function* () {
   const llm = yield* Llm;
   const retrieval = yield* Retrieval;
+  const sync = yield* Sync;
+  const settingsSvc = yield* Settings;
   const { q } = bindDb(yield* Db);
+
+  /**
+   * Keys Jira answered for in this session (found, 404 or 403), so each is read
+   * once (D45); a transient failure is not recorded, so a later item retries it.
+   */
+  const readKeys = new Set<string>();
+  /**
+   * A ticket named in the text that the cache does not hold (outside the sync
+   * scope, such as another team's PLAT-812) is read once from Jira, so it can be
+   * a candidate, for example as a blocker (D45). Pasted text is untrusted and
+   * must not widen the scope, so it is stored out of scope (`candidate`): it is
+   * offered by its key and nowhere else. A failure only leaves it out.
+   */
+  const readMissingKeys = (keys: readonly string[]) =>
+    Effect.gen(function* () {
+      const fresh = [...new Set(keys)].filter((k) => !readKeys.has(k));
+      if (fresh.length === 0) return;
+      const cached = new Set(
+        (yield* q((d) =>
+          d
+            .select({ key: jiraIssues.key })
+            .from(jiraIssues)
+            .where(and(inArray(jiraIssues.key, fresh), eq(jiraIssues.stale, false)))
+            .all(),
+        )).map((r) => r.key),
+      );
+      for (const key of fresh.filter((k) => !cached.has(k)).slice(0, MAX_KEY_READS)) {
+        const r = yield* Effect.either(sync.refreshIssue(key, { candidate: true }));
+        const status = Either.isLeft(r) && r.left._tag === "JiraError" ? r.left.status : undefined;
+        if (Either.isRight(r) || status === 404 || status === 403) readKeys.add(key);
+        if (Either.isLeft(r)) logger.info(`${key} named in the input was not read`, r.left.message);
+      }
+    });
 
   const contactsQuery = q((d) =>
     d
@@ -235,11 +292,12 @@ const make = Effect.gen(function* () {
         job.instructions.length || pending.length || ctx.thread.decided.length || others.length
           ? { instructions: job.instructions, decided: ctx.thread.decided, pending, others }
           : null;
+      const site = { jiraHost: jiraHost((yield* settingsOrDefault(settingsSvc)).jira.baseUrl) };
       const references = [
-        extractReferences(job.quote, contacts),
-        extractReferences(job.instructions.join("\n"), contacts),
+        extractReferences(job.quote, contacts, site),
+        extractReferences(job.instructions.join("\n"), contacts, site),
         // Tickets named anywhere earlier in the thread stay candidates for this item.
-        ...others.map((o) => extractReferences(o.quote, contacts)),
+        ...others.map((o) => extractReferences(o.quote, contacts, site)),
         {
           ...noRefs,
           issueKeys: [
@@ -248,12 +306,14 @@ const make = Effect.gen(function* () {
           ],
         },
       ].reduce(mergeRefs);
+      yield* readMissingKeys(references.issueKeys);
       const snapshot = yield* retrieval.snapshot({
         quote: job.quote,
         source: ctx.source,
         senderPersonId: ctx.senderPersonId,
         references,
         today: ctx.today,
+        ...(job.askedOn ? { askedOn: job.askedOn } : {}),
         thread,
       });
       const result = yield* Effect.either(
@@ -309,7 +369,7 @@ const make = Effect.gen(function* () {
         (lowConfidence && value.proposals.length === 0 ? UNSURE_QUESTION : null);
       return {
         itemId,
-        mapped: mapItemOutput(value, job.quote),
+        mapped: mapItemOutput(value, job.quote, snapshot),
         question,
         summary: value.summary,
       } satisfies Classified;
@@ -566,11 +626,13 @@ const make = Effect.gen(function* () {
             const p = effectivePayload(r);
             return p.kind === "create_issue" && used.has(p.ref);
           });
+        const snapshot = thread.current.get(idx)?.snapshot as Partial<ItemSnapshot> | null;
         return {
           idx,
           quote: thread.current.get(idx)?.quote ?? "",
           instructions: thread.instructions,
           revising: [...borrowed, ...own],
+          askedOn: snapshot?.askedOn ?? snapshot?.today,
         };
       });
       const results = yield* classifyAll(
@@ -670,8 +732,8 @@ const make = Effect.gen(function* () {
         kind: "read_only",
         message:
           origin === "planner"
-            ? "This thread holds a sprint plan. Change the plan on the Planning page."
-            : "This thread holds suggested rules. Approve or reject them here, or edit rules on the Memory page.",
+            ? "This thread holds a sprint plan. Change the plan in Sprint > Plan."
+            : "This thread holds suggested rules. Approve or reject them here, or edit rules in Context > Memory.",
       }),
     );
   };

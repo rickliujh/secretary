@@ -53,6 +53,24 @@ export type CallSettings = {
 };
 
 /**
+ * The `reasoning_effort` value an OpenAI-compatible server gets for the
+ * provider's effort setting (D52), or undefined to send nothing. The field takes
+ * low, medium, high and, on newer models, xhigh; the setting's "max" has no
+ * equivalent there, so it sends the highest value the field has.
+ */
+export function reasoningEffort(effort: Provider["effort"]): string | undefined {
+  switch (effort) {
+    case "default":
+      // Compatible servers may reject the field, so the default sends nothing.
+      return undefined;
+    case "max":
+      return "xhigh";
+    default:
+      return effort;
+  }
+}
+
+/**
  * Sampling and provider options. Anthropic models reject temperature, so
  * consistency there comes from schemas and candidates, not sampling
  * (design.md 7.0 rule 6).
@@ -64,8 +82,10 @@ export function callSettings(provider: Provider): CallSettings {
     if (provider.effort !== "default") anthropic.effort = provider.effort;
     return { providerOptions: { anthropic } };
   }
+  const effort = reasoningEffort(provider.effort);
   return {
     ...(provider.sendTemperature ? { temperature: 0 } : {}),
     ...(provider.seed !== undefined ? { seed: provider.seed } : {}),
+    ...(effort ? { providerOptions: { openaiCompatible: { reasoningEffort: effort } } } : {}),
   };
 }

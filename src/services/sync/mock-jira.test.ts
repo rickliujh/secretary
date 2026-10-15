@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { inboxItems, jiraComments, jiraIssues, proposals } from "@/db/schema";
 import { loadDashboardInputs } from "@/services/dashboard/data";
-import { buildDashboard } from "@/services/dashboard/sections";
+import { rankWork } from "@/services/dashboard/sections";
 import { query } from "@/services/db";
 import * as deps from "@/services/dependencies/queries";
 import { Executor } from "@/services/executor";
@@ -254,7 +254,7 @@ describe("dashboard over 2,000 synced issues", () => {
           yield* (yield* Sync).run();
           const started = performance.now();
           const inputs = yield* loadDashboardInputs(new Date("2026-09-24T09:00:00Z"));
-          const d = buildDashboard(inputs, DEFAULT_WEIGHTS, "2026-09-24", "2026-09-24T09:00:00Z");
+          const d = rankWork(inputs, DEFAULT_WEIGHTS, "2026-09-24", "2026-09-24T09:00:00Z");
           return {
             ms: performance.now() - started,
             issues: inputs.issues.length,

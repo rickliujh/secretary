@@ -8,9 +8,17 @@ import { DEFAULT_WEIGHTS } from "@/services/settings/schema";
 import { promptOf } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
-import { dashboardWithBrief, generateBrief } from "./brief";
-import { loadDashboardInputs, setOverride, setPinned, snooze } from "./data";
-import { buildDashboard } from "./sections";
+import { generateBrief, todayWithBrief } from "./brief";
+import {
+  loadDashboardInputs,
+  loadEpicHealth,
+  loadToday,
+  setOverride,
+  setPinned,
+  snooze,
+} from "./data";
+import { rankWork } from "./sections";
+import type { WaitRow } from "./today";
 
 // Wednesday 24 September 2026, mid-morning.
 const NOW = new Date("2026-09-24T09:00:00.000Z");
@@ -37,45 +45,48 @@ const brief = {
   chase: "- Platform about INC0012345 for PAY-2.",
 };
 
-describe("dashboard data", () => {
-  test("loads the cache into sections: focus, due soon, waiting, epic health", async () => {
+describe("Today from the local cache", () => {
+  test("loads the cache into the three lists: sprint work, due soon, waits", async () => {
     const { layer } = intakeTestLayer({});
-    const d = await Effect.runPromise(
-      Effect.provide(
-        Effect.gen(function* () {
-          yield* seedWork;
-          return buildDashboard(
-            yield* loadDashboardInputs(NOW),
-            DEFAULT_WEIGHTS,
-            TODAY,
-            NOW.toISOString(),
-          );
-        }),
-        layer,
-      ),
+    const t = await Effect.runPromise(
+      Effect.provide(Effect.zipRight(seedWork, loadToday(NOW)), layer),
     );
-    // PAY-2 is in the active sprint "Payments 15"; PAY-4 is not, so it leaves Top
-    // focus (D29) but still shows as due soon.
-    expect(d.focus).toEqual({ mode: "sprint", sprints: ["Payments 15"], endsOn: "2026-09-28" });
-    expect(d.topFocus.map((t) => t.key)).toEqual(["PAY-2"]);
-    expect(d.dueSoon.map((x) => [x.key, x.daysLeft])).toEqual([["PAY-4", 2]]);
-    expect(d.iAmWaitingOn.map((x) => [x.externalRef, x.overdueDays])).toEqual([["INC0012345", 3]]);
-    const pay2 = d.topFocus.find((t) => t.key === "PAY-2");
-    // PAY-2 has a "blocked by OPS-7" link in the fixtures and a Blocked status.
-    expect(pay2?.contributions.map((c) => c.reason)).toEqual(
+    // PAY-2 is in the active sprint "Payments 15"; PAY-4 is not, so it is not in
+    // Top focus (D29) but joins Sprint work as due soon.
+    expect(t.focus).toEqual({ mode: "sprint", sprints: ["Payments 15"], endsOn: "2026-09-28" });
+    expect(t.facts.topFocus.map((x) => x.key)).toEqual(["PAY-2"]);
+    expect(t.facts.dueSoon.map((x) => [x.key, x.daysLeft])).toEqual([["PAY-4", 2]]);
+    const waits = t.theirMove.filter((r): r is WaitRow => r.kind === "wait");
+    expect(waits.map((w) => [w.dependency.externalRef, w.state, w.reason])).toEqual([
+      ["INC0012345", "overdue", "3 days overdue"],
+    ]);
+    // PAY-2 (Ana's, with the wait) has a "blocked by OPS-7" link: only the user's
+    // own blocked tickets are Their move, so it stays Sprint work, blocked and at risk.
+    expect(t.theirMove.map((r) => r.kind)).toEqual(["wait"]);
+    expect(t.facts.topFocus[0]?.contributions.map((c) => c.reason)).toEqual(
       expect.arrayContaining([
         "Blocked by OPS-7",
         "Waiting on Platform fix (INC0012345), 3 days overdue",
       ]),
     );
-    expect(d.epicHealth[0]).toMatchObject({
-      key: "PAY-1",
-      total: 2,
-      done: 0,
-      inProgress: 1,
-      todo: 1,
-      blocked: 1,
-    });
+    expect(
+      t.sprintWork.map((r) => [r.issue.key, r.inFocus, r.daysLeft, r.risks[0] ?? null]),
+    ).toEqual([
+      ["PAY-2", true, null, "Blocked by OPS-7"],
+      ["PAY-4", false, 2, "Due in 2 days and not started"],
+    ]);
+    // No small-asks home in this layer.
+    expect(t.smallAsks.home).toBe(false);
+  });
+
+  test("epic health loads on its own for Sprint > Epics (D50)", async () => {
+    const { layer } = intakeTestLayer({});
+    const epics = await Effect.runPromise(
+      Effect.provide(Effect.zipRight(seedWork, loadEpicHealth(NOW)), layer),
+    );
+    expect(epics).toEqual([
+      expect.objectContaining({ key: "PAY-1", total: 2, done: 0, inProgress: 1, todo: 1 }),
+    ]);
   });
 
   test("pin, snooze and override change the local ranking only", async () => {
@@ -86,7 +97,7 @@ describe("dashboard data", () => {
           yield* seedWork;
           // Without sprints, so the whole scope is ranked and the local controls show.
           const rank = Effect.map(loadDashboardInputs(NOW), (i) =>
-            buildDashboard({ ...i, sprints: [] }, DEFAULT_WEIGHTS, TODAY, NOW.toISOString()),
+            rankWork({ ...i, sprints: [] }, DEFAULT_WEIGHTS, TODAY, NOW.toISOString()),
           );
           const before = (yield* rank).topFocus.map((t) => t.key);
           yield* setOverride("PAY-4", 20);
@@ -119,14 +130,14 @@ describe("daily brief", () => {
         Effect.gen(function* () {
           yield* seedWork;
           const generated = yield* generateBrief(NOW);
-          const after = yield* dashboardWithBrief(NOW);
+          const after = yield* todayWithBrief(NOW);
           yield* query((d) =>
             d
               .update(jiraIssues)
               .set({ updated: "2026-09-24T10:00:00.000Z" })
               .where(eq(jiraIssues.key, "PAY-4")),
           );
-          const changed = yield* dashboardWithBrief(new Date("2026-09-24T11:00:00.000Z"));
+          const changed = yield* todayWithBrief(new Date("2026-09-24T11:00:00.000Z"));
           const calls = yield* query((d) => d.select().from(llmCalls).all());
           return { generated, after, changed, calls };
         }),

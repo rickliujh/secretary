@@ -1,8 +1,8 @@
 /**
- * Facts for the dashboard's suggested prompts (D42), computed in code: what
- * waits on a decision from the user, and what the coming week holds.
+ * Facts for the chat's suggested prompts (D42), computed in code: what waits
+ * on a decision from the user, and what the coming week holds.
  */
-import { daysBetween } from "@/lib/dates";
+import { daysBetween, localDateOf } from "@/lib/dates";
 
 export type PendingProposal = {
   inboxItemId: string;
@@ -37,7 +37,7 @@ export function pendingDecisions(
     const entry = byThread.get(p.inboxItemId) ?? {
       thread: p.threadSummary ?? "Inbox item",
       inboxItemId: p.inboxItemId,
-      waitingDays: Math.max(0, daysBetween(p.createdAt.slice(0, 10), today)),
+      waitingDays: Math.max(0, daysBetween(localDateOf(p.createdAt), today)),
       approve: [],
       questions: [],
     };
@@ -50,7 +50,7 @@ export function pendingDecisions(
     unsentDrafts: drafts.map((d) => ({
       to: d.to,
       about: d.issueKeys,
-      days: Math.max(0, daysBetween(d.updatedAt.slice(0, 10), today)),
+      days: Math.max(0, daysBetween(localDateOf(d.updatedAt), today)),
     })),
   };
 }
@@ -109,7 +109,7 @@ export function weekAhead(w: WeekInputs) {
     events.push({
       date: w.sprint.end,
       daysAway: sprintEnd,
-      what: `Sprint ${w.sprint.name} ends: ${w.sprint.done} of ${w.sprint.total} points done; plan the next sprint on the Planning page`,
+      what: `Sprint ${w.sprint.name} ends: ${w.sprint.done} of ${w.sprint.total} points done; plan the next sprint in Sprint > Plan`,
     });
   events.sort((a, b) => a.date.localeCompare(b.date) || a.what.localeCompare(b.what));
   return {
@@ -119,4 +119,46 @@ export function weekAhead(w: WeekInputs) {
     atRisk: w.atRisk.slice(0, 5),
     sprint: w.sprint,
   };
+}
+
+/** The user's open small asks for `pending_decisions` (D49): who asked, age, due date and where each stands. */
+export function smallAskFacts(
+  asks: readonly {
+    issue: {
+      key: string;
+      summary: string;
+      created: string;
+      dueDate: string | null;
+      requester: { name: string } | null;
+    };
+    state: string;
+  }[],
+  today: string,
+) {
+  return asks.map(({ issue, state }) => ({
+    key: issue.key,
+    summary: issue.summary,
+    askedBy: issue.requester?.name ?? null,
+    // The local date, as Today's "asked 3 days ago" counts it.
+    ageDays: Math.max(0, daysBetween(localDateOf(issue.created), today)),
+    due: issue.dueDate,
+    state,
+  }));
+}
+
+/** The user's tickets blocked by open tickets, for `waiting_on`. */
+export function blockedFacts(
+  rows: readonly {
+    issue: { key: string; summary: string; status: string };
+    blockedBy: string[];
+    asleep: boolean;
+  }[],
+) {
+  return rows.map((r) => ({
+    key: r.issue.key,
+    summary: r.issue.summary,
+    status: r.issue.status,
+    blockedBy: r.blockedBy,
+    ...(r.asleep ? { note: "snoozed" } : {}),
+  }));
 }

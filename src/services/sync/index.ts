@@ -40,8 +40,20 @@ export interface SyncShape {
   readonly discoverFields: Effect.Effect<FieldInfo, JiraError | DbError>;
   /** Last discovered and effective field ids without calling Jira. */
   readonly fieldInfo: Effect.Effect<FieldInfo, DbError>;
-  /** Re-fetches one issue (with comments) and stores Jira's version. Used after writes. */
-  readonly refreshIssue: (key: string) => Effect.Effect<void, JiraError | DbError>;
+  /**
+   * Re-fetches one issue (with comments) and stores Jira's version. Used after
+   * writes. A cached issue keeps its scope flag (`stale`): one read does not say
+   * whether the sync scope holds it. A new issue is in scope, unless `candidate`
+   * is set: an issue read only because pasted text named it (D45) is stored out
+   * of scope, so it is a candidate by its key and nothing else (no project
+   * lists, tickets tree, ranking or blocker checks), and cleanup removes it.
+   * When the issue blocks one of the user's open issues, its blocker state
+   * (`jira.blockers`) is updated and those issues get the wake-up check.
+   */
+  readonly refreshIssue: (
+    key: string,
+    opts?: { candidate?: boolean },
+  ) => Effect.Effect<void, JiraError | DbError>;
 }
 
 export class Sync extends Context.Tag("Sync")<Sync, SyncShape>() {}

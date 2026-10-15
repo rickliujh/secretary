@@ -1,5 +1,5 @@
 /**
- * Opening the chat with a question (D42): the dashboard's suggested prompts
+ * Opening the chat with a question (D42): the suggested prompts
  * navigate to `/chat?c=<new id>&ask=<message>` and the thread sends it once.
  */
 import { newId } from "@/lib/ids";

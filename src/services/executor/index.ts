@@ -20,6 +20,8 @@ export type ExecutionResult = {
 
 export type ProposalResult = {
   message: string;
+  /** Something that did not happen though the proposal ran, e.g. a failed sprint move (D44). */
+  warning?: string;
   issueKey?: string;
   dependencyId?: string;
   memoryId?: string;

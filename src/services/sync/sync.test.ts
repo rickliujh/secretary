@@ -316,8 +316,18 @@ describe("project metadata", () => {
     expect(meta.OPS).toEqual({
       issueTypes: ["Sub-task", "Task"],
       statuses: ["Done", "In Progress", "To Do"],
+      // Jira's sub-task flag is kept, so a sub-task type is known whatever its name.
+      subtaskTypes: ["Sub-task"],
     });
     expect(Object.keys(meta).sort()).toEqual(["OPS", "PAY"]);
+  });
+
+  test("metadata stored before the sub-task flag was kept still parses", async () => {
+    const { parseProjectMeta } = await import("./state");
+    const old = parseProjectMeta(
+      JSON.stringify({ OPS: { issueTypes: ["Sub-task", "Task"], statuses: ["Done"] } }),
+    );
+    expect(old.OPS).toEqual({ issueTypes: ["Sub-task", "Task"], statuses: ["Done"] });
   });
 });
 

@@ -11,7 +11,7 @@ const PREP_STALE_MS = 10 * 60_000;
 
 /**
  * Suggests planning when the sprint is about to end (design.md D30). Quiet on
- * any error: the Planning page explains those.
+ * any error: Sprint > Plan explains those.
  */
 export function PlanCard() {
   const prep = usePlanPrep({ staleTime: PREP_STALE_MS });
@@ -28,7 +28,7 @@ export function PlanCard() {
         </CardDescription>
         <CardAction>
           <Button asChild size="sm">
-            <Link to="/planning">
+            <Link to="/sprint" search={{ tab: "plan" }}>
               <CalendarRange /> Plan
             </Link>
           </Button>

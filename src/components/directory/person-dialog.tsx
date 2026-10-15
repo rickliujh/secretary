@@ -57,6 +57,7 @@ const Form = z.object({
   preferredChannel: z.string(),
   language: z.string().max(50),
   notesMd: z.string(),
+  awayUntil: z.string(),
 });
 type FormValues = z.infer<typeof Form>;
 
@@ -76,6 +77,7 @@ function toForm(p?: Partial<Person>): FormValues {
     preferredChannel: profile.preferredChannel ?? UNSET,
     language: profile.language ?? "",
     notesMd: p?.notesMd ?? "",
+    awayUntil: p?.awayUntil ?? "",
   };
 }
 
@@ -89,6 +91,7 @@ function toInput(v: FormValues): PersonInput {
     teamId: v.teamId === UNSET ? null : v.teamId,
     responsibilities: v.responsibilities,
     notesMd: v.notesMd,
+    awayUntil: v.awayUntil,
     profile: {
       tone: opt(v.tone),
       formality: opt(v.formality) as (typeof FORMALITY)[number] | undefined,
@@ -221,6 +224,14 @@ export function PersonDialog({
                 label="Team"
                 options={(teams.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
               />
+              <Field>
+                <FieldLabel htmlFor="person-away">Away until</FieldLabel>
+                <Input id="person-away" type="date" {...form.register("awayUntil")} />
+                <FieldDescription>
+                  Their last day away. What you wait on from them sleeps until the next working day,
+                  then is due for a follow-up.
+                </FieldDescription>
+              </Field>
             </div>
             <Field>
               <FieldLabel htmlFor="person-resp">Responsibilities</FieldLabel>

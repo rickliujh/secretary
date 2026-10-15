@@ -3,6 +3,7 @@ import { Clock, Effect, Layer, Option, SubscriptionRef } from "effect";
 import { jiraIssues } from "@/db/schema";
 import { nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
+import { type BlockerState, type LinkTypes, pickBlocksType } from "@/services/blockers/logic";
 import { bindDb, Db, type DbError } from "@/services/db";
 import { JiraClient, type JiraError, type RawIssue, type SearchResult } from "@/services/jira";
 import { discoverFieldIds, effectiveFieldIds, type FieldIds } from "@/services/jira/fields";
@@ -17,6 +18,7 @@ import {
   type SyncResult,
   type SyncStatus,
 } from ".";
+import { refreshBlocker, syncBlockers } from "./blockers";
 import { buildScopeJql, chunk, withUpdatedSince } from "./jql";
 import { parentEpicsToRead } from "./parent-epics";
 import {
@@ -57,6 +59,8 @@ const make = Effect.gen(function* () {
   const jira = yield* JiraClient;
   const { q, withDb } = bindDb(yield* Db);
   const lock = yield* Effect.makeSemaphore(1);
+  /** The blocker step and a refresh's blocker update write the same state (D45). */
+  const blockerLock = yield* Effect.makeSemaphore(1);
   const status = yield* SubscriptionRef.make(initialStatus);
 
   const patch = (p: Partial<SyncStatus>) => SubscriptionRef.update(status, (s) => ({ ...s, ...p }));
@@ -111,6 +115,8 @@ const make = Effect.gen(function* () {
     /** Sprints seen on synced issues, by id, and the projects on each board. */
     sprints: Map<number, SprintInfo>;
     boardProjects: Map<number, Set<string>>;
+    /** State of every issue this run fetched, so the blocker step need not read them again. */
+    returned: Map<string, BlockerState>;
   };
 
   /** Pages through one JQL query, storing issues and comments. Returns max `updated`. */
@@ -146,6 +152,11 @@ const make = Effect.gen(function* () {
                 new Set([...(ctx.boardProjects.get(sprint.boardId) ?? []), m.issue.projectKey]),
               );
           }
+          ctx.returned.set(m.issue.key, {
+            status: m.issue.status,
+            statusCategory: m.issue.statusCategory,
+            resolvedAt: m.issue.resolved ?? null,
+          });
           comments.push(...(m.commentsComplete ? m.comments : yield* allComments(m.issue.key)));
           if (!maxUpdated || m.issue.updated > maxUpdated) maxUpdated = m.issue.updated;
         }
@@ -304,6 +315,7 @@ const make = Effect.gen(function* () {
         syncedAt: nowIso(),
         sprints: new Map(),
         boardProjects: new Map(),
+        returned: new Map(),
       };
 
       const main = yield* syncQuery(
@@ -370,13 +382,28 @@ const make = Effect.gen(function* () {
       )).map((r) => r.key);
       const meta = parseProjectMeta(yield* withDb(getState(SYNC_KEYS.projectMeta)));
       let metaChanged = false;
-      for (const key of projectKeys.slice(0, MAX_PROJECTS_WITH_META)) {
+      // The small-asks home may hold none of the synced issues yet (D44).
+      const home = settings.smallAsks.projectKey;
+      const metaKeys = [
+        ...(home ? [home] : []),
+        ...projectKeys.filter((k) => k !== home).slice(0, MAX_PROJECTS_WITH_META),
+      ];
+      for (const key of metaKeys) {
         if (!full && meta[key]) continue;
         const types = yield* jira.projectStatuses(key).pipe(Effect.option);
         if (types._tag === "None") continue;
         meta[key] = {
           issueTypes: [...new Set(types.value.map((t) => t.name))].sort(),
           statuses: [...new Set(types.value.flatMap((t) => t.statuses.map((x) => x.name)))].sort(),
+          // Jira's flag, so a sub-task type with another name is known as one (D44).
+          // A response without the flag leaves it unknown; the name decides then.
+          ...(types.value.some((t) => t.subtask !== undefined)
+            ? {
+                subtaskTypes: [
+                  ...new Set(types.value.filter((t) => t.subtask).map((t) => t.name)),
+                ].sort(),
+              }
+            : {}),
         };
         metaChanged = true;
       }
@@ -384,6 +411,18 @@ const make = Effect.gen(function* () {
 
       yield* patch({ phase: "Reading sprints" });
       yield* syncSprints(ctx, full);
+
+      // The "blocks" link type, for proposing "blocked by" links (D45).
+      if (full || !(yield* withDb(getState(SYNC_KEYS.linkTypes)))) {
+        const types = yield* jira.issueLinkTypes.pipe(Effect.option);
+        if (Option.isSome(types))
+          yield* withDb(
+            setState(
+              SYNC_KEYS.linkTypes,
+              JSON.stringify({ blocks: pickBlocksType(types.value) } satisfies LinkTypes),
+            ),
+          );
+      }
 
       // Tracked-epic flags follow settings even for issues not updated in this run.
       yield* q((d) =>
@@ -403,6 +442,25 @@ const make = Effect.gen(function* () {
         );
         staleMarked = stale.length;
       }
+
+      // Blockers outside this run (or the scope) are read fresh; woken issues are marked (D45).
+      yield* patch({ phase: "Checking blockers" });
+      const blockers = yield* syncBlockers({
+        me: me.id,
+        returned: ctx.returned,
+        at: nowIso(),
+      }).pipe(
+        withDb,
+        Effect.provideService(JiraClient, jira),
+        blockerLock.withPermits(1),
+        Effect.catchAll((e) =>
+          Effect.sync(() => {
+            logger.warn("Blocker check failed", e.message);
+            return null;
+          }),
+        ),
+      );
+      if (blockers?.woke.length) logger.info(`Unblocked: ${blockers.woke.join(", ")}`);
 
       const previous = yield* withDb(getState(SYNC_KEYS.watermark));
       if (maxUpdated && (!previous || maxUpdated > previous))
@@ -437,7 +495,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const refreshIssue = (key: string) =>
+  const refreshIssue = (key: string, opts: { candidate?: boolean } = {}) =>
     Effect.gen(function* () {
       const settings = yield* settingsOrDefault(settingsSvc);
       const { effective: fieldIds } = yield* withDb(fieldInfo);
@@ -450,9 +508,40 @@ const make = Effect.gen(function* () {
         trackedEpics: new Set(settings.jira.trackedEpics),
         syncedAt: nowIso(),
       });
-      const comments = m.commentsComplete ? m.comments : yield* allComments(key);
-      yield* withDb(upsertIssues([m.issue]));
-      yield* withDb(replaceComments([key], comments));
+      // One read says nothing about the sync scope: a cached issue keeps its flag,
+      // and an issue read only as a candidate stays out of scope (D45 review).
+      const cached = yield* q((d) =>
+        d
+          .select({ stale: jiraIssues.stale })
+          .from(jiraIssues)
+          .where(eq(jiraIssues.key, m.issue.key))
+          .get(),
+      );
+      const issue = { ...m.issue, stale: cached ? cached.stale : !!opts.candidate };
+      const comments = m.commentsComplete ? m.comments : yield* allComments(m.issue.key);
+      yield* withDb(upsertIssues([issue]));
+      yield* withDb(replaceComments([m.issue.key], comments));
+      // A blocker closed (or reopened) from the app shows at once (D45 review).
+      yield* blockerLock
+        .withPermits(1)(
+          withDb(
+            refreshBlocker({
+              key,
+              state: {
+                status: issue.status,
+                statusCategory: issue.statusCategory,
+                resolvedAt: issue.resolved ?? null,
+              },
+              at: nowIso(),
+            }),
+          ),
+        )
+        .pipe(
+          // The issue itself is stored; the next sync repairs the blocker state.
+          Effect.catchAll((e) =>
+            Effect.sync(() => logger.warn(`Blocker update for ${key} failed`, e.message)),
+          ),
+        );
     });
 
   return Sync.of({

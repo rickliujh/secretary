@@ -649,6 +649,537 @@ Built
 - Live eval: two new cases (a cancellation with its reason, a later paste referring
   to an earlier ticket) pass with GLM 5.3 Flash.
 
+## Phase 11: Small-asks home (2026-10-03)
+
+- Settings > Jira > Small asks: a project (from your synced projects), a label
+  (default `small-ask`) and "add new small asks to the active sprint" (default on).
+  Saving reads the project's create metadata and lists the types a small ask can
+  take, required fields the app cannot fill, and types without a Labels field
+  (design.md D44). Sync now reads the home project's types even when none of its
+  tickets are cached.
+- Intake (prompt version 7): with a home set, every new ticket is marked as a small
+  ask or planned work. For a small ask, code sets the project (the home, or the
+  story's project for a sub-task), the label, you as assignee and the sprint flag;
+  the model writes the summary, description and due date and picks the type (Task by
+  default) and epic. Who asked is the sender, else a contact the model picks; the
+  description ends with "Asked by <name> via <source> on <date>" and the quoted text.
+  Without a home nothing changes.
+- On Track the Executor creates the ticket with its label, remembers who asked
+  (`issue_meta.requester_person_id`, migration 0011) and moves it into the active
+  sprint that holds most of your open work, preferring a board that shows the
+  ticket's project. A failed move, no such sprint, or a create screen without Labels
+  leave the ticket created with a warning on the card. Sub-tasks are not moved.
+- Inbox: a small ask and the proposals that hang on it (a dependency, a comment) show
+  as one row with type and epic pickers, what it waits on, and Track, which approves
+  them in order; a change in the row is saved as an edit you can learn from. The
+  cards are under Details. While no home is set, the new-thread page points to the
+  setting once.
+- Proposals stored before this keep working: new fields have defaults and stored
+  payloads are read through the schema, so they load, edit and execute as before.
+  The edit dialog gains Labels and Asked by.
+- The user's active sprint is now chosen the same way everywhere (planner, sprint
+  points, small asks): most open issues, finished ones break ties.
+- Tests: the FR-10 acceptance case runs end to end against the mock Jira (one row,
+  one click, ticket in the home with label, assignee, sprint, due date and
+  requester); the mock Jira stores labels. Four eval cases cover a small ask, a
+  sub-task under a candidate story, planned work and the requester; the live eval
+  sets the home per case and was not run.
+- Not verified in the running app: the Settings section, the Track row and the hint
+  were checked by typecheck and lint only, not seen on screen.
+
+Review fixes
+- Track runs only what the row shows: a row takes a dependency (and, from Phase 12, a
+  blocker link) on the new ticket, one line each on its face; a comment, move, update
+  or draft on the new ticket stays a card under the row, as does anything that also
+  points at another new ticket not created yet.
+- Once Jira has created the ticket, a later failure (the epic link, remembering who
+  asked, the action log, finding or joining the sprint) is a warning on an executed
+  card, so Retry cannot create a second ticket.
+- A create screen without Assignee or Description now warns like one without Labels,
+  and Settings lists such types, plus required fields the app fills only when the
+  model gives a value (due date, priority, parent, Epic Link): "needed on every ask; a
+  small ask without one will fail".
+- Sub-task types are recognised by Jira's flag, stored per project at sync, not by
+  name; metadata synced before still works by name until the next full sync.
+- The quoted words go to Jira inside `{noformat}`, so pasted `!image!`, `[~user]`,
+  `{macro}` or link markup shows as text. A made-up "Asked by" line from the model is
+  removed wherever it is, and a reply in the thread keeps the date the ask arrived.
+- A proposal card shows a stored payload that no longer parses instead of failing.
+
+## Phase 14: Quick capture and tray (2026-10-03)
+
+Why: filing a small ask meant switching to the app and finding the Inbox
+(requirements FR-11, design.md D48).
+
+Built
+- Capture: the Inbox composer in a dialog over any page, opened from Ctrl+K
+  ("Capture", the first action), the global shortcut, the tray menu and
+  `secretary --capture`. Enter files a new thread and closes the dialog; triage runs
+  in the background and a toast with "Open" follows. A window that capture had to
+  show (hidden or minimised) goes back the same way, also when the dialog is left
+  without sending.
+- One notification when a capture finishes with proposals or questions while the
+  window is out of sight; a failed triage while hidden says so too.
+- Tray icon with Open Secretary, Capture and Quit. Closing the window hides it while
+  "keep running in the tray" is on (default) and the tray exists, so sync, reminders
+  and the shortcut keep working; every close path (the app's button, Alt+F4, the red
+  button, Close Window) goes through the same check. The macOS Dock icon reopens the
+  window. The webview is not throttled in the background on macOS.
+- One running instance: a second launch focuses the window, or opens Capture with
+  `--capture`; a first launch with `--capture` starts with Capture open.
+- Settings -> General -> Capture and tray: the shortcut (blank turns it off),
+  close-to-tray, and why the tray or the shortcut is unavailable with what to do.
+- Rust: `tauri-plugin-global-shortcut` 2.3 and `tauri-plugin-single-instance` 2.4
+  (the newer releases need tauri 2.12), Tauri's `tray-icon` feature, and
+  `src-tauri/src/capture.rs`. All three native sources emit one `capture://open`
+  event; the webview does the rest.
+
+Decisions and defaults
+- Shortcut `CommandOrControl+Shift+Space`; close-to-tray on.
+- On a Wayland session the shortcut is not registered (an X11 grab through XWayland
+  only fires while an X11 window has focus); Settings shows how to bind
+  `secretary --capture` instead.
+- On Linux the AppIndicator library is looked up before the tray is built; without
+  it there is no tray and closing quits, as before.
+- Debug builds on Linux use their own D-Bus name, so `tauri dev` runs beside an
+  installed copy.
+
+Checklist
+- `cargo check` and clippy pass; typecheck, tests and lint are green.
+  `src/app/capture.test.ts` covers the open-capture event and the submit path over
+  the real intake (thread filed, window put back before triage ends, one
+  notification only when hidden), and a Rust test covers the `--capture` flag.
+- Window controls (D36), by code review: minimise and maximise are unchanged; close
+  sends a close request, which the native handler turns into hide only when the
+  setting is on and the tray exists, and otherwise closes the last window, which
+  quits.
+
+Known limits
+- Not run: nothing in this phase was tried in the running app (tray, shortcut,
+  second launch, notifications, hide and restore on macOS, Linux and Windows).
+- GNOME without the AppIndicator extension has the library but shows no icon;
+  Settings cannot tell, so turn close-to-tray off there or relaunch to show the
+  window.
+- On Linux and Windows the hidden webview's timers may be throttled by the engine;
+  the 10-minute sync and reminder timers tolerate that.
+
+Fix (macOS, after a first run there)
+- Closing to the tray hid only the window, which left the app active with no window
+  to take the keyboard; the Dock and Cmd+Tab did not bring it back and nothing could
+  be typed (tauri#7540, #2149). On macOS hiding is now at the application level, as
+  Cmd+H: closing, and putting the window back after capture, hide the app, so focus
+  returns to the previous app and the Dock icon stays; the tray, the shortcut, a Dock
+  click and a second launch unhide the app, then show and focus the window. Linux and
+  Windows still hide the window. The choice lives in `capture.rs` (`hide_main`,
+  `reveal`); the webview no longer hides the window itself but calls
+  `capture_restore` and `capture_window_hidden`, and loses `core:window:allow-hide`.
+- Troubleshooting switches for the desktop pieces this phase added: `SECRETARY_NO_TRAY=1`
+  starts without the tray icon, `SECRETARY_NO_SHORTCUT=1` without the global shortcut
+  plugin and `SECRETARY_NO_SINGLE_INSTANCE=1` without the single-instance plugin;
+  Settings shows the first two. Added while chasing a macOS 26 report
+  (`tauri dev` window shown but never activated, no Dock icon, typing went to the
+  previous app). The cause was the launch, not the app: started from the built-in
+  Terminal app, the same build works, and every build back to Phase 11 behaved the
+  same from the other terminal. README Development says so.
+  A Rust test pins the `restore` payload. Not yet re-run on macOS.
+
+## Phase 15: Navigation (2026-10-03)
+
+Built
+- Seven pages in the sidebar (design.md D50, FR-13): Today, Inbox, Tickets, Waiting
+  on, Sprint, Chat, Context. Today is the dashboard under its new name; Phase 16
+  rebuilds it.
+- `/sprint` has tabs Plan (was `/planning`), Report (was `/report`) and Epics, which
+  takes the epic health rollup off the dashboard and loads it on its own.
+  `/context` has tabs People, Teams and Memory. The tab is a zod-validated search
+  parameter (`?tab=`); a missing or unknown tab opens the first.
+- `/planning`, `/report`, `/people`, `/teams` and `/memory` redirect to their tab and
+  keep their search parameters: a contact or team `id`, an open ticket, and the
+  Memory page's own `tab`, which is now `list` (`memories` or `corrections`). Every
+  link in the app, the chat agenda's and the Inbox's "plan it" and "edit rules"
+  hints, and the command palette point at the new tabs.
+- The draft composer opens as a panel (a Sheet over the current page) from a ticket,
+  a contact, a team, Waiting on and dependency cards ("Draft a chase"), the Inbox's
+  "write it now" and Ctrl+K "New draft". A new draft can start with a recipient,
+  tickets, a dependency, a purpose, a channel and notes; writing it shows it in the
+  same panel. "All drafts" opens the Drafts page.
+- The Drafts page stays and comes back to the sidebar with Settings > General "Show
+  Drafts in the sidebar" (`general.draftsInSidebar`, default off). The command
+  palette always lists it, and each Sprint and Context tab.
+- Settings > Advanced holds task routing and evaluation replay (from Models, which
+  keeps the tiers) and the ranking weights (the Ranking tab is gone);
+  `?tab=ranking` opens Advanced. Nothing was removed.
+- Route tests run the app's route tree in a memory history: every old path lands on
+  its tab with its parameters, the tab parameter falls back, and the old settings
+  tab opens Advanced.
+
+Decisions and defaults
+- The panel closes when its own links go to another page (a dependency, a contact);
+  a ticket link opens the ticket panel on top of it.
+- Teams get "Draft a message" too; a ticket's draft starts with that ticket, a
+  contact's or a team's with them as the recipient.
+- Switching Sprint or Context tabs unmounts the other tabs, as leaving the old pages
+  did: a drafted sprint plan that was not sent is lost when you switch away.
+
+Not verified yet
+- Nothing here was run in the desktop app: the sidebar, the tabs, the panel over the
+  ticket and dependency sheets, and the redirects in a real window were checked by
+  typecheck, the route tests and review only.
+
+## Phase 12: Jira links and blocker wake-up (2026-10-03)
+
+Why: "do this when PLAT-812 is done" had nowhere to go, and nothing noticed when a
+blocker outside the sync scope closed (requirements FR-3.8, design.md D45).
+
+Built
+- Intake (prompt version 8) proposes "blocked by" links (`link_issues`, target and
+  blocker) when the input says something waits for a ticket ("when X is done", "after
+  X ships", "once X is deployed", "blocked by X"). It is offered only when sync has
+  found the instance's "blocks" link type (`GET /issueLinkType`, kept in
+  `jira.linkTypes`). Candidates show what they are already blocked by; a link to
+  itself, one Jira already has, a duplicate or two issues blocking each other go back
+  for repair.
+- A ticket named in the text that the cache does not hold (another team's PLAT-812)
+  is read once from Jira and offered as a candidate.
+- On approval the Executor posts the link, reads the target back and checks it reads
+  "target is blocked by blocker"; a link stored the other way round is deleted and
+  posted swapped. Approving a link Jira already has writes nothing.
+- A small ask that waits for a ticket shows "Blocked by PLAT-812" on its Track row,
+  and Track creates the ticket, then the link. The proposal card and edit dialog
+  show both ends.
+- After every sync the blockers of your open tickets that the run did not return are
+  read with one `key in (...)` search per 100 keys (status and resolution date only)
+  into `jira.blockers`; ranking, the report, planning and the picker prefer that
+  state to the copy embedded in the link. `issue_meta` keeps each ticket's open
+  blockers; when the last one closes the ticket wakes up (`unblocked_at`,
+  `unblocked_by`, migration 0012), and a blocker that reopens puts it back to sleep.
+- The reminder loop sends one notification per woken ticket ("PAY-5 is unblocked",
+  with the reason), under the same Reminders setting as follow-ups.
+- For Today (Phase 16): `loadWokenTickets` in `src/services/blockers/queries.ts`
+  lists woken tickets, newest first, with the reason ("PLAT-812 moved to Done on
+  2 Oct"); the rules are the pure `wokenTickets` in `blockers/logic.ts`.
+- Mock Jira: `GET /issueLinkType`, `POST /issueLink`, `DELETE /issueLink/{id}`, links
+  on both issues, JQL `key in (...)`, `--reversed-links`, and a `--cloud` shape (Basic
+  auth, `/search/jql` token paging, account ids, parent epics, `/priority/search`).
+
+Decisions and defaults
+- The POST names the blocker as `inwardIssue`; the direction check is what makes
+  that safe on instances that read it the other way.
+- "Your open tickets" for the blocker step are those assigned to you and not done.
+- A key is read from Jira once per app session, at most five per pasted item.
+- A removed link wakes a ticket like a closed blocker; the reason says the key "no
+  longer blocks it".
+- At most five wake-up notifications per check; the rest follow ten minutes later.
+
+Checklist
+- FR-3.8 AC in a service test against the mock Jira (`blockers.mock-jira.test.ts`):
+  the link is created on approval, the blocker closes outside what incremental sync
+  returns, the next sync reads it with `key in (...)`, sets `unblocked_at` and one
+  reminder is due, none after it is sent; a reopened blocker clears it. The same flow
+  runs in the Cloud shape.
+- The direction check runs against a mock that stores links reversed: POST, DELETE,
+  POST swapped, one correct link left.
+- Two eval cases (a small ask blocked by PLAT-1, which is outside the fixtures and
+  read once; an existing ticket blocked by another) and scripted-model tests for the
+  schema, rule, validation, mapping and the Track row. The live eval was not run.
+
+Known limits
+- Not seen in the running app: the Track row line, the card, the edit dialog and the
+  notification were checked by typecheck, lint and tests only.
+- Only "blocked by" links are written; other link types are not.
+- No Today UI yet; woken tickets are only notified until Phase 16 lists them.
+
+Review fixes
+- Links never make a cycle: validation sends back a link whose blocker is already
+  blocked by the target, and the Executor refuses it before posting. The swap after a
+  reversed POST deletes only a link id that was not there before that POST, so a link
+  the user had is never removed; if the swapped POST fails, the error says the issues
+  are unlinked now and Retry links them again.
+- Only a definite answer changes blocker state: a blocker not read this run keeps its
+  last entry in `jira.blockers`, and a ticket with a blocker of unknown state (no
+  entry, or 403) does not wake. A search that fails with 400 is split in two until
+  the bad keys are found; 404 means the link is gone (stored with `gone`, read as not
+  blocking, "no longer blocks it"); 404 and 403 are remembered for seven days in
+  `jira.blockersUnread` and forgotten when the link goes. A key the search did not
+  return (moved, renamed) is read on its own and stored under the key the link
+  names; Cloud's next-page token is followed. Other failures stop reading for that
+  run.
+- A ticket that is no longer one of your open tickets forgets its blockers, so it
+  returns as first seen; woken tickets must still be assigned to you.
+- The re-fetch after every Executor write updates that issue's entry in
+  `jira.blockers` and runs the wake-up for the tickets it blocks, so closing a
+  blocker from the app shows at once.
+- A ticket named in pasted text is stored out of scope (`stale`): offered by its key,
+  but not in project lists, the tickets tree, ranking or the blocker step, and
+  removed by cleanup. A re-fetch keeps a cached issue's scope flag. `/browse/KEY`
+  links count only on the configured Jira site, and a key is marked read only after
+  Jira answered (found, 404, 403).
+- The requester's name in a small ask's "Asked by" line is escaped for Jira. Edited
+  descriptions where the block is no longer last were already covered by D51.
+- While reminders are off, wake-ups are marked notified without a notification, so
+  turning reminders on sends no burst.
+
+## Polish: Sprint plan, tray notice, palette (2026-10-03)
+
+- Sprint: the Plan tab stays mounted, hidden, once opened, so a drafted plan that
+  was not sent (and its notes, picks and goal, or a draft still being written)
+  survives switching to Report or Epics and back. Report and Epics still load only
+  when opened. Leaving the Sprint page still discards it. Context was checked: its
+  edits are in modal dialogs and sheets, so only the People search text resets.
+- Tray: the first close that hides the window to the tray sends one notification,
+  "Secretary is still running in the tray. Quit from the tray menu, or turn this off
+  in Settings." Once ever (`capture.trayNoticeShown`); a refused notification
+  permission does not use it up. The native close handler emits
+  `capture://hidden-to-tray` only when it hid the window, so nothing is sent without
+  a tray. Saving Settings > Capture now keeps the flag.
+- Command palette: "New draft" moved into the Actions group, after Capture.
+- Not run in the desktop app: the notification and the hidden Plan tab were checked
+  by cargo check, typecheck, unit tests and review only.
+
+## Phase 13: Waits from intake, away dates (2026-10-03)
+
+Why: pasting the answer to something you were waiting on did nothing to the wait,
+and "ask again when they are back from leave" needed a date set by hand on every
+wait (requirements FR-3.6, FR-3.7, design.md D46, D47).
+
+Built
+- Intake (prompt version 9) sees up to 12 open waits that the pasted text may be
+  about: the sender's, a named contact's, the sender's team's, those on a
+  candidate ticket, and those sharing words or an incident number with it. It
+  can propose `update_dependency` on one of them: resolve ("Bob sent the
+  numbers"), log their reply (with a new expected date when they give one), or
+  reschedule. A new dependency that a listed wait already covers goes back for
+  repair.
+- Approving it writes the timeline entry, the new date or the resolution through
+  the Waiting page's functions, then updates the remote link of a mirrored wait;
+  a failed link update is a warning on the executed card.
+- Dependency proposals (a change to a wait, a wait on an existing ticket) show as
+  one line with Approve; the full card, with Edit and Reject, is behind the
+  expand arrow. A wait on a new small ask still joins its Track row.
+- Contacts have an "away until" date (migration 0013): a field on the contact, a
+  badge on the People list and the contact, and `update_person.awayUntil` from a
+  pasted out-of-office reply.
+- While the owner is away a wait sleeps: not overdue, no follow-up due, no
+  reminder, no ranking points, last in its group on the Waiting page with "Bob is
+  away until 14 Oct". From the first working day after, it is due with "Bob is
+  back" until a follow-up is logged; the reminder says so too. The dashboard's
+  waiting list, the report facts, planning and the chat tools use the same timing.
+- Drafts to someone away say so in the composer and the draft, and the draft
+  prompt is told not to ask for anything before they are back.
+
+Proposal text bound for Jira (D51)
+- A create's description and a comment's body from a proposal are made safe after
+  conversion to wiki markup: a remote image (`![](https://...)`, `!https://...!`,
+  with or without `|width=...`) becomes a plain link, and a mention
+  (`[~user]`, `[~accountid:...]`, `[name|~user]`) stays only for a contact with a
+  Jira id, the ticket's assignee or reporter, or you; any other is written as
+  text. The card says what was changed. Image names without a scheme (attachments
+  of the same ticket), `{code}` and `{noformat}` blocks, links and formatting are
+  left alone. What you type in the ticket view is sent as typed.
+
+Decisions and defaults
+- "Back" is the first working day after the away date; "is back" applies only to
+  waits opened before that day, so an old date needs no clearing.
+- An away date the model proposes must be a real date from today to 180 days
+  ahead.
+- The next chase after a reply is the date given, else the working day after a new
+  expected date, else the usual interval (Settings > dependencies).
+- A reschedule needs a new expected date or follow-up date; dates before today go
+  back for repair.
+
+Checklist
+- FR-3 AC in a service test (`intake/waits.test.ts`): "Bob sent the numbers" from
+  Bob offers Bob's wait, and one approval resolves it with a timeline entry and
+  the mirrored link marked resolved. An out-of-office reply sets the away date;
+  no reminder while away, one with "Bob Ray is back" on the first working day
+  after.
+- A wait whose owner is away until tomorrow is not due today and is due, with the
+  reason, on the first working day after (`dependencies/logic.test.ts`), also
+  across a weekend.
+- Scripted-model tests for the schema, rule, validation and mapping
+  (`prompts/classify-waits.test.ts`); Executor tests for each action, an already
+  resolved wait, a missing one and a failed mirror update; three eval cases (a
+  wait resolved, a partial reply logged, an out-of-office). The live eval was not
+  run.
+
+Review fixes
+- The D51 sanitiser is now a scanner instead of a set of regexes. A run of
+  backslashes escapes only when odd (`\\` is a line break), so `\\!url!` and
+  `\\[~user]` are caught. `{code}` / `{noformat}` blocks count only when lowercase,
+  unescaped and closed; every other marker, in any case, is broken up (`{ code}`),
+  including in the model's part of a small ask, so it cannot pair with the quote's
+  block and turn the quote live. Every link part starting with `~` is a mention
+  (`[Bob|~user|tip]`, `[ ~user]`). Every unescaped `!` whose text up to the next
+  `!` names a URL, in any wrapping (`![https://...]!`), is defused: a plain web
+  embed becomes a link, anything else (`data:`, wrapped URLs) loses its `!`. Its
+  output is idempotent, and a table of adversarial inputs in many wrappings is
+  checked by an independent checker in the test.
+- An away date that is not a real date (`2026-13-01` from an import) no longer
+  breaks every waits view; it is ignored, and the contact form rejects it.
+- "Is back" can be put off: it also ends when the wait's next follow-up is later
+  than the back day, and 14 days after the back day (D47 updated).
+- A new wait on a ticket and owner that already have one is allowed when it is
+  about something else; incident numbers match whole (INC0012 is not INC00123).
+- A retried change to a wait does not log its timeline entry twice.
+
+Known limits
+- Not seen in the running app: the compact rows, the contact's away field and
+  badges, the Waiting page badges and the draft warning were checked by
+  typecheck, lint and tests only.
+- Today (Phase 16) is not built; the current dashboard lists a returned owner's
+  wait with "is back" and leaves sleeping ones out.
+
+## Phase 16: Today and the sweep (2026-10-03)
+
+Why: small asks beside planned work were trackable after Phases 11 to 15 but
+still had no single place to look, and the dashboard spread what needed the user
+over seven sections (requirements FR-12, design.md D49).
+
+Built
+- Today at `/`: the capture box, then three lists. *Your move*: woken tickets
+  (D45), your open small asks with nothing to wait for (by due date, then oldest),
+  new comments and mentions, and one row per Inbox thread with decisions. *Their
+  move*: open waits (overdue, follow-up due, owner back, the rest), your tickets
+  blocked by an open ticket, then sleeping ones (owner away, or the ticket
+  snoozed), soonest to wake first. *Sprint work*: Top focus (D29) without small
+  asks, with due-soon and at-risk tickets joined in as badges. Every row says why
+  in a few words; a list longer than 12 folds behind "Show all"; each list says
+  so in one line when empty; without a small-asks home, Your move still lists
+  the rest and one line links to the setting.
+- `buildToday` (`services/dashboard/today.ts`) is pure over one snapshot and
+  replaces `buildDashboard`. A ticket is in one list only; the precedence is
+  written down and tested (woken, snoozed, new comment, blocked, small ask,
+  sprint work). The ranking itself is unchanged and is now `rankWork`, which the
+  brief, the report, the ticket picker and the chat read.
+- Row actions without leaving the page, each with a toast (and any warning),
+  disabled while running, lists refreshed after: Done (reads the transitions; one
+  runs, several give a menu, none is an error; Jira's message when fields are
+  needed), snooze (tomorrow, Monday, after the sprint, a date; on a wait it moves
+  the next chase), reply draft (to the requester when known), chase draft, log a
+  reply, resolve. Jira writes go through the Executor.
+- The sweep (Sweep in the header): woken tickets, follow-ups due or overdue,
+  owners back, asks due or overdue, and once a week asks untouched for 14 days
+  (`sync_state` `sweep.staleAt`). Keys D done, N nudge, S snooze, X drop (asks
+  why, then closes as D43 requires: a cancel-like status when the workflow has
+  one, else a done one, and a comment with the reason), Space skip, Esc leave;
+  "3 of 9" with a progress bar, and a summary at the end.
+- The brief opens from a button into a side panel; the plan banner stays;
+  suggested prompts are on the Chat page only.
+- Chat: `pending_decisions` lists your open small asks with who asked, age, due
+  date and where each stands; `waiting_on` also lists your blocked tickets.
+- Removed: the old dashboard sections and their tests, the dashboard's prompts
+  card, `iAmWaitingOn` and the dashboard's own epic health (Sprint > Epics keeps
+  `buildEpicHealth`). Wording that pointed at the dashboard now points at Today or
+  the Chat page.
+
+Decisions and defaults
+- A new comment or mention ranks above a blocker and a small ask: someone waits
+  for an answer. Comments on a snoozed ticket wait until the snooze ends.
+- Only tickets assigned to you count as blocked in Their move; a blocked ticket of
+  someone else's that you track stays Sprint work with an "at risk" badge.
+- Waits are rows of their own, so a sprint ticket with a wait is in Sprint work
+  and its wait in Their move.
+- A wait on a snoozed ticket sleeps with it.
+- "Tomorrow" is the next working day; "after the sprint" is the first working
+  day after your active sprint ends.
+- On a wait, Done resolves it and Drop logs "Stopped waiting: <reason>" and
+  resolves it. A ticket's drop comment is "Dropped: <reason>", or "Closed without
+  being done: <reason>" when only a done status is offered.
+- The sweep leaves out an overdue wait whose next chase is already set for a
+  later day, until that day. The weekly pass counts as run when a sweep that
+  held it reaches its summary.
+- `buildDashboard` stays as an alias of `rankWork` only because two tests on
+  another branch call it.
+
+Checklist
+- FR-12 AC: `today.test.ts` builds the three lists from one fixture that mixes
+  small asks, waits (overdue, follow-up due, back, sleeping), blockers and sprint
+  work, with the order of each list, the precedence, the empty and no-home cases;
+  2,000 issues build in under 150 ms. `today.mock-jira.test.ts` loads and builds
+  Today over 2,000 synced issues in under a second.
+- Done on a small ask transitions it in the mock Jira and the row leaves Your
+  move; Drop closes one with the reason as a comment (`today.mock-jira.test.ts`).
+- The sweep's order, the weekly pass and the summary (`sweep.test.ts`); the done
+  and drop transitions and the snooze days (`closing.test.ts`); the chat's new
+  fields (`chat.test.ts`, `agenda.test.ts`).
+
+Known limits
+- Not seen in the running app: the page, the three columns, the row menus, the
+  sweep dialog and its keys, the brief panel and the draft panel over the sweep
+  were checked by typecheck, lint, the build and review only.
+- The mock Jira has one done status and no cancel-like one, so the Done menu and
+  a drop into a cancelled status are covered by unit tests, not end to end.
+- The cancel-like words are repeated in `dashboard/closing.ts`; the classify
+  check in `prompts/classify.ts` should import them from there.
+
+Review fixes
+- The sweep runs one action at a time through one guard (`dashboard/sweep.ts`,
+  pure and tested): a second Enter, a held key or a double-click no longer
+  writes twice or acts on the next item. Outcomes are kept by item id and only
+  the item an action ran on advances; for 400 ms after the item changes actions
+  are ignored. Keys act only with focus on the item, never on auto-repeat, so
+  Space on a focused button presses it. Errors offer a Retry for that item.
+- Drop takes a cancel-like transition only when it leads to a done-category
+  status, so "Reject" back to In Progress is never used. It comments first and
+  moves second; a retry does not post the comment again, and a failed move says
+  the ticket is still open and Retry closes it (checked against the mock Jira).
+- "Chase later" on a wait whose owner is away or just back offers only days
+  after the back day; a later chase ends "is back" on Today and in the sweep.
+- An overdue wait chased later keeps its badge but sits with the rest of Their
+  move, its reason naming the next chase.
+- `waiting_on` lists every blocked ticket of yours (new `Today.blocked`), also
+  one Your move holds for a new comment. `pending_decisions` leaves sleeping
+  waits out of follow-ups due, as the brief does. Chat ages count local days.
+- Opening a ticket refreshes Today, so its woken or comment row goes at once.
+- One cancel-like word list (`services/jira/cancel.ts`) for classify and Drop;
+  the `buildDashboard` alias is removed.
+- Read-through of the page: row menus are no longer modal (their items open
+  dialogs, which could leave the page unclickable); a Today that fails to load
+  keeps the header and the capture box and says why; long wait reasons truncate
+  in their badge; the snoozed and pinned icons have names.
+- Still not seen in the running app; checked by typecheck, tests, lint and the
+  build.
+
+## Live eval: concurrent, verbose, fail-fast; reasoning effort for compatible providers (2026-10-03)
+
+- The intake eval runs every case in its own layer and in-memory database, six at
+  a time (`SECRETARY_EVAL_CONCURRENCY`, 1 for one after another); a thread's turns
+  stay in order inside their case. Corrections, waits and the small-asks home are
+  per case, so nothing is cleaned up between cases. The other live tests
+  (drafts, chat, planning, report, vault, fast versus standard) run concurrently
+  beside it; each prints its time and model calls.
+- Each case prints PASS or FAIL, seconds and model calls (repairs, escalations and
+  failed calls from its `llm_calls`) when it finishes. The final report keeps the
+  details and adds wall time, total calls, input and output tokens, the five
+  slowest cases and which upstream provider answered.
+- The run stops when the first three cases all end in the same provider error
+  (timeout, rate limit, server or request error), and at once on 401/403, saying
+  what to try (`harness.ts`, unit-tested).
+- D52: the provider effort setting now also applies to OpenAI-compatible
+  providers as `reasoning_effort` (max sends xhigh); "Provider default" still sends
+  nothing. The provider form shows it for both kinds. The eval takes
+  `SECRETARY_EVAL_EFFORT`.
+- Eval only: `SECRETARY_EVAL_PROVIDER` pins OpenRouter's upstream provider
+  (`provider.only`, no fallbacks), and the eval's model fetch waits out up to six
+  429s with backoff before the app sees one, inside the app's own timeout.
+- First run on GLM 5.3 Flash pinned to `deepinfra/fp4`: DeepInfra's shared pool
+  answered 429 ("engine overloaded") to nearly every request, so the first three
+  cases timed out and the run stopped after 4 minutes instead of grinding on. When
+  it does answer, DeepInfra returned the classify call in 15 s (700 output tokens,
+  55 of them reasoning) with valid JSON. No intake result yet.
+- Eval only: `SECRETARY_EVAL_PROVIDER` takes an ordered, comma-separated list
+  (`deepinfra/fp4,streamlake/fp8,novita/fp8`), sent as `provider.order` and
+  `provider.only` with fallbacks allowed, so nothing outside the list serves a
+  request; one slug still pins that provider. OpenRouter sends a schema-bound
+  request only to listed providers with structured outputs, so it did not move on
+  from a busy DeepInfra by itself; after a 429 the eval now asks the rest of the
+  list at once and backs off only when the last one is busy. The summary counts
+  responses and 429s per provider.
+- D47, classify prompt version 10: "until D" keeps the person away through D;
+  "back on D" makes D the first day back, so `awayUntil` is the day before. The
+  first full run had read "until Friday 2 October" as 1 October. A new eval case
+  covers the back-on form. Full run on GLM 5.3 Flash: 27 of 27 passed in 4
+  minutes, served by StreamLake 34 and DeepInfra 13 after 34 DeepInfra 429s.
 ## Parent epics outside the sync scope (2026-10-15)
 
 - An epic that synced tickets sit under, but that the sync JQL and tracked epics
@@ -659,4 +1190,27 @@ Built
   A full run refreshes them all; an incremental run reads only new ones. A key the
   user cannot see is isolated and skipped. The watermark is unchanged.
 - The epic picker falls back to the summary when the Epic Name is blank.
+
+## Small asks: row changes reach every approve (2026-10-15)
+
+- A type or epic changed on a small-ask row was kept only in the row, and only
+  Track sent it. Approving the create from its card under Details, or with Approve
+  all, created the ticket with the default type and epic.
+- The row now saves the change on the pending create as soon as it is picked
+  (`Proposals.saveEdit`, design.md D44). The card under Details shows it as edited,
+  and every approve path uses it. Saving records nothing; the approval records the
+  change as one correction, also when Track sends the same change again. Picking
+  the original values again clears the edit.
+- A failed create still sends its row changes with Retry.
+
+## Drafts back in the sidebar; chat leaves drafts to the Drafts page (2026-10-15)
+
+- The Drafts page is in the sidebar again, before Chat (design.md D50). It was out
+  of the sidebar behind a setting, so in practice it was reachable only from the
+  Inbox. The setting is removed; the draft panel from tickets, people and Waiting on
+  stays.
+- Chat no longer writes its own email or message draft next to a draft request; it
+  makes the request and says it is waiting in the Inbox (PR #24, also on `main`).
+- The issue picker scrolls inside the edit dialog and shows full summaries (PR #20),
+  and the sync buttons keep their labels while a sync runs (PR #23).
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { pendingDecisions, weekAhead } from "./agenda";
+import { blockedFacts, pendingDecisions, smallAskFacts, weekAhead } from "./agenda";
 
 describe("pendingDecisions", () => {
   test("groups the Inbox by thread, oldest wait first, and lists unsent drafts", () => {
@@ -81,8 +81,82 @@ describe("weekAhead", () => {
       ["2026-10-01", "Network expected to deliver Firewall rule for PAY-2"],
       [
         "2026-10-02",
-        "Sprint PAY 15 ends: 13 of 21 points done; plan the next sprint on the Planning page",
+        "Sprint PAY 15 ends: 13 of 21 points done; plan the next sprint in Sprint > Plan",
       ],
     ]);
+  });
+});
+
+describe("small asks and blocked tickets for the chat (D49)", () => {
+  test("each ask with who asked, its age, due date and where it stands", () => {
+    expect(
+      smallAskFacts(
+        [
+          {
+            issue: {
+              key: "PAY-9",
+              summary: "Send the Q3 numbers",
+              created: "2026-10-04T09:00:00.000Z",
+              dueDate: "2026-10-09",
+              requester: { name: "Priya Shah" },
+            },
+            state: "waiting on Finance (export)",
+          },
+        ],
+        "2026-10-07",
+      ),
+    ).toEqual([
+      {
+        key: "PAY-9",
+        summary: "Send the Q3 numbers",
+        askedBy: "Priya Shah",
+        ageDays: 3,
+        due: "2026-10-09",
+        state: "waiting on Finance (export)",
+      },
+    ]);
+  });
+
+  test("the age counts local days, as Today does, also just after midnight", () => {
+    // Bun runs tests in UTC, where a UTC date slice is right by chance.
+    const zone = process.env.TZ;
+    process.env.TZ = "Europe/Berlin";
+    const restore = () => {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    };
+    // Asked at 00:30 local time on 6 October: 5 October in UTC.
+    let ages: (number | undefined)[];
+    try {
+      ages = [new Date(2026, 9, 6, 0, 30), new Date(2026, 9, 6, 23, 30)].map(
+        (at) =>
+          smallAskFacts(
+            [
+              {
+                issue: {
+                  key: "PAY-9",
+                  summary: "s",
+                  created: at.toISOString(),
+                  dueDate: null,
+                  requester: null,
+                },
+                state: "your move",
+              },
+            ],
+            "2026-10-07",
+          )[0]?.ageDays,
+      );
+    } finally {
+      restore();
+    }
+    expect(ages).toEqual([1, 1]);
+  });
+
+  test("blocked tickets name their blockers; snoozed ones say so", () => {
+    expect(
+      blockedFacts([
+        { issue: { key: "A-1", summary: "s", status: "To Do" }, blockedBy: ["B-1"], asleep: true },
+      ]),
+    ).toEqual([{ key: "A-1", summary: "s", status: "To Do", blockedBy: ["B-1"], note: "snoozed" }]);
   });
 });

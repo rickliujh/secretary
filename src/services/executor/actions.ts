@@ -10,6 +10,11 @@ export const JiraActionSchema = z.discriminatedUnion("kind", [
     kind: z.literal("add_comment"),
     issueKey: IssueKey,
     bodyMarkdown: z.string().trim().min(1),
+    /**
+     * Wiki markup sent instead of converting `bodyMarkdown`: an approved proposal's
+     * body, already converted and made safe by `proposalTextToWiki` (D51).
+     */
+    bodyWiki: z.string().trim().min(1).optional(),
   }),
   z.object({
     kind: z.literal("transition"),
@@ -51,6 +56,24 @@ export const JiraActionSchema = z.discriminatedUnion("kind", [
     issueKey: IssueKey,
     globalId: z.string().min(1),
   }),
+  /**
+   * "issueKey is blocked by blockerKey" with the instance's blocks link type (D45).
+   * `swapped` posts the two issues the other way round, for an instance that
+   * stored the first attempt reversed.
+   */
+  z.object({
+    kind: z.literal("link_issues"),
+    issueKey: IssueKey,
+    blockerKey: IssueKey,
+    linkType: z.string().trim().min(1),
+    swapped: z.boolean().default(false),
+  }),
+  /** Removes one issue link of `issueKey` by its id. */
+  z.object({
+    kind: z.literal("delete_issue_link"),
+    issueKey: IssueKey,
+    linkId: z.string().regex(/^\d+$/, "Invalid link id"),
+  }),
   /** Moves the issue into a sprint through the Agile API (D30). */
   z.object({
     kind: z.literal("move_to_sprint"),
@@ -81,5 +104,9 @@ export function describeAction(a: JiraAction): string {
       return `Remove mirrored dependency from ${a.issueKey}`;
     case "move_to_sprint":
       return `Move ${a.issueKey} to sprint ${a.sprintName ?? a.sprintId}`;
+    case "link_issues":
+      return `Mark ${a.issueKey} blocked by ${a.blockerKey}`;
+    case "delete_issue_link":
+      return `Remove link ${a.linkId} from ${a.issueKey}`;
   }
 }

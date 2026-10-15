@@ -180,6 +180,54 @@ describe("Executor", () => {
     expect(seen).toHaveLength(0);
   });
 
+  test("a proposed comment is made safe for Jira with a warning; a typed one is not (D51)", async () => {
+    const { seen, layer } = setup();
+    const body = "Ask [~jsmith], [~ana.b], [~rliu] and [~carl.d] ![](https://x.io/p.png)";
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sync = yield* Sync;
+          yield* sync.discoverFields;
+          yield* sync.refreshIssue("PAY-2");
+          // carl.d is a contact; ana.b is PAY-2's assignee and rliu its reporter.
+          yield* query((d) =>
+            d.insert(people).values({ id: "p9", displayName: "Carl D", jiraUsername: "carl.d" }),
+          );
+          yield* query((d) =>
+            d.insert(proposals).values({
+              id: "c1",
+              seq: 0,
+              kind: "add_comment",
+              payload: {},
+              status: "approved",
+              createdAt: "2026-10-03T10:00:00.000Z",
+            }),
+          );
+          const executor = yield* Executor;
+          const proposed = yield* executor.runProposal(
+            { kind: "add_comment", target: "PAY-2", bodyMd: body },
+            { proposalId: "c1", inboxItemId: null },
+          );
+          yield* executor.run({ kind: "add_comment", issueKey: "PAY-2", bodyMarkdown: body });
+          return proposed;
+        }),
+        layer,
+      ),
+    );
+    const posted = seen
+      .filter((s) => s.method === "POST" && s.url.endsWith("/comment"))
+      .map((s) => (s.body as { body: string }).body);
+    expect(posted[0]).toBe("Ask \\[~jsmith], [~ana.b], [~rliu] and [~carl.d] [https://x.io/p.png]");
+    expect(r).toEqual({
+      message: "Commented on PAY-2",
+      issueKey: "PAY-2",
+      warning:
+        "In the comment, 1 remote image became a link and the mention of jsmith became plain text (not a Jira user Secretary knows).",
+    });
+    // The user's own comment goes out as typed.
+    expect(posted[1]).toBe("Ask [~jsmith], [~ana.b], [~rliu] and [~carl.d] !https://x.io/p.png!");
+  });
+
   test("an appended contact note is stamped with the local date", async () => {
     const { layer } = setup();
     const row = await Effect.runPromise(
