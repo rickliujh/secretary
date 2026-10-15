@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { UIMessage, UIMessageChunk } from "ai";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { jiraIssues, proposals } from "@/db/schema";
+import { jiraIssues, people, proposals } from "@/db/schema";
 import { query } from "@/services/db";
 import { createDependency } from "@/services/dependencies/queries";
 import { createTeam } from "@/services/directory/queries";
@@ -105,6 +105,54 @@ describe("Chat (D25)", () => {
     expect(r.output.proposed).toEqual(["Comment on PAY-4"]);
     expect(r.rows.map((p) => [p.kind, p.status])).toEqual([["add_comment", "pending"]]);
     expect(text(r.chunks)).toContain("approve it in the Inbox");
+  });
+
+  test("a draft request goes to the Inbox and the model is told not to write the draft", async () => {
+    const e = { rationale: "asked in chat", evidence: "email Simon", confidence: 0.9 };
+    const { layer, models } = intakeTestLayer({
+      "std-m": [
+        {
+          toolCall: {
+            name: "propose_actions",
+            input: { request: "Email Simon asking him to approve the PAY-4 rollout" },
+          },
+        },
+        out({
+          summary: "Email Simon for approval",
+          question: null,
+          confidence: 0.9,
+          proposals: [
+            {
+              kind: "draft_message",
+              channel: "email",
+              intent: "request",
+              notes: "Ask Simon to approve the PAY-4 rollout.",
+              recipientPersonId: "p-simon",
+              issueKeys: ["PAY-4"],
+              ...e,
+            },
+          ],
+        }),
+        { text: "The draft request is waiting in the Inbox." },
+      ],
+    });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          yield* query((d) => d.insert(people).values({ id: "p-simon", displayName: "Simon" }));
+          const stream = yield* (yield* Chat).stream({
+            messages: ask("draft an email to Simon asking him to approve the PAY-4 rollout"),
+          });
+          const chunks = yield* Effect.promise(() => drainStream(stream));
+          return { output: toolOutputs(chunks)[0] as { note: string; proposed: string[] } };
+        }),
+        layer,
+      ),
+    );
+    expect(r.output.proposed).toHaveLength(1);
+    expect(r.output.note).toContain("do not write the message");
+    expect(promptOf(models.calls, 0)).toContain("Do not write the message");
   });
 
   test("a failing tool tells the model why instead of ending the turn", async () => {
