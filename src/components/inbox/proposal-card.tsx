@@ -11,7 +11,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
 import { compactLine, isCompact } from "@/services/proposals/compact";
-import { NEW_REF_RE, PROPOSAL_LABELS, type ProposalPayload } from "@/services/proposals/schema";
+import {
+  NEW_REF_RE,
+  PROPOSAL_LABELS,
+  type ProposalPayload,
+  pointsLabel,
+} from "@/services/proposals/schema";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
 import { isEditable, viewPayload } from "./proposal-fields";
 import { RevokeControl, RevokeOutcome } from "./revoke-control";
@@ -68,6 +73,14 @@ function PayloadView({ p, lookups }: { p: ProposalPayload; lookups: Lookups }) {
           <Row label="Priority">{p.priority}</Row>
           <Row label="Assignee">{p.assignee}</Row>
           <Row label="Due">{p.dueDate}</Row>
+          <Row label="Points">
+            {typeof p.storyPoints === "number" && !/^epic$/i.test(p.issueType) && (
+              <span className="inline-flex items-center gap-1.5">
+                {pointsLabel(p.storyPoints)}
+                {p.storyPointsEstimated && <Badge variant="outline">suggested</Badge>}
+              </span>
+            )}
+          </Row>
           <Row label="Labels">{p.labels.length > 0 && p.labels.join(", ")}</Row>
           <Row label="Asked by">{person(p.requesterPersonId)}</Row>
           <Row label="Sprint">{p.joinSprint && "Joins your active sprint"}</Row>
@@ -85,6 +98,11 @@ function PayloadView({ p, lookups }: { p: ProposalPayload; lookups: Lookups }) {
           <Row label="Due">{p.changes.dueDate === null ? "clear" : p.changes.dueDate}</Row>
           <Row label="Assignee">
             {p.changes.assignee === null ? "unassign" : p.changes.assignee}
+          </Row>
+          <Row label="Points">
+            {p.changes.storyPoints === null
+              ? "clear"
+              : typeof p.changes.storyPoints === "number" && pointsLabel(p.changes.storyPoints)}
           </Row>
         </dl>
       );

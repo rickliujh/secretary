@@ -32,6 +32,7 @@ import { promptSprints } from "@/services/sprints/calendar";
 import { deletedKeys, stillRevoked } from "@/services/sync/deleted";
 import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { BUDGETS, CANDIDATE_LIMIT, Retrieval, type SnapshotRequest } from ".";
+import { pointScale, pointUses } from "./points";
 import {
   mergeCandidates,
   orderPriorities,
@@ -209,6 +210,7 @@ const make = Effect.gen(function* () {
             assignee: row.assignee,
             priority: row.priority,
             dueDate: row.dueDate,
+            storyPoints: row.storyPoints,
             updated: row.updated,
             reasons,
             // Existing "blocked by" links, so the model does not propose them again (D45).
@@ -261,6 +263,7 @@ const make = Effect.gen(function* () {
             joinSprint: settings.smallAsks.joinActiveSprint,
             issueTypes: smallAskTypes(homeTypes, homeSubtasks).sort(),
             defaultType: defaultSmallAskType([...homeTypes].sort(), homeSubtasks),
+            defaultPoints: settings.smallAsks.defaultPoints,
           }
         : null;
       const priorities = orderPriorities(
@@ -507,6 +510,11 @@ const make = Effect.gen(function* () {
         projects: [...projects.keys()],
       });
 
+      // --- story point scale (D55): the candidates' projects and the home first ---
+      const pointScaleValues = pointScale(yield* withDb(pointUses), [
+        ...new Set([...candidates.map((c) => c.projectKey), ...(homeKey ? [homeKey] : [])]),
+      ]);
+
       return {
         promptVersion: CLASSIFY_PROMPT_VERSION,
         today: req.today,
@@ -560,6 +568,7 @@ const make = Effect.gen(function* () {
         examples,
         notes,
         sprints,
+        pointScale: pointScaleValues,
         smallAsks,
         blockLinkType:
           parseLinkTypes(yield* withDb(getState(SYNC_KEYS.linkTypes))).blocks?.name ?? null,

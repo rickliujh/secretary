@@ -95,6 +95,7 @@ function setup(canDelete: boolean) {
       label: "small-ask",
       joinActiveSprint: false,
       hintDismissed: false,
+      defaultPoints: null,
     },
   });
   const models = makeScriptedModels({ "std-m": [out(ask("2026-10-09"))] });

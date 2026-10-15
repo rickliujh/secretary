@@ -9,7 +9,7 @@ import { createPerson, createTeam } from "@/services/directory/queries";
 import { Intake } from "@/services/intake";
 import { FIXTURE_VAULT_DIR, loadVaultFromDisk } from "@/services/sources/test";
 import { getState, SYNC_KEYS, setState } from "@/services/sync/state";
-import { drainStream, promptOf } from "@/test/helpers";
+import { drainStream, promptOf, readThread } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { Chat } from ".";
@@ -106,6 +106,55 @@ describe("Chat (D25)", () => {
     expect(r.output.proposed).toEqual(["Comment on PAY-4"]);
     expect(r.rows.map((p) => [p.kind, p.status])).toEqual([["add_comment", "pending"]]);
     expect(text(r.chunks)).toContain("approve it in the Inbox");
+  });
+
+  test("the chat's request is not the user's own words: its numbers need a points cue (D55)", async () => {
+    const e = { rationale: "asked in chat", evidence: "points", confidence: 0.9 };
+    const update = {
+      kind: "update_issue",
+      target: "PAY-4",
+      storyPoints: "8",
+      pointsSource: "stated",
+      ...e,
+    };
+    const { layer, models } = intakeTestLayer({
+      "std-m": [
+        {
+          toolCall: {
+            name: "propose_actions",
+            // A number from a tool result, in the chat model's words and without a cue.
+            input: { request: "Fix the points on PAY-4: the refinement page says 8" },
+          },
+        },
+        out({ summary: "Points on PAY-4", question: null, confidence: 0.9, proposals: [update] }),
+        out({
+          summary: "Points on PAY-4",
+          question: "How many story points should PAY-4 have?",
+          confidence: 0.9,
+          proposals: [],
+        }),
+        { text: "I asked in the Inbox how many points PAY-4 should have." },
+      ],
+    });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const stream = yield* (yield* Chat).stream({
+            messages: ask("set the points on PAY-4 from the refinement page"),
+          });
+          const chunks = yield* Effect.promise(() => drainStream(stream));
+          const output = toolOutputs(chunks)[0] as { threadId: string };
+          return yield* readThread(output.threadId);
+        }),
+        layer,
+      ),
+    );
+    expect(r.messages[0]?.content).toMatchObject({ source: "typed", author: "chat" });
+    expect(r.items[0]?.snapshot).toMatchObject({ source: "typed", ownInput: false });
+    // The 8 went to repair, so the thread asks instead of proposing it.
+    expect(promptOf(models.calls, 2)).toContain("storyPoints 8 is not given as story points");
+    expect(r.props.map((p) => p.kind)).toEqual(["needs_clarification"]);
   });
 
   test("a draft request goes to the Inbox and the model is told not to write the draft", async () => {
@@ -451,6 +500,7 @@ describe("small asks and blockers in the chat (D49)", () => {
             label: "small-ask",
             joinActiveSprint: true,
             hintDismissed: false,
+            defaultPoints: null,
           },
         },
       },

@@ -25,6 +25,12 @@ export const UserContentSchema = z.object({
    * replying, because they have no input to classify again.
    */
   origin: z.enum(["planner", "rules"]).optional(),
+  /**
+   * Set when the chat wrote this message for the user (propose_actions). Its text
+   * is the chat model's words and may carry numbers from Jira or Confluence, so it
+   * is not the user's own words (D55): its numbers need a points cue.
+   */
+  author: z.enum(["chat"]).optional(),
 });
 export type UserContent = z.infer<typeof UserContentSchema>;
 

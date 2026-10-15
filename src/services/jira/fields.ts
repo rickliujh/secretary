@@ -77,6 +77,33 @@ export function effectiveFieldIds(discovered: FieldIds, overrides: FieldIds): Fi
 export const storyPointFields = (ids: FieldIds): string[] =>
   [ids.storyPoints, ...(ids.storyPointsAlt ?? [])].filter((f): f is string => !!f);
 
+/**
+ * The story point field to write (D55): the first effective story point field
+ * that is on the screen (create metadata for a new issue, edit metadata for an
+ * existing one), or null when the screen has none. Cloud sites may have both
+ * "Story point estimate" and "Story Points", and a project shows only one.
+ */
+export function pointsFieldOn(ids: FieldIds, onScreen: Iterable<string>): string | null {
+  const screen = new Set(onScreen);
+  return storyPointFields(ids).find((f) => screen.has(f)) ?? null;
+}
+
+/**
+ * The story point field to write on an existing issue (D55): of the effective
+ * story point fields on its edit screen, the first that holds a value, so the
+ * write lands where the board reads the points (D35); else the first on the
+ * screen. Null when the screen has none.
+ */
+export function pointsFieldForIssue(
+  ids: FieldIds,
+  onScreen: Iterable<string>,
+  issueFields: Readonly<Record<string, unknown>>,
+): string | null {
+  const screen = new Set(onScreen);
+  const candidates = storyPointFields(ids).filter((f) => screen.has(f));
+  return candidates.find((f) => typeof issueFields[f] === "number") ?? candidates[0] ?? null;
+}
+
 /** `customfield_10100` -> `cf[10100]` for use in JQL. */
 export function jqlFieldRef(fieldId: string): string {
   const m = /^customfield_(\d+)$/.exec(fieldId);

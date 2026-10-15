@@ -144,6 +144,8 @@ export const SmallAsksSettingsSchema = z.object({
   joinActiveSprint: z.boolean().default(true),
   /** The Inbox points to this setting once while no home is set. */
   hintDismissed: z.boolean().default(false),
+  /** Story points a small ask gets when the input states none (D55); null: the model's suggestion. */
+  defaultPoints: z.number().min(0).max(1000).nullable().default(null),
 });
 export type SmallAsksSettings = z.infer<typeof SmallAsksSettingsSchema>;
 

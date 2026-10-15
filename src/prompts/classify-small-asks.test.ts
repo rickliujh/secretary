@@ -97,6 +97,9 @@ describe("mapping a small ask (code sets the home)", () => {
       // The sender asked.
       requesterPersonId: "p-ana",
       joinSprint: true,
+      storyPoints: null,
+      storyPointsEstimated: false,
+      storyPointsCleared: false,
     });
   });
 

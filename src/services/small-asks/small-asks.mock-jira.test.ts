@@ -85,6 +85,7 @@ function setup() {
       label: "small-ask",
       joinActiveSprint: true,
       hintDismissed: false,
+      defaultPoints: null,
     },
   });
   const models = makeScriptedModels({ "std-m": [out(answer)] });

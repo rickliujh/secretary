@@ -3,6 +3,7 @@ import { Controller, useForm } from "react-hook-form";
 import type { Lookups } from "@/app/queries";
 import { IssueCombobox } from "@/components/tickets/issue-combobox";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +31,7 @@ import {
 import {
   FIELD_SPECS,
   fieldName,
+  formName,
   fromFormValues,
   isEditable,
   issueOptions,
@@ -62,6 +64,8 @@ export function ProposalEditDialog({
   }, [open, payload, form]);
   if (!isEditable(payload)) return null;
   const specs = FIELD_SPECS[payload.kind];
+  // Every value, so a field can hide while others make it meaningless (an Epic's points).
+  const values = form.watch();
 
   const submit = form.handleSubmit((values) => {
     const parsed = ProposalPayloadSchema.safeParse(fromFormValues(payload, values));
@@ -85,10 +89,29 @@ export function ProposalEditDialog({
           </DialogHeader>
           <FieldGroup>
             {specs.map((spec) => {
-              const name = fieldName(spec.path);
+              const name = formName(spec);
               const id = `edit-${name}`;
+              if (spec.hidden?.(values)) return null;
+              if (spec.type === "clear")
+                return (
+                  <Controller
+                    key={name}
+                    control={form.control}
+                    name={name}
+                    render={({ field }) => (
+                      <Field orientation="horizontal">
+                        <Checkbox
+                          id={id}
+                          checked={field.value === "true"}
+                          onCheckedChange={(c) => field.onChange(c === true ? "true" : "")}
+                        />
+                        <FieldLabel htmlFor={id}>{spec.label}</FieldLabel>
+                      </Field>
+                    )}
+                  />
+                );
               return (
-                <Field key={spec.path}>
+                <Field key={name}>
                   <FieldLabel htmlFor={id}>{spec.label}</FieldLabel>
                   {spec.type === "textarea" ? (
                     <Textarea id={id} rows={5} {...form.register(name)} />
@@ -140,8 +163,18 @@ export function ProposalEditDialog({
                   ) : (
                     <Input
                       id={id}
-                      type={spec.type === "date" ? "date" : "text"}
-                      className={cn(spec.mono && "font-mono")}
+                      type={
+                        spec.type === "date" ? "date" : spec.type === "number" ? "number" : "text"
+                      }
+                      {...(spec.type === "number"
+                        ? {
+                            min: 0,
+                            step: "any",
+                            inputMode: "decimal" as const,
+                            placeholder: spec.optionalChange ? "No change" : "None",
+                          }
+                        : {})}
+                      className={cn(spec.mono && "font-mono", spec.type === "number" && "w-32")}
                       {...form.register(name)}
                     />
                   )}

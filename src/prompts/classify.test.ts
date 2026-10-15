@@ -429,7 +429,7 @@ describe("revoked proposals in the thread context (FR-14.6, prompt version 11)",
   const create = "Create Task in PAY: Send Dana the Q3 numbers";
 
   test("a revoked create reads as approved, then revoked, with its ticket deleted", () => {
-    expect(CLASSIFY_PROMPT_VERSION).toBe(11);
+    expect(CLASSIFY_PROMPT_VERSION).toBeGreaterThanOrEqual(11);
     const { system, prompt } = withDecided([
       {
         outcome: "revoked",

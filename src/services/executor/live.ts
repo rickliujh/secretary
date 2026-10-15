@@ -29,6 +29,7 @@ import {
   setStatus,
 } from "@/services/dependencies/queries";
 import { CreatedIssueSchema, JiraClient, JiraError } from "@/services/jira";
+import { pointsFieldForIssue, storyPointFields } from "@/services/jira/fields";
 import { parseIssueLinks } from "@/services/jira/schemas";
 import {
   describeWaitUpdate,
@@ -59,9 +60,9 @@ import {
 } from "./jira-mapping";
 import { PERSON_COLUMNS, pickColumns, type ReverseOp, TEAM_COLUMNS } from "./reverse";
 import {
-  ISSUE_FIELD_IDS,
   type IssueField,
   type IssueFieldValues,
+  issueFieldIds,
   issueFieldValues,
   issueStatus,
   issueUserNames,
@@ -300,6 +301,7 @@ const make = Effect.gen(function* () {
               assignee: p.assignee,
               dueDate: p.dueDate,
               labels: p.labels,
+              storyPoints: p.storyPoints,
             },
             { deployment, fieldIds, fields, knownUsers },
           ),
@@ -430,6 +432,25 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
+    });
+
+  /**
+   * The story point field to write on an issue (D55): on its edit screen, the one
+   * holding its points, else the first; without one the update fails, naming why.
+   */
+  const editScreenPointsField = (issueKey: string, issueFields: Record<string, unknown>) =>
+    Effect.gen(function* () {
+      const { effective } = yield* sync.fieldInfo;
+      const meta = yield* jira.getEditMeta(issueKey);
+      const field = pointsFieldForIssue(effective, Object.keys(meta.fields), issueFields);
+      if (!field)
+        return yield* fail(
+          "invalid",
+          storyPointFields(effective).length
+            ? `The edit screen of ${issueKey} has no story point field, so its story points cannot be set. Add the field to the screen in Jira, or remove the points from the proposal.`
+            : `No story point field was found in Jira, so the story points of ${issueKey} cannot be set. Set the field in Settings > Jira, or remove the points from the proposal.`,
+        );
+      return field;
     });
 
   /** The target's "blocks" links, read from Jira (not the cache) for the direction check. */
@@ -820,15 +841,27 @@ const make = Effect.gen(function* () {
           return yield* moveToSprint(payload, proposalId);
         case "update_issue": {
           const { assignee, ...fields } = payload.changes;
-          // The values it replaces, read just before, for revoking it (D54).
-          const keys = Object.keys(payload.changes) as IssueField[];
-          const current = yield* jira.getIssue(payload.target, {
-            fields: keys.map((k) => ISSUE_FIELD_IDS[k]),
-          });
           // A retry keeps the values the first attempt replaced: the earliest per field.
           const prior = yield* priorUndo(proposalId, "update_issue");
+          // The values it replaces, read just before, for revoking it (D54). With
+          // points, every story point field, to write where the issue holds them (D55).
+          const keys = Object.keys(payload.changes) as IssueField[];
+          const wantsPoints = fields.storyPoints !== undefined;
+          const pointFieldIds = wantsPoints
+            ? [
+                ...storyPointFields((yield* sync.fieldInfo).effective),
+                ...(prior?.pointsField ? [prior.pointsField] : []),
+              ]
+            : [];
+          const current = yield* jira.getIssue(payload.target, {
+            fields: [...new Set([...issueFieldIds(keys), ...pointFieldIds])],
+          });
+          // A retry writes the field the first attempt chose.
+          const pointsField = wantsPoints
+            ? (prior?.pointsField ?? (yield* editScreenPointsField(payload.target, current.fields)))
+            : undefined;
           const before: IssueFieldValues = {
-            ...issueFieldValues(current.fields, keys),
+            ...issueFieldValues(current.fields, keys, pointsField),
             ...Object.fromEntries(
               keys.filter((k) => prior && k in prior.before).map((k) => [k, prior?.before[k]]),
             ),
@@ -841,10 +874,19 @@ const make = Effect.gen(function* () {
             before,
             after,
             ...(Object.keys(names).length ? { names } : {}),
+            ...(pointsField ? { pointsField } : {}),
           };
           yield* keepUndo(proposalId, undo);
           if (Object.keys(fields).length > 0) {
-            yield* run({ kind: "update_fields", issueKey: payload.target, fields }, { proposalId });
+            yield* run(
+              {
+                kind: "update_fields",
+                issueKey: payload.target,
+                fields,
+                ...(pointsField ? { pointsField } : {}),
+              },
+              { proposalId },
+            );
           }
           if (assignee !== undefined) {
             yield* run(

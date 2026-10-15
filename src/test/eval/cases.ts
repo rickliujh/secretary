@@ -458,4 +458,55 @@ export const EVAL_CASES: EvalCase[] = [
     },
     single: true,
   },
+  // Story points (D55). The fixtures' tickets use 2, 3 and 5; PAY-4 has 2.
+  {
+    name: "points: stated points on a new ticket are used as stated",
+    source: "typed",
+    text: "We need a new story under the billing migration epic (PAY-1) to export credit notes to the ledger. It's a 3-pointer.",
+    expect: {
+      required: [
+        {
+          kind: "create_issue",
+          target: "PAY-1",
+          fields: { storyPoints: 3, storyPointsEstimated: false },
+        },
+      ],
+      forbiddenKinds: ["needs_clarification"],
+    },
+    single: true,
+  },
+  {
+    name: "points: a new ticket without points gets a suggestion from the scale",
+    source: "typed",
+    text: "We need a new story under the billing migration epic (PAY-1) to email customers a confirmation when a refund is issued.",
+    expect: {
+      required: [{ kind: "create_issue", target: "PAY-1", fields: { storyPointsEstimated: true } }],
+      forbiddenKinds: ["needs_clarification"],
+    },
+    single: true,
+  },
+  {
+    name: "points: 'is more like a 5' changes an existing ticket's points",
+    source: "teams",
+    sender: "ana",
+    text: "Looked at the refund rounding bug again with the team: PAY-4 is more like a 5.",
+    expect: {
+      required: [{ kind: "update_issue", target: "PAY-4", fields: { storyPoints: 5 } }],
+      forbiddenKinds: ["create_issue", "transition_issue"],
+    },
+    single: true,
+  },
+  {
+    // The model may not estimate PAY-4, so it asks; the user's bare answer is the
+    // number (D55 answers, 2026-10-15). No comment talks to the user on the ticket.
+    name: "points: a bare answer to the points question sets them on an existing ticket",
+    source: "typed",
+    text: "What are the story points on PAY-4? Can you set them for me?",
+    followUp: "3",
+    expect: {
+      required: [{ kind: "update_issue", target: "PAY-4", fields: { storyPoints: 3 } }],
+      forbiddenKinds: ["add_comment", "create_issue", "needs_clarification"],
+    },
+    single: false,
+  },
 ];
