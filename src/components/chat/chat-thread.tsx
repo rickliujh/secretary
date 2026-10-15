@@ -2,7 +2,7 @@ import { useChat } from "@ai-sdk/react";
 import { useQuery } from "@tanstack/react-query";
 import { isToolUIPart } from "ai";
 import { AlertCircle, CornerDownLeft, Loader2, RotateCcw, Square } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSettings } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
@@ -25,18 +25,22 @@ import { Textarea } from "@/components/ui/textarea";
 import { isSubmitEnter } from "@/lib/keys";
 import { loadConversation } from "@/services/chat/history";
 import { TIERS, type Tier } from "@/services/llm/tasks";
+import { claimAsk } from "./ask";
 import { chatFor, chatTier, hasChat, setChatTier } from "./store";
 import { ToolStep } from "./tool-step";
 
-const SUGGESTIONS = [
-  "What should I focus on today?",
-  "What am I waiting on, and what is overdue?",
-  "Who should I ask about Kubernetes?",
-];
 const ROUTED = "routed";
 
+type ThreadProps = {
+  id: string;
+  /** A question to send once as soon as the conversation is ready (D42). */
+  ask?: string;
+  /** Called after `ask` was sent, so the caller can drop it from the URL. */
+  onAsked?: () => void;
+};
+
 /** One conversation: loads it once, then the in-memory chat takes over (D28). */
-export function ChatThread({ id }: { id: string }) {
+export function ChatThread({ id, ask, onAsked }: ThreadProps) {
   const cached = hasChat(id);
   const stored = useQuery({
     queryKey: queryKeys.chat(id),
@@ -46,10 +50,15 @@ export function ChatThread({ id }: { id: string }) {
   });
   if (!cached && stored.isPending)
     return <Loader2 className="m-6 animate-spin text-muted-foreground" />;
-  return <Thread id={id} stored={stored.data ?? []} />;
+  return <Thread id={id} stored={stored.data ?? []} ask={ask} onAsked={onAsked} />;
 }
 
-function Thread({ id, stored }: { id: string; stored: Parameters<typeof chatFor>[1] }) {
+function Thread({
+  id,
+  stored,
+  ask,
+  onAsked,
+}: ThreadProps & { stored: Parameters<typeof chatFor>[1] }) {
   const { data: settings } = useSettings();
   const [tier, setTier] = useState<string>(chatTier() ?? ROUTED);
   const { messages, sendMessage, status, stop, error, regenerate } = useChat({
@@ -64,6 +73,13 @@ function Thread({ id, stored }: { id: string; stored: Parameters<typeof chatFor>
     setInput("");
   };
 
+  // Once per conversation and question, even when StrictMode runs this twice.
+  useEffect(() => {
+    if (!ask?.trim()) return;
+    if (claimAsk(id, ask)) void sendMessage({ text: ask.trim() });
+    onAsked?.();
+  }, [id, ask, onAsked, sendMessage]);
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <Conversation className="min-h-0 flex-1">
@@ -76,9 +92,10 @@ function Thread({ id, stored }: { id: string; stored: Parameters<typeof chatFor>
                 Ask for a change and it prepares proposals in the Inbox for you to approve.
               </p>
               <div className="flex flex-wrap justify-center gap-2">
-                {SUGGESTIONS.map((s) => (
-                  <Button key={s} variant="outline" size="sm" onClick={() => send(s)}>
-                    {s}
+                {/* The same suggested prompts as the dashboard, from Settings (D42). */}
+                {(settings?.suggestedPrompts ?? []).map((p) => (
+                  <Button key={p.id} variant="outline" size="sm" onClick={() => send(p.message)}>
+                    {p.title}
                   </Button>
                 ))}
               </div>

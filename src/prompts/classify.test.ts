@@ -161,6 +161,28 @@ describe("validateItemOutput", () => {
       snapshot,
     );
 
+  test("a cancellation needs a comment on the same issue saying why", () => {
+    // The fixture project's statuses do not list Cancelled; the partial list keeps it allowed.
+    const cancel = { kind: "transition_issue", target: "PAY-2", toStatus: "Cancelled", ...base };
+    const loose = {
+      ...snapshot,
+      projects: snapshot.projects.map((p) => ({ ...p, complete: false })),
+    };
+    const run = (proposals: Record<string, unknown>[]) =>
+      validateItemOutput({ ...good, proposals: proposals as ItemOutput["proposals"] }, loose);
+    expect(run([cancel])).toEqual([
+      "Proposal 1 (transition_issue): moving PAY-2 to Cancelled needs an add_comment on PAY-2 saying why, from the input.",
+    ]);
+    expect(
+      run([
+        cancel,
+        { kind: "add_comment", target: "PAY-2", body: "Cancelled: the team moved.", ...base },
+      ]),
+    ).toEqual([]);
+    expect(run([{ ...cancel, toStatus: "Won't Do" }])[0]).toContain("saying why");
+    expect(run([{ ...cancel, toStatus: "In Review" }])).toEqual([]);
+  });
+
   test("$new refs must be created in the same answer", () => {
     expect(check([{ kind: "add_comment", target: "$new:2", body: "x", ...base }])[0]).toContain(
       "$new:2 is not created",

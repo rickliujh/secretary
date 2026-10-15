@@ -632,6 +632,23 @@ Built
 - Live eval (GLM 5.3 Flash) answers a decision-and-owner question from a test vault,
   naming the notes.
 
+## Suggested prompts, thread context, cancellations explained (2026-09-28)
+
+- Dashboard: a "suggested prompts" card beside At risk (Plan My Day, Top Priorities,
+  Pending Decisions, Weekly Look-Ahead) opens the chat with the question; edit, add,
+  remove and reorder them in Settings > General (design.md D42). The chat's empty
+  screen shows the same list. New chat tools `pending_decisions` and `week_ahead`
+  answer the last two from code.
+- Inbox threads: every item now sees the rest of the conversation and the tickets
+  named in it, so a later paste can say "that ticket" (D43).
+- Closing or cancelling a ticket comes with a comment saying why; a cancellation
+  without one is sent back to the model (D43).
+- Inbox edit: Epic, Parent and Issue are searchable pickers (epics, possible parents,
+  or any synced ticket, the chosen project's first) instead of text boxes; a key that
+  is not synced, or a new issue from the same thread ("$new:1"), can still be typed.
+- Live eval: two new cases (a cancellation with its reason, a later paste referring
+  to an earlier ticket) pass with GLM 5.3 Flash.
+
 ## Parent epics outside the sync scope (2026-10-15)
 
 - An epic that synced tickets sit under, but that the sync JQL and tracked epics

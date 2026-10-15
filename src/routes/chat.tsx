@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { z } from "zod";
 import { useErrorToast } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { deleteConversation, listConversations } from "@/services/chat/history";
 
 export const Route = createFileRoute("/chat")({
-  validateSearch: z.object({ c: z.string().optional() }),
+  validateSearch: z.object({ c: z.string().optional(), ask: z.string().optional() }),
   component: ChatPage,
 });
 
@@ -66,7 +66,7 @@ function IconButton({
 
 /** Ask the secretary (FR-8, D25) with saved conversations (D28). */
 function ChatPage() {
-  const { c } = Route.useSearch();
+  const { c, ask } = Route.useSearch();
   const navigate = Route.useNavigate();
   const client = useQueryClient();
   const onError = useErrorToast();
@@ -79,6 +79,10 @@ function ChatPage() {
   const id = c ?? lastChat() ?? (list.isSuccess ? (list.data[0]?.id ?? fresh) : null);
   const open = (next: string) => navigate({ search: { c: next } });
   const [collapsed, toggleList] = useListCollapsed();
+  // Sent once by the thread; then dropped so a reload or Back does not ask again (D42).
+  const asked = useCallback(() => {
+    if (c) void navigate({ search: { c }, replace: true });
+  }, [c, navigate]);
 
   const remove = useMutation({
     mutationFn: (target: string) => run(deleteConversation(target)),
@@ -147,7 +151,14 @@ function ChatPage() {
         </aside>
       )}
       <section className="mx-auto flex min-h-0 min-w-0 max-w-3xl flex-1 flex-col">
-        {id && <ChatThread key={id} id={id} />}
+        {id && (
+          <ChatThread
+            key={id}
+            id={id}
+            ask={c === id ? ask : undefined}
+            onAsked={c === id ? asked : undefined}
+          />
+        )}
       </section>
     </div>
   );

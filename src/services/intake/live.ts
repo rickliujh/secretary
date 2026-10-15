@@ -195,6 +195,9 @@ const make = Effect.gen(function* () {
   type Thread = Effect.Effect.Success<ReturnType<typeof loadThread>>;
   type Ctx = { thread: Thread; source: string; senderPersonId: string | null; today: string };
 
+  /** How much of each other item in a thread the model sees. */
+  const OTHER_QUOTE_CHARS = 600;
+
   /** Retrieval, one schema-bound model call and validation for one item. */
   const classify = (inboxItemId: string, job: Job, ctx: Ctx) =>
     Effect.gen(function* () {
@@ -220,17 +223,27 @@ const make = Effect.gen(function* () {
             ]
           : [];
       });
+      // The thread's other items: what "it" or "that ticket" may point at (D22).
+      const others = [...ctx.thread.current]
+        .filter(([idx]) => idx !== job.idx)
+        .sort(([a], [b]) => a - b)
+        .map(([, row]) => ({
+          summary: row.summary ?? null,
+          quote: row.quote.slice(0, OTHER_QUOTE_CHARS),
+        }));
       const thread: ThreadContext | null =
-        job.instructions.length || pending.length || ctx.thread.decided.length
-          ? { instructions: job.instructions, decided: ctx.thread.decided, pending }
+        job.instructions.length || pending.length || ctx.thread.decided.length || others.length
+          ? { instructions: job.instructions, decided: ctx.thread.decided, pending, others }
           : null;
       const references = [
         extractReferences(job.quote, contacts),
         extractReferences(job.instructions.join("\n"), contacts),
+        // Tickets named anywhere earlier in the thread stay candidates for this item.
+        ...others.map((o) => extractReferences(o.quote, contacts)),
         {
           ...noRefs,
           issueKeys: [
-            ...job.revising.flatMap((r) => issueRefs(effectivePayload(r), { only: "keys" })),
+            ...ctx.thread.rows.flatMap((r) => issueRefs(effectivePayload(r), { only: "keys" })),
             ...ctx.thread.createdKeys,
           ],
         },

@@ -21,7 +21,7 @@ import type { Reason } from "@/services/retrieval/ranking";
 import type { PromptSprint } from "@/services/sprints/calendar";
 import { HARD_RULES, untrusted } from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 5;
+export const CLASSIFY_PROMPT_VERSION = 6;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -54,6 +54,11 @@ export type ThreadContext = {
   decided: { outcome: "done" | "rejected"; description: string }[];
   /** This item's undecided proposals in the output shape; empty for a new item. */
   pending: Record<string, unknown>[];
+  /**
+   * The thread's other items (their text and what was made of it), so "it" and
+   * "that ticket" can be resolved (prompt version 6). Context only; untrusted.
+   */
+  others?: { summary: string | null; quote: string }[];
 };
 
 /** Everything the model sees for one item, stored on the item for replay. */
@@ -376,6 +381,10 @@ const validDate = (v: unknown) =>
  * Business-rule checks the schema cannot express (design.md 7.0 rule 4).
  * Returns error strings for the repair prompt; empty means valid.
  */
+/** Statuses that end a ticket without doing it; moving there needs a comment saying why. */
+const CANCEL_STATUS =
+  /cancel|won'?t\s*(do|fix)|wontfix|abandon|reject|declin|obsolete|duplicate|invalid|not\s*needed|descoped/i;
+
 export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
   const errors: string[] = [];
   const candidates = new Map(s.candidates.map((c) => [c.key, c]));
@@ -444,6 +453,14 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
           `${at}: status ${p.toStatus} is not used in ${proj.key} (${proj.statuses.join(", ")}).`,
         );
       if (c && c.status === p.toStatus) errors.push(`${at}: ${c.key} is already ${c.status}.`);
+      // A cancelled ticket without a word about why leaves its watchers guessing.
+      if (
+        CANCEL_STATUS.test(String(p.toStatus)) &&
+        !out.proposals.some((o) => o.kind === "add_comment" && o.target === p.target && str(o.body))
+      )
+        errors.push(
+          `${at}: moving ${p.target} to ${p.toStatus} needs an add_comment on ${p.target} saying why, from the input.`,
+        );
     }
     if (
       p.kind === "link_dependency" &&
@@ -591,6 +608,8 @@ ${HARD_RULES}
 - Write summaries, comments and notes in ${s.outputLanguage}.
 - Prefer the fewest actions that fully capture the item. Do not duplicate actions.
 - Every proposal has the same fields. Choose its kind, fill the fields that kind needs, and leave the rest empty ("", "${NONE}" or []).
+- When the input asks to cancel, close, drop or stop a ticket, propose a transition_issue to the project's status for that: a cancel-like status (Cancelled, Won't Do, Rejected, Obsolete) if the project lists one, otherwise its done or closed status. A comment alone does not close a ticket.
+- When you move an issue to a closing status (cancelled, won't do, rejected, duplicate, obsolete, done or closed) for a reason in the input, also add an add_comment on the same issue that says why, in one or two sentences drawn from the input, so people reading the ticket know. When the closing status is a done status but the work was not done, the comment says the ticket was closed without being done. A cancellation always gets that comment.
 - Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
 - Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
 - Use remember for rules and preferences the user states about how to handle future work.
@@ -679,6 +698,13 @@ ${
   if (s.thread?.instructions.length) {
     blocks.push(
       `## Instructions from the user in this conversation (trusted), oldest first\n${s.thread.instructions.map((x, i) => `${i + 1}. ${x}`).join("\n")}\nFollow the newest instruction. Do not ask again about anything these cover or anything you can decide yourself.`,
+    );
+  }
+  if (s.thread?.others?.length) {
+    blocks.push(
+      `## Earlier in this conversation (context only)\nThe other items in this thread, oldest first. Use them to work out what "it", "that ticket" or "the issue" refers to. Do not act on them unless the newest instruction or this input asks for it.\n${s.thread.others
+        .map((o, i) => `${i + 1}. ${o.summary ? `${o.summary}\n` : ""}${untrusted(o.quote)}`)
+        .join("\n")}`,
     );
   }
   if (s.thread?.decided.length) {

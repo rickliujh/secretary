@@ -216,6 +216,52 @@ describe("Intake threads (D22)", () => {
     });
   });
 
+  test("a later paste that says 'it' sees the thread's earlier items and their tickets", async () => {
+    const cancel = { kind: "transition_issue", target: "PAY-2", toStatus: "Done", ...e };
+    const why = {
+      kind: "add_comment",
+      target: "PAY-2",
+      body: "Cancelled: the team is relocating.",
+      ...e,
+    };
+    const { layer, models } = intakeTestLayer({
+      "std-m": [out(answer([transition])), out(answer([cancel, why], "Cancel PAY-2"))],
+    });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const intake = yield* Intake;
+          const first = yield* intake.triage({
+            text,
+            source: "teams",
+            senderPersonId: null,
+            today: TODAY,
+          });
+          // No key in the new text: the ticket comes from earlier in the thread.
+          yield* intake.reply({
+            inboxItemId: first.inboxItemId,
+            text: "Ana: the team is relocating, so please cancel that ticket.",
+            today: TODAY,
+          });
+          return yield* readThread(first.inboxItemId);
+        }),
+        layer,
+      ),
+    );
+    const prompt = promptOf(models.calls, 1);
+    expect(prompt).toContain("## Earlier in this conversation (context only)");
+    expect(prompt).toContain("PAY-2 is blocked on INC0012345");
+    // PAY-2 is a candidate for the new item, so the model can act on it.
+    const snapshot = r.items.find((i) => i.idx === 1)?.snapshot as {
+      candidates: { key: string }[];
+    };
+    expect(snapshot.candidates.map((c) => c.key)).toContain("PAY-2");
+    expect(r.props.filter((p) => p.status === "pending").map((p) => p.kind)).toEqual(
+      expect.arrayContaining(["transition_issue", "add_comment"]),
+    );
+  });
+
   test("with several items, a reply goes only to the items the router picks", async () => {
     const long = [
       "Notes from the payments sync.",

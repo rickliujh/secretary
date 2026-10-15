@@ -6,6 +6,7 @@ import { BriefPanel } from "@/components/dashboard/brief-panel";
 import { EpicHealth } from "@/components/dashboard/epic-health";
 import { FocusList } from "@/components/dashboard/focus-list";
 import { PlanCard } from "@/components/dashboard/plan-card";
+import { PromptsCard } from "@/components/dashboard/prompts-card";
 import { useDashboard } from "@/components/dashboard/use-dashboard";
 import { QuickThread } from "@/components/inbox/quick-thread";
 import { StatusBadge } from "@/components/tickets/status-badge";
@@ -28,16 +29,18 @@ function Section({
   description,
   count,
   action,
+  className,
   children,
 }: {
   title: string;
+  className?: string;
   description?: string;
   count?: number;
   action?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <Card size="sm">
+    <Card size="sm" className={className}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {title}
@@ -163,8 +166,14 @@ function Dashboard() {
           </Section>
         </div>
       </div>
+      {/* At risk beside the suggested prompts (D42). */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <Section title="At risk" description="Blocked, stale or late." count={d.atRisk.length}>
+        <Section
+          className="lg:col-span-2"
+          title="At risk"
+          description="Blocked, stale or late."
+          count={d.atRisk.length}
+        >
           {d.atRisk.length === 0 ? (
             <Empty>Nothing at risk.</Empty>
           ) : (
@@ -184,6 +193,9 @@ function Dashboard() {
             </ul>
           )}
         </Section>
+        <PromptsCard />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
         <Section
           title="Due soon"
           description="Within a week, and anything past due."
