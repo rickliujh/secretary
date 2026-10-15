@@ -352,6 +352,27 @@ unchanged.
   comment, the Secretary comment deleted, the wait gone and the row marked revoked;
   with delete permission the ticket is gone.
 
+### FR-15 Story points on proposals (D55)
+
+- FR-15.1 (Must) A proposed ticket can carry story points. A number stated in the
+  input ("it's a 3-pointer") is used as stated. Otherwise the model suggests one
+  from the point values the user's synced tickets use, shown as a suggestion; with
+  no point history nothing is suggested.
+- FR-15.2 (Must) A small ask without stated points gets the default from Settings >
+  Jira > Small asks when one is set (empty by default), instead of a suggestion.
+- FR-15.3 (Must) Story points can be edited, or cleared, in the edit dialog and on
+  the small-ask row before approving.
+- FR-15.4 (Must) Intake can change the story points of an existing ticket when the
+  input asks for it or states a new estimate ("PAY-12 is more like a 5"); it never
+  re-estimates an existing ticket on its own. Revoking it puts the old value back.
+- FR-15.5 (Must) Points are written to the story point field on the ticket's create
+  or edit screen. When that screen has none, a create goes ahead without points and
+  says so on the card; an update fails with the reason.
+- AC: against the mock Jira, a pasted ask that states 3 points creates a ticket with
+  3 points; one that states none gets a suggestion from the scale (or the small-ask
+  default when set); "PAY-12 is more like a 5" proposes an update that sets 5, and
+  revoking it restores the previous value.
+
 ## 5. Non-functional requirements
 
 - NFR-1 Works offline for browsing cached data, drafting from cache and editing

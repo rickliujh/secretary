@@ -409,3 +409,32 @@ Checklist
   named in a warning; a failed step leaves the proposal resumable.
 - typecheck, lint, tests and cargo checks pass; CHANGELOG has the phase entry.
 
+## Phase 18: Story points on proposals (FR-15, D55)
+
+Needs Phase 17. Branch `feat/18-story-points`, stacked on `feat/17-revoke`.
+
+Tasks
+1. Schema and settings: `storyPoints` and `storyPointsEstimated` on create_issue,
+   `storyPoints` in update_issue changes, `smallAsks.defaultPoints`; describePayload
+   and the payload mapping; unit tests.
+2. Scale from the cache as a pure query with tests (projects in play first, top 8 by
+   frequency, ascending).
+3. Classify prompt version 12: the scale section, the `storyPoints` and
+   `pointsSource` output fields, the rules (use stated points; estimate only new
+   tickets and only from the scale; never re-estimate an existing ticket), and code
+   validation with repair messages; the small-ask default in payload building.
+4. Jira client `editMetaFields(key)`; the Executor picks the field from create or
+   edit metadata, writes the number, warns or fails as D55 says; update_issue undo
+   records the previous points and revoke restores them.
+5. UI: Story points in the edit dialog, on the small-ask row (saved at once) and on
+   cards ("suggested" while estimated); the default in Settings > Jira > Small asks.
+6. Mock Jira: the story point field on create screens (not Epic or Sub-task),
+   editmeta, values stored on create and update.
+7. Live eval cases: stated points on a new ticket, a suggestion from the scale, and
+   "is more like a 5" on an existing ticket.
+
+Checklist
+- FR-15 AC passes against the mock Jira.
+- Validation rejects estimates outside the scale, stated points not in the input,
+  and estimates on existing tickets.
+- typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
