@@ -380,3 +380,27 @@ Checklist
 - FR-12 AC passes; each list has a test for a fixture that mixes small asks, waits,
   blockers and sprint work.
 - Done on a small ask transitions it in the mock Jira and the row leaves the list.
+
+## Phase 19: Inline pasted text in the message box (FR-2.8, D56)
+
+Branch `feat/19-inline-paste` from `main`.
+
+Tasks
+1. Composer on TipTap (plain-text schema, `pasted` mark, paste handler, unmark
+   button and Ctrl/Cmd+Shift+U, Ctrl/Cmd+Shift+V, Enter/Shift+Enter, Ctrl+W, disabled
+   while busy, placeholder). `ComposerMessage` becomes ordered parts; every caller
+   (inbox new thread, thread reply, quick thread, capture dialog) follows.
+2. `splitMessage` and `partsOf` for inline runs, with unit tests: standalone paste,
+   inline paste, several of each, multi-line paste inside a line, « » in user text,
+   old block-first messages.
+3. Prompt version 13: inline «…» in instructions and the rule; unit tests on the
+   rendered prompt.
+4. Thread view renders user parts in order with the highlight.
+5. Live eval: a reply "change the summary to «…»" where the paste holds an
+   instruction-like sentence; the summary changes and nothing else is proposed.
+
+Checklist
+- Pasting inside a sentence keeps it there; the model gets one sentence with «…».
+- A pasted message on its own lines is still classified as input.
+- typecheck, lint, tests and build pass; CHANGELOG has the entry.
+
