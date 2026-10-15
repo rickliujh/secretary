@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import {
   inboxItems,
   intakeItems,
+  issueMeta,
   jiraIssues,
   memories,
   people,
@@ -16,6 +17,7 @@ import { bindDb, Db } from "@/services/db";
 import { Executor, undoOf } from "@/services/executor";
 import { JiraClient } from "@/services/jira";
 import { Sync } from "@/services/sync";
+import { deletedKeys } from "@/services/sync/deleted";
 import {
   type DecisionResult,
   describePayload,
@@ -51,7 +53,7 @@ const make = Effect.gen(function* () {
   const jira = yield* JiraClient;
   const sync = yield* Sync;
   const db = yield* Db;
-  const { q } = bindDb(db);
+  const { q, withDb } = bindDb(db);
 
   const load = (id: string) =>
     Effect.flatMap(
@@ -206,6 +208,17 @@ const make = Effect.gen(function* () {
       // What earlier approvals already recorded: nothing for a pending proposal.
       const recorded = row.status === "failed" ? payload : original;
       if (edited) payload = yield* parseEdit(row, edited);
+      const resolved = resolveRefs(payload, yield* createdRefs(row.inboxItemId));
+      // A ticket a revoke deleted no longer exists, whichever thread proposed acting on it
+      // (FR-14.6). A draft only mentions it, and a wait update changes Secretary's own row.
+      const deleted = yield* withDb(deletedKeys);
+      const acts = resolved.kind !== "draft_message" && resolved.kind !== "update_dependency";
+      const gone = acts ? issueRefs(resolved, { only: "keys" }).filter((k) => deleted.has(k)) : [];
+      if (gone.length)
+        return yield* new ProposalError({
+          kind: "invalid",
+          message: `${gone.join(", ")} ${gone.length > 1 ? "were" : "was"} deleted when you revoked ${gone.length > 1 ? "them" : "it"}, so this can no longer run. Reject it instead.`,
+        });
       if (!same(payload, original) && !same(payload, recorded))
         yield* captureCorrection(row, payload);
       yield* q((d) =>
@@ -219,7 +232,6 @@ const make = Effect.gen(function* () {
           .where(eq(proposals.id, id)),
       );
 
-      const resolved = resolveRefs(payload, yield* createdRefs(row.inboxItemId));
       const outcome = yield* Effect.either(
         executor.runProposal(resolved, { proposalId: id, inboxItemId: row.inboxItemId }),
       );
@@ -606,6 +618,17 @@ const make = Effect.gen(function* () {
             .set({ status: "revoked", result: { ...kept, revoked: record } })
             .where(eq(proposals.id, entry.proposalId)),
         );
+        // Every later thread is told a closed ticket was revoked (FR-14.6); a deleted
+        // one has its tombstone from the delete.
+        if (ticket?.state === "closed") {
+          const revokedAt = record.at;
+          yield* q((d) =>
+            d
+              .insert(issueMeta)
+              .values({ issueKey: ticket.key, revokedAt })
+              .onConflictDoUpdate({ target: issueMeta.issueKey, set: { revokedAt } }),
+          );
+        }
         if (record.warning) left.push(record.warning);
       }
       // Only the creates that were revoked: one left as it is keeps its pending work.

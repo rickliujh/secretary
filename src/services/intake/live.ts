@@ -41,6 +41,7 @@ import { describePayload, effectivePayload, issueRefs } from "@/services/proposa
 import { Retrieval } from "@/services/retrieval";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sync } from "@/services/sync";
+import { deletedKeys } from "@/services/sync/deleted";
 import {
   Intake,
   IntakeError,
@@ -103,7 +104,7 @@ const make = Effect.gen(function* () {
   const retrieval = yield* Retrieval;
   const sync = yield* Sync;
   const settingsSvc = yield* Settings;
-  const { q } = bindDb(yield* Db);
+  const { q, withDb } = bindDb(yield* Db);
 
   /**
    * Keys Jira answered for in this session (found, 404 or 403), so each is read
@@ -251,6 +252,7 @@ const make = Effect.gen(function* () {
         decided,
         createdKeys,
         deletedKeys,
+        revokedKeys,
         pendingByIdx,
       };
     });
@@ -311,13 +313,17 @@ const make = Effect.gen(function* () {
           ],
         },
       ].reduce(mergeRefs);
-      // A ticket a revoke deleted no longer exists (FR-14.6): not read, not named as a
-      // reference, and retrieval leaves it out however it would find it.
-      const deleted = new Set(ctx.thread.deletedKeys);
+      // A ticket a revoke deleted, in this thread or any other, no longer exists
+      // (FR-14.6): not read, not named as a reference, and retrieval leaves it out
+      // however it would find it.
+      const deleted = new Set([...ctx.thread.deletedKeys, ...(yield* withDb(deletedKeys))]);
       const references = {
         ...named,
         issueKeys: named.issueKeys.filter((k) => !deleted.has(k)),
       };
+      const exclude = [
+        ...new Set([...ctx.thread.deletedKeys, ...named.issueKeys.filter((k) => deleted.has(k))]),
+      ];
       yield* readMissingKeys(references.issueKeys);
       const snapshot = yield* retrieval.snapshot({
         quote: job.quote,
@@ -327,7 +333,8 @@ const make = Effect.gen(function* () {
         today: ctx.today,
         ...(job.askedOn ? { askedOn: job.askedOn } : {}),
         thread,
-        exclude: ctx.thread.deletedKeys,
+        exclude,
+        revokedHere: ctx.thread.revokedKeys,
       });
       const result = yield* Effect.either(
         llm.object<ItemOutput>("classify_item", {

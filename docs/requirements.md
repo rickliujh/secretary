@@ -346,7 +346,11 @@ unchanged.
 - FR-14.6 (Must) Later turns in the same thread know what was revoked: the model
   sees each revoked proposal as approved and then revoked (and whether its ticket was
   deleted or closed), does not treat a deleted ticket as existing, and does not
-  propose a revoked action again unless the user asks to redo it.
+  propose a revoked action again unless the user asks to redo it. Every other
+  thread knows too: a deleted ticket is never synced, offered, named or targeted
+  again, and a closed one is offered only when named and then shown as created by
+  mistake and revoked by the user. The model does not mention either unless the
+  user names it.
 - AC: a small ask tracked with a wait and a comment, revoked in the mock Jira as a
   user without delete permission, leaves the ticket in a cancelled status with a
   comment, the Secretary comment deleted, the wait gone and the row marked revoked;
