@@ -18,6 +18,7 @@ import {
   type SyncStatus,
 } from ".";
 import { buildScopeJql, chunk, withUpdatedSince } from "./jql";
+import { parentEpicsToRead } from "./parent-epics";
 import {
   getState,
   parseFieldIds,
@@ -37,6 +38,7 @@ const MAX_SPRINT_PAGES = 20;
 const SPRINT_KEEP_DAYS = 400;
 
 const SUBTASK_PARENTS_PER_QUERY = 100;
+const PARENT_EPICS_PER_QUERY = 100;
 
 const initialStatus: SyncStatus = {
   running: false,
@@ -166,6 +168,30 @@ const make = Effect.gen(function* () {
       }
       return { fetched, maxUpdated };
     });
+
+  /**
+   * Reads issues by key as context for the scope, outside the watermark (D53). One
+   * key the user cannot see fails a whole `key in` search with 400, so a failed
+   * search is split until that key is alone and skipped. 403 and 404 skip the part;
+   * any other Jira failure is logged and the part waits for the next run.
+   */
+  const readByKey = (keys: readonly string[], ctx: RunCtx): Effect.Effect<number, DbError> =>
+    syncQuery(`key in (${keys.join(", ")})`, ctx, "Fetching epics").pipe(
+      Effect.map((r) => r.fetched),
+      Effect.catchTag("JiraError", (e: JiraError) => {
+        if (e.status === 400 && keys.length > 1) {
+          const mid = Math.ceil(keys.length / 2);
+          return Effect.zipWith(
+            readByKey(keys.slice(0, mid), ctx),
+            readByKey(keys.slice(mid), ctx),
+            (a, b) => a + b,
+          );
+        }
+        if (e.status !== 400 && e.status !== 403 && e.status !== 404)
+          logger.warn("Reading parent epics failed", e.message);
+        return Effect.succeed(0);
+      }),
+    );
 
   /**
    * Sprint calendar data (design.md D23): sprints from synced issues, plus each
@@ -310,6 +336,26 @@ const make = Effect.gen(function* () {
           if (r.maxUpdated && (!maxUpdated || r.maxUpdated > maxUpdated)) maxUpdated = r.maxUpdated;
         }
       }
+
+      // Epics the synced issues sit under that the scope left out, so pickers,
+      // intake and reports can name and offer them (D53). They do not move the
+      // watermark, which only tracks the scope.
+      const epicRefs = yield* q((d) =>
+        d
+          .select({
+            key: jiraIssues.key,
+            epicKey: jiraIssues.epicKey,
+            stale: jiraIssues.stale,
+            syncedAt: jiraIssues.syncedAt,
+          })
+          .from(jiraIssues)
+          .all(),
+      );
+      for (const keys of chunk(
+        parentEpicsToRead(epicRefs, { full, syncedAt: ctx.syncedAt }),
+        PARENT_EPICS_PER_QUERY,
+      ))
+        fetched += yield* readByKey(keys, ctx);
 
       // Real issue types and statuses per project, so intake validation does not
       // depend on which tickets happen to be cached. Refreshed on full syncs and
