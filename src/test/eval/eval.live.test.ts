@@ -441,6 +441,12 @@ const runCase = (c: EvalCase, label: string) =>
             text: c.followUpPaste,
             today: TODAY,
           });
+        if (c.followUpParts)
+          yield* intake.reply({
+            inboxItemId: first.inboxItemId,
+            parts: c.followUpParts,
+            today: TODAY,
+          });
         return first;
       }),
     );

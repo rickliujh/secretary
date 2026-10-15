@@ -64,7 +64,15 @@ import {
   needsSegmentation,
   type References,
 } from "./preprocess";
-import { partsOf, splitMessage, UserContentSchema, withLinkedItems } from "./thread";
+import {
+  hasInput,
+  mergeParts,
+  partsOf,
+  plainQuotes,
+  splitMessage,
+  UserContentSchema,
+  withLinkedItems,
+} from "./thread";
 
 const UNSURE_QUESTION =
   "I am not sure what should happen here. What would you like me to do with this?";
@@ -228,8 +236,11 @@ const make = Effect.gen(function* () {
       const instructions = userMessages.flatMap((m, i) => {
         const c = UserContentSchema.safeParse(m.content);
         if (!c.success) return [];
-        return splitMessage(c.data.parts, i === 0).instruction ?? [];
+        return splitMessage(c.data.parts, i === 0, c.data.inline).instruction ?? [];
       });
+      // Typed input written in the message box may hold «...» values (D56); older
+      // typed input's own « and » are plain quotes, so they never read as one.
+      const firstInline = !!UserContentSchema.safeParse(userMessages[0]?.content).data?.inline;
       // A ticket a revoke closed without moving it shows its status as cached now.
       const revokedKeys = rows
         .filter((r) => r.kind === "create_issue" && r.status === "revoked")
@@ -276,6 +287,7 @@ const make = Effect.gen(function* () {
         current,
         idxOf,
         instructions,
+        firstInline,
         decided,
         createdKeys,
         deletedKeys,
@@ -374,10 +386,12 @@ const make = Effect.gen(function* () {
         ...new Set([...ctx.thread.deletedKeys, ...named.issueKeys.filter((k) => deleted.has(k))]),
       ];
       yield* readMissingKeys(references.issueKeys);
+      const source = job.source ?? ctx.source;
       const snapshot: ItemSnapshot = {
         ...(yield* retrieval.snapshot({
-          quote: job.quote,
-          source: job.source ?? ctx.source,
+          // Typed input from before the message box keeps its « and » as plain quotes (D56).
+          quote: source === "typed" && !ctx.thread.firstInline ? plainQuotes(job.quote) : job.quote,
+          source,
           senderPersonId: ctx.senderPersonId,
           references,
           today: ctx.today,
@@ -546,10 +560,12 @@ const make = Effect.gen(function* () {
             kind: "example",
             subjectType: "revision",
             content: `Asked "${opts.instruction}": ${before.map(describePayload).join("; ")} -> ${after.map(describePayload).join("; ") || "nothing"}`,
-            exampleInput: `${opts.quotes.join("\n")}\nThe user asked: ${opts.instruction}`.slice(
-              0,
-              1000,
-            ),
+            // Only the instruction's «...» values are markers; the input's are plain quotes.
+            exampleInput:
+              `${opts.quotes.map(plainQuotes).join("\n")}\nThe user asked: ${opts.instruction}`.slice(
+                0,
+                1000,
+              ),
             exampleBefore: before,
             exampleAfter: after,
             source: "user",
@@ -745,7 +761,7 @@ const make = Effect.gen(function* () {
       const thread = yield* loadThread(inboxItemId);
       const message = thread.messages.find((m) => m.id === messageId);
       const content = UserContentSchema.parse(message?.content ?? { parts: [] });
-      const { input, instruction } = splitMessage(content.parts, false);
+      const { input, instruction } = splitMessage(content.parts, false, content.inline);
       if (input) {
         // New input joins the thread as new items, instructed by this message only.
         // Pasted text is never the user's own words, whatever source it was given.
@@ -778,16 +794,23 @@ const make = Effect.gen(function* () {
 
   const triage = (input: TriageInput) =>
     Effect.gen(function* () {
-      if (!input.text.trim())
+      // From the message box (D56): a paste that is a value inside a line is not input.
+      const parts = input.parts ? mergeParts(input.parts) : null;
+      const split = parts ? splitMessage(parts, true, true) : null;
+      const typed = parts ? !hasInput(parts, true) : input.source === "typed";
+      const text = split ? split.input : (input.text ?? "");
+      // Pasted input is never the user's own words (D55): "typed" given with a paste is "other".
+      const source: Source = typed ? "typed" : input.source === "typed" ? "other" : input.source;
+      if (!text.trim())
         return yield* new IntakeError({ kind: "empty", message: "Paste or type something first." });
       const inboxItemId = newId();
       const now = nowIso();
       yield* q((d) =>
         d.insert(inboxItems).values({
           id: inboxItemId,
-          source: input.source,
-          senderPersonId: input.senderPersonId,
-          rawText: input.text,
+          source,
+          senderPersonId: typed && parts ? null : input.senderPersonId,
+          rawText: text,
           receivedAt: now,
           status: "new",
         }),
@@ -799,8 +822,10 @@ const make = Effect.gen(function* () {
           seq: 0,
           role: "user",
           content: {
-            parts: partsOf(input.text, input.instruction ?? null, input.source === "typed"),
-            source: input.source,
+            ...(parts
+              ? { parts, inline: true }
+              : { parts: partsOf(text, input.instruction ?? null, typed) }),
+            source,
             ...(input.author ? { author: input.author } : {}),
           },
           createdAt: now,
@@ -830,8 +855,10 @@ const make = Effect.gen(function* () {
 
   const reply = (input: ReplyInput) =>
     Effect.gen(function* () {
-      const text = input.text?.trim() ?? "";
-      const instruction = input.instruction?.trim() || null;
+      const parts = input.parts ? mergeParts(input.parts) : null;
+      const split = parts ? splitMessage(parts, false, true) : null;
+      const text = split ? split.input : (input.text?.trim() ?? "");
+      const instruction = split ? split.instruction : input.instruction?.trim() || null;
       if (!text && !instruction)
         return yield* new IntakeError({ kind: "empty", message: "Type or paste something first." });
       const thread = yield* loadThread(input.inboxItemId);
@@ -849,7 +876,8 @@ const make = Effect.gen(function* () {
           seq: Math.max(-1, ...thread.messages.map((m) => m.seq)) + 1,
           role: "user",
           content: {
-            parts: partsOf(text, instruction, false),
+            parts: parts ?? partsOf(text, instruction, false),
+            ...(parts ? { inline: true } : {}),
             source: replySource,
             answers: input.answers ?? null,
           },

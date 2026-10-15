@@ -28,10 +28,11 @@ import { dateTime, relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { inboxDetail, type ProposalView, type ThreadMessage } from "@/services/inbox/queries";
 import type { Source } from "@/services/intake";
-import type { MessagePart } from "@/services/intake/thread";
+import { hasInput, type MessagePart } from "@/services/intake/thread";
 import { describePayload } from "@/services/proposals/schema";
 import { executedRefs, groupSmallAsks } from "@/services/small-asks/bundle";
 import { Composer, type ComposerMessage } from "./composer";
+import { PASTED_HIGHLIGHT } from "./message-doc";
 import { ProposalCard } from "./proposal-card";
 import { SmallAskRow } from "./small-ask-row";
 import { useDecisions, useReply } from "./use-inbox";
@@ -60,13 +61,56 @@ function PastedText({ text, source }: { text: string; source: string | null }) {
   );
 }
 
+/** A message written in the message box (D56): its parts in order, pastes highlighted. */
+function InlineText({ parts, source }: { parts: readonly MessagePart[]; source: string | null }) {
+  const [open, setOpen] = useState(false);
+  const text = parts.map((p) => p.text).join("");
+  const long = text.length > 400 || text.split("\n").length > 6;
+  const pastedInput = hasInput(parts, true);
+  return (
+    <div className="flex flex-col gap-1">
+      {pastedInput && source && source !== "typed" && (
+        <span className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+          <ClipboardPaste className="size-3" />
+          Pasted · {sourceLabel(source)}
+        </span>
+      )}
+      <p className={cn("whitespace-pre-wrap", long && !open && "line-clamp-6")}>
+        {parts.map((p, i) =>
+          p.type === "pasted" ? (
+            // biome-ignore lint/suspicious/noArrayIndexKey: parts never reorder.
+            <mark key={i} className={PASTED_HIGHLIGHT}>
+              {p.text}
+            </mark>
+          ) : (
+            // biome-ignore lint/suspicious/noArrayIndexKey: parts never reorder.
+            <span key={i}>{p.text}</span>
+          ),
+        )}
+      </p>
+      {long && (
+        <button
+          type="button"
+          className="self-start text-xs text-muted-foreground underline"
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? "Show less" : "Show all"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function UserBubble({
   parts,
+  inline = false,
   source,
   answer,
   pending = false,
 }: {
-  parts: MessagePart[];
+  parts: readonly MessagePart[];
+  /** Written in the message box (D56); older messages show pastes as blocks. */
+  inline?: boolean;
   source: string | null;
   answer?: boolean;
   pending?: boolean;
@@ -79,17 +123,19 @@ function UserBubble({
       )}
     >
       {answer && <span className="text-xs text-muted-foreground">Answer</span>}
-      {parts.map((p, i) =>
-        p.type === "pasted" ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: parts never reorder.
-          <PastedText key={i} text={p.text} source={source} />
-        ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: parts never reorder.
-          <p key={i} className="whitespace-pre-wrap">
-            {p.text}
-          </p>
-        ),
-      )}
+      {inline && <InlineText parts={parts} source={source} />}
+      {!inline &&
+        parts.map((p, i) =>
+          p.type === "pasted" ? (
+            // biome-ignore lint/suspicious/noArrayIndexKey: parts never reorder.
+            <PastedText key={i} text={p.text} source={source} />
+          ) : (
+            // biome-ignore lint/suspicious/noArrayIndexKey: parts never reorder.
+            <p key={i} className="whitespace-pre-wrap">
+              {p.text}
+            </p>
+          ),
+        )}
     </div>
   );
 }
@@ -239,20 +285,27 @@ export function ThreadView({ id }: { id: string }) {
   const origin = firstUser?.role === "user" ? firstUser.origin : null;
   const unanswered = !reply.isPending && last?.role === "user" && d.item.error;
 
-  const send = (m: ComposerMessage) =>
+  const send = (m: ComposerMessage) => {
+    const withInput = hasInput(m.parts, true);
     reply.mutate({
       inboxItemId: id,
-      text: m.pasted.join("\n\n"),
-      instruction: m.typed || null,
-      source: m.pasted.length ? m.source : undefined,
-      // Only a typed reply answers; pasted text starts new items instead.
-      answers: answering && m.typed && m.pasted.length === 0 ? answering.id : null,
+      parts: m.parts,
+      source: withInput ? m.source : undefined,
+      // Only a typed reply answers; pasted input starts new items instead.
+      answers: answering && !withInput ? answering.id : null,
     });
+  };
   const sending = reply.isPending ? reply.variables : null;
 
   const turn = (m: ThreadMessage) =>
     m.role === "user" ? (
-      <UserBubble key={m.id} parts={m.parts} source={m.source} answer={!!m.answers} />
+      <UserBubble
+        key={m.id}
+        parts={m.parts}
+        inline={m.inline}
+        source={m.source}
+        answer={!!m.answers}
+      />
     ) : (
       <AssistantTurn
         key={m.id}
@@ -320,12 +373,15 @@ export function ThreadView({ id }: { id: string }) {
                 pending
                 source={sending.source ?? null}
                 answer={!!sending.answers}
-                parts={[
-                  ...(sending.text ? [{ type: "pasted" as const, text: sending.text }] : []),
-                  ...(sending.instruction
-                    ? [{ type: "typed" as const, text: sending.instruction }]
-                    : []),
-                ]}
+                inline={!!sending.parts}
+                parts={
+                  sending.parts ?? [
+                    ...(sending.text ? [{ type: "pasted" as const, text: sending.text }] : []),
+                    ...(sending.instruction
+                      ? [{ type: "typed" as const, text: sending.instruction }]
+                      : []),
+                  ]
+                }
               />
               <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
                 <Loader2 className="size-3.5 animate-spin" />

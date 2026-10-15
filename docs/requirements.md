@@ -121,6 +121,13 @@ scope; "Should" is v1 if time permits; "Could" is later.
 - FR-2.6 (Should) Inbox history: every intake is kept with its triage and what was
   approved, searchable.
 - FR-2.7 (Could) Bulk intake: paste a long chat log and split into several items.
+- FR-2.8 (Must) Pasted text stays where it is pasted in the message box, editable in
+  place and highlighted as quoted, so a reply like "change the summary to <paste>"
+  reads as one sentence. A paste on its own line, or any paste of several lines, is
+  input to work on; a one-line paste inside a typed line is a value for that
+  instruction. Either way the model treats it as
+  someone else's text, never as instructions. The highlight can be removed to make it
+  the user's own words (D56).
 - AC: given 20 representative inputs from the user, at least 16 produce proposals the
   user accepts without edit or with minor edits; zero writes happen without approval.
 

@@ -1,6 +1,7 @@
 /** Story points in classify_item (prompt version 12, D55): fields, rules, checks and mapping. */
 import { describe, expect, test } from "bun:test";
 import type { z } from "zod";
+import { splitMessage } from "@/services/intake/thread";
 import { snapshot } from "@/test/fixtures/intake/snapshot";
 import {
   buildClassifyPrompt,
@@ -539,6 +540,25 @@ describe("the user's own words state points (answers, 2026-10-15)", () => {
       notStated(13),
     );
     expect(validateItemOutput(update("2"), plain(["Dana says «it's a 2-pointer»"]))).toEqual([]);
+  });
+
+  test("an inline reply «13» (D56) with no points cue is not stated, even when points are the topic", () => {
+    // The instruction as the message box splits it: the paste shares the typed line.
+    const { instruction } = splitMessage(
+      [
+        { type: "typed", text: "make it " },
+        { type: "pasted", text: "13" },
+      ],
+      false,
+      true,
+    );
+    expect(instruction).toBe("make it «13»");
+    const asked = ["How many story points should PAY-2 get?"];
+    expect(validateItemOutput(update("13"), plain([instruction ?? ""], asked)).join(" ")).toContain(
+      notStated(13),
+    );
+    // The same number typed by the user answers the question.
+    expect(validateItemOutput(update("13"), plain(["make it 13"], asked))).toEqual([]);
   });
 
   test("pasted input (any source) still needs a cue; the make forms are cues", () => {

@@ -1,6 +1,7 @@
 import { Context, Data, type Effect } from "effect";
 import type { DbError } from "@/services/db";
 import type { LlmError } from "@/services/llm";
+import type { MessagePart } from "./thread";
 
 export const SOURCES = ["teams", "email", "meeting", "typed", "other"] as const;
 export type Source = (typeof SOURCES)[number];
@@ -12,9 +13,16 @@ export class IntakeError extends Data.TaggedError("IntakeError")<{
 
 export type TriageInput = {
   /** The input: pasted text, or what the user typed when nothing was pasted. */
-  text: string;
+  text?: string;
   /** The user's typed words sent with pasted input: a trusted instruction (D22). */
   instruction?: string | null;
+  /**
+   * The message as written in the message box, in order (D56). When given, the
+   * input and instruction are worked out from it and `text` and `instruction`
+   * are ignored; with no paste that is input, the message is typed input.
+   */
+  parts?: readonly MessagePart[];
+  /** Where pasted input is from. */
   source: Source;
   senderPersonId: string | null;
   /**
@@ -33,6 +41,8 @@ export type ReplyInput = {
   text?: string;
   /** Typed words: they instruct the new text, or revise existing items when nothing was pasted. */
   instruction?: string | null;
+  /** The message as written in the message box (D56); replaces `text` and `instruction`. */
+  parts?: readonly MessagePart[];
   /** The pending question this reply answers. */
   answers?: string | null;
   /** Source of the pasted text; defaults to the thread's. */

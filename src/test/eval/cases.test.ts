@@ -15,6 +15,13 @@ describe("eval cases", () => {
     expect(EVAL_CASES.length).toBeGreaterThanOrEqual(5);
   });
 
+  test("a reply with a paste inside its sentence (D56)", () => {
+    const inline = EVAL_CASES.filter((c) =>
+      c.followUpParts?.some((p, i, all) => p.type === "pasted" && all[i - 1]?.type === "typed"),
+    );
+    expect(inline).toHaveLength(1);
+  });
+
   test("small-ask cases run with a home and check what code decides (D44)", () => {
     const small = EVAL_CASES.filter((c) => c.home);
     expect(small.length).toBeGreaterThanOrEqual(4);
