@@ -438,3 +438,37 @@ Checklist
 - Validation rejects estimates outside the scale, stated points not in the input,
   and estimates on existing tickets.
 - typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
+
+## Phase 20: New tickets and the sprint (FR-16, D57)
+
+Needs Phase 18 (story points). Branch `feat/20-sprint-fit`, stacked on
+`feat/18-story-points`.
+
+Tasks
+1. Settings: `sprint.daysPerPoint` (number or null) with the zod schema and a
+   Settings > General > Sprint field that shows the derived rate when empty.
+2. `sprints/fit.ts` (pure, tests): working days left, load, rate (setting, else
+   velocity on the board, else none), verdict (fits, tight, over, unknown), the
+   headline and detail lines. Cover: today is the last day, the end has passed, no
+   rate, unestimated tickets, a ticket without points, another assignee, other
+   creates of the thread joining.
+3. Payload: `joinSprintChosen`; `joinSprint` for every create (small ask from the
+   setting; otherwise due on or before the sprint end; never Epics or sub-tasks);
+   revisions and re-triage keep a chosen value. Correction examples leave
+   `joinSprint` out.
+4. `sprints/fit-query.ts` and a TanStack Query hook per thread, invalidated after
+   sync and proposal edits; the same sprint pick as the Executor.
+5. UI: the switch with its verdict line and Details popover on the create card,
+   the chip on the small-ask row, the switch in the edit dialog (saved at once
+   through `Proposals.saveEdit`), executed cards showing the result; the Today
+   Sprint work header line; the chat `sprint_points` additions.
+6. Mock Jira: whatever the AC needs (a sprint with dates and the user's tickets in
+   it, the move into the sprint on create).
+
+Checklist
+- FR-16 AC passes against the mock Jira.
+- Fit tests cover the cases in task 2; payload tests cover the defaults and the
+  chosen value surviving a revision.
+- No change to the classify prompt or its version.
+- typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
+
