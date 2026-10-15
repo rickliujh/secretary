@@ -29,6 +29,9 @@ const DECISION_KEYS = [
   queryKeys.memories,
 ];
 
+/** What a saved edit changes: the thread and the sprint fits that count its creates. */
+const SAVE_EDIT_KEYS = [queryKeys.inbox, ["tickets", "sprint-fit"]] as const;
+
 export function useInvalidateAfterDecision() {
   const client = useQueryClient();
   return () => {
@@ -50,20 +53,44 @@ export type SaveEditInput = { id: string; edited: ProposalPayload; inboxItemId?:
 
 const saveOf = (m: Pick<Mutation, "state">) => (m.state.variables ?? null) as SaveEditInput | null;
 
-/** A save of this proposal's edit (or of any in this thread) is running. */
-export function useSavingEdit(filter: { id?: string; inboxItemId?: string | null }) {
-  return (
-    useIsMutating({
-      mutationKey: SAVE_EDIT_MUTATION,
-      predicate: (m) => {
-        const v = saveOf(m);
-        if (!v) return false;
-        if (filter.id) return v.id === filter.id;
-        return !!filter.inboxItemId && v.inboxItemId === filter.inboxItemId;
-      },
-    }) > 0
+/**
+ * Saves of pending proposals' edits still being written, by proposal id. Saves
+ * of one proposal run in order, and an approve (or Approve all, or Track)
+ * waits for them, so it always reads the newest choice without the buttons
+ * being disabled while a save runs (D57).
+ */
+const writes = new Map<string, { inboxItemId: string | null; done: Promise<unknown> }>();
+
+const writeEdit = (i: SaveEditInput) =>
+  Effect.tryPromise({
+    try: () => {
+      const before = writes.get(i.id)?.done.catch(() => undefined) ?? Promise.resolve();
+      const done = before.then(() =>
+        run(Effect.flatMap(Proposals, (p) => p.saveEdit(i.id, i.edited))),
+      );
+      const entry = { inboxItemId: i.inboxItemId ?? null, done };
+      writes.set(i.id, entry);
+      void done
+        .catch(() => undefined)
+        .finally(() => {
+          if (writes.get(i.id) === entry) writes.delete(i.id);
+        });
+      return done;
+    },
+    catch: (e) => e,
+  });
+
+/** Waits for the edits being written to these proposals, or to any in a thread. */
+const afterWrites = (filter: { ids?: readonly string[]; inboxItemId?: string }) =>
+  Effect.promise(() =>
+    Promise.all(
+      [...writes.entries()]
+        .filter(([id, w]) =>
+          filter.ids ? filter.ids.includes(id) : w.inboxItemId === filter.inboxItemId,
+        )
+        .map(([, w]) => w.done.catch(() => undefined)),
+    ),
   );
-}
 
 /** The newest edit of this proposal still being saved, from any component; null when none. */
 export function usePendingEdit(id: string): ProposalPayload | null {
@@ -180,11 +207,15 @@ const withProposals =
 
 export function useDecisions() {
   const approve = useDecisionMutation(
-    withProposals((p, i: { id: string; edited?: ProposalPayload }) => p.approve(i.id, i.edited)),
+    withProposals((p, i: { id: string; edited?: ProposalPayload }) =>
+      Effect.zipRight(afterWrites({ ids: [i.id] }), p.approve(i.id, i.edited)),
+    ),
   );
   const reject = useDecisionMutation(withProposals((p, id: string) => p.reject(id)));
   const approveAll = useDecisionMutation(
-    withProposals((p, inboxItemId: string) => p.approveAll(inboxItemId)),
+    withProposals((p, inboxItemId: string) =>
+      Effect.zipRight(afterWrites({ inboxItemId }), p.approveAll(inboxItemId)),
+    ),
   );
   const dismiss = useDecisionMutation(
     withProposals((p, inboxItemId: string) => p.dismiss(inboxItemId)),
@@ -193,19 +224,21 @@ export function useDecisions() {
   const track = useDecisionMutation(
     withProposals(
       (p, i: { ids: readonly string[]; edits?: Readonly<Record<string, ProposalPayload>> }) =>
-        p.track(i.ids, i.edits),
+        Effect.zipRight(afterWrites({ ids: i.ids }), p.track(i.ids, i.edits)),
     ),
   );
   /**
    * Keeps a row change or the sprint switch on a pending proposal, so any
-   * approve uses it (D44, D57). Named, and pending until the thread is read
-   * again, so approvals can wait for it.
+   * approve uses it (D44, D57). It changes only that proposal, so only the
+   * Inbox and the sprint fits are read again, and it stays pending until they
+   * are back, so a switch shows the new value throughout (`usePendingEdit`).
    */
-  const saveEdit = useDecisionMutation(
-    withProposals((p, i: SaveEditInput) => p.saveEdit(i.id, i.edited)),
-    SAVE_EDIT_MUTATION,
-    { awaitRefresh: true },
-  );
+  const saveEdit = useAppMutation(writeEdit, {
+    invalidate: SAVE_EDIT_KEYS,
+    invalidateOnError: true,
+    mutationKey: SAVE_EDIT_MUTATION,
+    awaitRefresh: true,
+  });
   /** Revoke (FR-14): the steps the user confirmed; a failed step comes back as a result. */
   const revoke = useDecisionMutation(
     withProposals((p, i: RevokeInput) => p.revoke(i.id, i.confirmed)),

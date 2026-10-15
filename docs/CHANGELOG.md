@@ -1528,6 +1528,9 @@ Built
   the card shows the stored choice, and when it fails the switch still works;
   Today names the end date once; the rate field takes "0,5"; fits refresh on a
   new day.
+- Toggling the switch no longer makes the page flicker: a save reads again only
+  the Inbox and the sprint fits, and approvals wait for it instead of being
+  disabled while it runs.
 - A sprint's last day is the user's choice: Settings > General > "A sprint's
   last day" (`sprint.lastDay`): follow Jira's end time (default; the option shows
   the active sprint's end time when known), count it as a working day, or not

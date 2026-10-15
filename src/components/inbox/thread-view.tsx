@@ -34,7 +34,7 @@ import { executedRefs, groupSmallAsks } from "@/services/small-asks/bundle";
 import { Composer, type ComposerMessage } from "./composer";
 import { ProposalCard } from "./proposal-card";
 import { SmallAskRow } from "./small-ask-row";
-import { useDecisions, useReply, useSavingEdit } from "./use-inbox";
+import { useDecisions, useReply } from "./use-inbox";
 
 function PastedText({ text, source }: { text: string; source: string | null }) {
   const [open, setOpen] = useState(false);
@@ -216,7 +216,6 @@ export function ThreadView({ id }: { id: string }) {
   const lookups = useLookups();
   const { approveAll, dismiss, retriage } = useDecisions();
   // Approve all waits for a save in this thread (the sprint switch, a row field) to land (D57).
-  const saving = useSavingEdit({ inboxItemId: id });
   const reply = useReply();
   const [skipAnswer, setSkipAnswer] = useState<string | null>(null);
   const d = detail.data;
@@ -278,7 +277,7 @@ export function ThreadView({ id }: { id: string }) {
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"
-            disabled={pendingActions === 0 || approveAll.isPending || saving}
+            disabled={pendingActions === 0 || approveAll.isPending}
             onClick={() => approveAll.mutate(id)}
           >
             {approveAll.isPending ? <Loader2 className="animate-spin" /> : <CheckCheck />}

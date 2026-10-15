@@ -22,7 +22,7 @@ import { ProposalEditDialog } from "./proposal-edit-dialog";
 import { isEditable, viewPayload } from "./proposal-fields";
 import { RevokeControl, RevokeOutcome } from "./revoke-control";
 import { SprintSwitch, sprintOutcome } from "./sprint-choice";
-import { useDecisions, usePendingEdit, useSavingEdit } from "./use-inbox";
+import { useDecisions, usePendingEdit } from "./use-inbox";
 
 const STATUS_TONE: Record<string, string> = {
   pending: TONE.warning,
@@ -280,9 +280,8 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
   const draftId = result?.communicationId;
   const pending = proposal.status === "pending";
   // Approve waits for a save of this proposal (the sprint switch, a row field) to land (D57).
-  const saving = useSavingEdit({ id: proposal.id });
   const pendingEdit = usePendingEdit(proposal.id);
-  const busy = approve.isPending || reject.isPending || saving;
+  const busy = approve.isPending || reject.isPending;
   // The sprint switch alone is code's field, not an edit of the proposal (D57).
   const edited =
     !!proposal.editedPayload &&

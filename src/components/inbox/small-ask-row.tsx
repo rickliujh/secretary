@@ -28,7 +28,7 @@ import { editedPoints, issueOptions } from "./proposal-fields";
 import { RevokeControl, RevokeOutcome } from "./revoke-control";
 import { SMALL_ASK_KEYS } from "./small-ask-keys";
 import { SprintChip } from "./sprint-choice";
-import { useDecisions, useSavingEdit, useTurnRunning } from "./use-inbox";
+import { useDecisions, useTurnRunning } from "./use-inbox";
 import { useThreadSprintFits } from "./use-sprint-fit";
 
 type Result = { message?: string; error?: string; issueKey?: string; warning?: string } | null;
@@ -84,10 +84,9 @@ export function SmallAskRow({
   const ids = trackOrder(create, members);
   const createOpen = create.status === "pending" || create.status === "failed";
   const pendingIds = [create, ...members].filter((p) => p.status === "pending").map((p) => p.id);
-  // A save from the expanded card's switch counts too, and a running turn locks the chip (D57).
-  const saving = useSavingEdit({ id: create.id });
+  // Track waits for saves of the row's fields and switch (D57); a running turn locks the chip.
   const turn = useTurnRunning(create.inboxItemId);
-  const busy = track.isPending || saveEdit.isPending || saving || rejecting;
+  const busy = track.isPending || rejecting;
   const result = create.result as Result;
   const failed = [create, ...members].filter((p) => p.status === "failed");
   const warnings = [create, ...members]

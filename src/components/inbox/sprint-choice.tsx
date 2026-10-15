@@ -17,7 +17,7 @@ import type { PayloadOf } from "@/services/proposals/schema";
 import { isSubtaskType } from "@/services/small-asks/home";
 import type { Fit, Verdict } from "@/services/sprints/fit";
 import type { CreateSprintFit } from "@/services/sprints/fit-query";
-import { useDecisions, usePendingEdit, useSavingEdit, useTurnRunning } from "./use-inbox";
+import { useDecisions, usePendingEdit, useTurnRunning } from "./use-inbox";
 import { useThreadSprintFits } from "./use-sprint-fit";
 
 const VERDICT_TEXT: Record<Verdict, string> = {
@@ -109,15 +109,14 @@ const neverJoins = (p: PayloadOf<"create_issue">) =>
 /**
  * The create's switch (D57). What it shows is the stored proposal, or an edit
  * of it still being saved from any component (a card, its dialog, the
- * small-ask row), so two switches never disagree. It is locked while a save
- * or an intake turn on the thread runs, so a toggle is not lost to a row the
- * turn replaces.
+ * small-ask row), so two switches never disagree. It is locked while an
+ * intake turn on the thread runs, so a toggle is not lost to a row the turn
+ * replaces; saves queue, and approvals wait for them.
  */
 export function useSprintSwitch(proposal: ProposalView) {
   const { saveEdit } = useDecisions();
   const payload = (proposal.editedPayload ?? proposal.payload) as PayloadOf<"create_issue">;
   const fits = useThreadSprintFits(proposal.inboxItemId, proposal.kind === "create_issue");
-  const saving = useSavingEdit({ id: proposal.id });
   const turn = useTurnRunning(proposal.inboxItemId);
   const pendingEdit = usePendingEdit(proposal.id);
   const checked =
@@ -127,7 +126,12 @@ export function useSprintSwitch(proposal: ProposalView) {
     saveEdit.mutate({
       id: proposal.id,
       inboxItemId: proposal.inboxItemId,
-      edited: { ...payload, joinSprint, joinSprintChosen: true },
+      // On top of an edit still being saved (a row field), not the stored one.
+      edited: {
+        ...(pendingEdit?.kind === "create_issue" ? pendingEdit : payload),
+        joinSprint,
+        joinSprintChosen: true,
+      },
     });
   };
   const choice: CreateSprintFit | undefined = fits.data?.[proposal.id];
@@ -138,7 +142,7 @@ export function useSprintSwitch(proposal: ProposalView) {
     failed: fits.isError,
     checked,
     set,
-    busy: saving || turn,
+    busy: turn,
     payload,
   };
 }
