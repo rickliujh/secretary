@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
+import { Loader2 } from "lucide-react";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -298,13 +299,21 @@ function SyncCard() {
           </>
         )}
       </CardContent>
-      <CardFooter className="mt-4 gap-2">
+      {/* Fixed labels: a label that changed with each phase resized the buttons
+          every few hundred milliseconds, and WebKit left stale copies behind. */}
+      <CardFooter className="mt-4 flex-wrap gap-2">
         <Button disabled={status?.running} onClick={() => start(false)}>
-          {status?.running ? (status.phase ?? "Syncing...") : "Sync now"}
+          {status?.running && <Loader2 className="animate-spin" />}
+          Sync now
         </Button>
         <Button variant="outline" disabled={status?.running} onClick={() => start(true)}>
           Full resync
         </Button>
+        {status?.running && (
+          <span role="status" className="min-w-0 truncate text-sm text-muted-foreground">
+            {status.phase ?? "Syncing..."}
+          </span>
+        )}
       </CardFooter>
     </Card>
   );
