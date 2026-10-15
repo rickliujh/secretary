@@ -112,7 +112,7 @@ export function EpicSelect({ issue }: { issue: Issue }) {
         )}
         {(epics.data ?? []).map((e) => (
           <SelectItem key={e.key} value={e.key}>
-            {e.key} {e.epicName ?? e.summary}
+            {e.key} {e.epicName || e.summary}
           </SelectItem>
         ))}
       </SelectContent>

@@ -206,6 +206,100 @@ describe("Sync", () => {
   });
 });
 
+describe("parent epics outside the scope (D53)", () => {
+  type RawFixture = { key: string; id: string; fields: Record<string, unknown> };
+  const clone = (raw: unknown) => structuredClone(raw) as RawFixture;
+  const epic = (() => {
+    const e = clone(all.find((i) => i.key === "PAY-1"));
+    e.key = "PAY-9";
+    e.id = "20009";
+    e.fields.summary = "Migrate old service feature";
+    return e;
+  })();
+  // PAY-2 sits under PAY-9 and OPS-7 under OPS-404, which the user cannot see.
+  const scoped = all.map((raw) => {
+    const r = clone(raw);
+    if (r.key === "PAY-2") r.fields.customfield_10100 = "PAY-9";
+    if (r.key === "OPS-7") r.fields.customfield_10100 = "OPS-404";
+    return r;
+  });
+
+  function setupEpics() {
+    const searches: string[] = [];
+    const stub = stubFetch([
+      { match: (u) => u.pathname.endsWith("/myself"), respond: () => json(myself) },
+      { match: (u) => u.pathname.endsWith("/field"), respond: () => json(fields) },
+      {
+        match: (u) => /\/issue\/[A-Z]+-\d+\/comment$/.test(u.pathname),
+        respond: () => json(comments),
+      },
+      {
+        match: (u, r) => u.pathname.endsWith("/search") && r.method === "POST",
+        respond: (r: StubRequest) => {
+          const body = r.body as SearchBody;
+          searches.push(body.jql);
+          if (body.jql.startsWith("key in")) {
+            if (body.jql.includes("OPS-404"))
+              return json({ errorMessages: ["no such issue"] }, 400);
+            return json({ startAt: 0, maxResults: 100, total: 1, issues: [epic] });
+          }
+          const source = body.jql.startsWith("(parent in") ? [] : scoped;
+          return json({ startAt: 0, maxResults: 100, total: source.length, issues: source });
+        },
+      },
+    ]);
+    const layer = Layer.provideMerge(SyncLive, jiraTestLayer(stub.fetch, jiraSettings({})));
+    return { searches, layer };
+  }
+
+  test("an epic the scope leaves out is read by key; an unreadable key is split off and skipped", async () => {
+    const { searches, layer } = setupEpics();
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sync = yield* Sync;
+          const first = yield* sync.run();
+          const second = yield* sync.run();
+          return { first, second, rows: yield* issueRows };
+        }),
+        layer,
+      ),
+    );
+    const epicRow = r.rows.find((x) => x.key === "PAY-9");
+    expect(epicRow?.issueType).toBe("Epic");
+    expect(epicRow?.summary).toBe("Migrate old service feature");
+    expect(epicRow?.stale).toBe(false);
+    expect(r.rows.find((x) => x.key === "PAY-2")?.epicKey).toBe("PAY-9");
+    expect(r.rows.some((x) => x.key === "OPS-404")).toBe(false);
+    const byKey = searches.filter((q) => q.startsWith("key in"));
+    // First run: both keys fail together, then each alone. Second run (incremental):
+    // PAY-9 is stored, so only the unreadable key is tried again.
+    expect(byKey).toEqual([
+      "key in (OPS-404, PAY-9)",
+      "key in (OPS-404)",
+      "key in (PAY-9)",
+      "key in (OPS-404)",
+    ]);
+    expect(r.second.full).toBe(false);
+  });
+
+  test("a full resync keeps an out-of-scope epic fresh instead of marking it stale", async () => {
+    const { layer } = setupEpics();
+    const rows = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sync = yield* Sync;
+          yield* sync.run();
+          yield* sync.run({ full: true });
+          return yield* issueRows;
+        }),
+        layer,
+      ),
+    );
+    expect(rows.find((x) => x.key === "PAY-9")?.stale).toBe(false);
+  });
+});
+
 describe("project metadata", () => {
   test("a full sync reads every issue type and status per project for intake validation", async () => {
     const { getState, parseProjectMeta, SYNC_KEYS } = await import("./state");

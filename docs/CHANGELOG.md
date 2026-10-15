@@ -631,3 +631,15 @@ Built
   fixed reading the tab-separated `file` output and repeated search lines.
 - Live eval (GLM 5.3 Flash) answers a decision-and-owner question from a test vault,
   naming the notes.
+
+## Parent epics outside the sync scope (2026-10-15)
+
+- An epic that synced tickets sit under, but that the sync JQL and tracked epics
+  leave out, was never stored. The ticket's epic picker showed it as a bare key, and
+  intake could not offer it. Adding an Epic Name in Jira or running a full resync
+  did not help, because a full resync only re-reads the scope.
+- Sync now reads those parent epics by key after the sub-task pass (design.md D53).
+  A full run refreshes them all; an incremental run reads only new ones. A key the
+  user cannot see is isolated and skipped. The watermark is unchanged.
+- The epic picker falls back to the summary when the Epic Name is blank.
+
