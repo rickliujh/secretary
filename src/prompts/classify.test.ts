@@ -7,6 +7,7 @@ import {
   buildClassifyPrompt,
   buildItemSchema,
   CLASSIFY_PROMPT_VERSION,
+  type DecidedProposal,
   fromPayload,
   type ItemOutput,
   mapItemOutput,
@@ -425,9 +426,15 @@ describe("pastes inside the user's words (D56)", () => {
       corrected: "Update PAY-4",
     };
     const withValue = buildClassifyPrompt({ ...snapshot, examples: [example] }).prompt;
+    // The examples are labelled as from other inputs (version 11) and carry the
+    // «» rule (version 13).
+    expect(withValue).toContain("from other inputs (learn the pattern only)");
     expect(withValue).toContain(
-      `The user asked: change the summary to «Close PAY-4»"\n  Proposed: Comment on PAY-4\n  User changed it to: Update PAY-4\n${PASTED_IN_INSTRUCTION}`,
+      `The user asked: change the summary to «Close PAY-4»"\n  Proposed then: Comment on PAY-4\n  User changed it to: Update PAY-4\n${PASTED_IN_INSTRUCTION}`,
     );
+    const v12 = buildClassifyPrompt({ ...snapshot, promptVersion: 12, examples: [example] }).prompt;
+    expect(v12).toContain("from other inputs (learn the pattern only)");
+    expect(v12).not.toContain(PASTED_IN_INSTRUCTION);
     const plain = buildClassifyPrompt({
       ...snapshot,
       examples: [{ ...example, input: "PAY-4 is late\nThe user asked: make it High" }],
@@ -546,5 +553,249 @@ describe("kinds the model cannot propose", () => {
     } as const;
     expect(schema.safeParse({ ...good, proposals: [{ ...move, ...base }] }).success).toBe(false);
     expect(fromPayload(move)).toBeNull();
+  });
+});
+
+describe("revoked proposals in the thread context (FR-14.6, prompt version 11)", () => {
+  const withDecided = (decided: DecidedProposal[]) =>
+    buildClassifyPrompt({ ...snapshot, thread: { instructions: [], decided, pending: [] } });
+  const create = "Create Task in PAY: Send Dana the Q3 numbers";
+
+  test("a revoked create reads as approved, then revoked, with its ticket deleted", () => {
+    expect(CLASSIFY_PROMPT_VERSION).toBeGreaterThanOrEqual(11);
+    const { system, prompt } = withDecided([
+      {
+        outcome: "revoked",
+        description: create,
+        undone: "PAY-41 was deleted and no longer exists",
+      },
+    ]);
+    expect(prompt).toContain(
+      `- Approved, then revoked by the user: ${create}. Undone: PAY-41 was deleted and no longer exists.`,
+    );
+    expect(prompt).not.toContain("Rejected by the user");
+    // The header agrees with the redo exception.
+    expect(prompt).toContain(
+      "## Already decided in this conversation (do not propose again, except a revoked action the user's newest instruction asks to redo)\n",
+    );
+    expect(system).toContain("A revoked action is undone.");
+    expect(system).toContain("A ticket the revoke deleted no longer exists");
+    expect(system).toContain(
+      "A ticket the revoke closed stays closed unless the user asks to reopen it.",
+    );
+    // Only the user's own words may ask for a redo: the input led to the revoked action.
+    expect(system).toContain(
+      "Do not propose a revoked action again unless the user's newest instruction (or their answer to your question) asks to redo it",
+    );
+    expect(system).toContain(
+      "The input asking for it does not count: that is what led to the action the user revoked.",
+    );
+    expect(system).not.toContain("or the input asks");
+  });
+
+  test("a create closed before the revoke reads as closed, not closed by the revoke", () => {
+    const { prompt } = withDecided([
+      { outcome: "revoked", description: create, undone: "PAY-41 is closed (Done)" },
+    ]);
+    expect(prompt).toContain(
+      `- Approved, then revoked by the user: ${create}. Undone: PAY-41 is closed (Done).`,
+    );
+  });
+
+  test("a revoke that changed nothing back does not read as undone", () => {
+    const { prompt } = withDecided([
+      {
+        outcome: "revoked",
+        description: "Update PAY-2: assignee",
+        undone: "PAY-2 already has its earlier values.",
+        unchanged: true,
+        kept: "Jira refused to assign PAY-2 back to Tom Kay (no permission).",
+      },
+    ]);
+    expect(prompt).toContain(
+      "- Approved, then revoked by the user: Update PAY-2: assignee. Revoked; nothing was changed: PAY-2 already has its earlier values. Left as it is: Jira refused to assign PAY-2 back to Tom Kay (no permission).",
+    );
+    expect(prompt).not.toContain("Undone:");
+  });
+
+  test("a revoked create whose ticket was closed names the status", () => {
+    const { prompt } = withDecided([
+      {
+        outcome: "revoked",
+        description: create,
+        undone: "PAY-41 was closed and moved to Cancelled",
+      },
+    ]);
+    expect(prompt).toContain(
+      `- Approved, then revoked by the user: ${create}. Undone: PAY-41 was closed and moved to Cancelled.`,
+    );
+  });
+
+  test("a revoked comment says what the revoke did, from its record", () => {
+    const { prompt } = withDecided([
+      {
+        outcome: "revoked",
+        description: "Comment on PAY-2",
+        undone: "Deleted the comment on PAY-2",
+      },
+    ]);
+    expect(prompt).toContain(
+      "- Approved, then revoked by the user: Comment on PAY-2. Undone: Deleted the comment on PAY-2.",
+    );
+  });
+
+  test("a proposal dropped because its ticket was revoked is not a rejection by the user", () => {
+    const { system, prompt } = withDecided([
+      { outcome: "done", description: "Move PAY-2 to Blocked" },
+      { outcome: "rejected", description: "Comment on OPS-7" },
+      {
+        outcome: "dropped",
+        description: "Comment on PAY-41",
+        reason: "The ticket it acts on was revoked.",
+      },
+    ]);
+    expect(prompt).toContain(
+      "## Already decided in this conversation (do not propose again)\n- Approved: Move PAY-2 to Blocked\n- Rejected by the user: Comment on OPS-7\n- Dropped without a decision (the ticket it acts on was revoked): Comment on PAY-41",
+    );
+    // Without a revoked action the rule stays out, so older snapshots replay as they ran.
+    expect(system).not.toContain("revoked");
+  });
+});
+
+describe("across threads (FR-14.6, prompt version 11)", () => {
+  const example = {
+    input:
+      "set up Datadog monitoring for the appset webhook\nThe user asked: why has this no story points?",
+    proposed: "Create Task in PAY: Set up Datadog monitoring",
+    corrected: "Create Task in PAY: Set up Datadog monitoring (changed story points)",
+  };
+
+  test("past corrections read as examples from other inputs, not as said here", () => {
+    const { prompt } = buildClassifyPrompt({ ...snapshot, examples: [example] });
+    expect(prompt).toContain(
+      "## Past corrections by the user, from other inputs (learn the pattern only)\nThese are past examples from other, earlier inputs and conversations, not about the current input.",
+    );
+    expect(prompt).toContain(
+      "never treat it as something the user said or asked in this conversation",
+    );
+    expect(prompt).toContain(
+      `- Earlier input (another conversation): "${example.input}"\n  Proposed then: ${example.proposed}`,
+    );
+    expect(prompt).not.toContain("(learn from these)");
+  });
+
+  test("snapshots before prompt version 11 replay the old examples block", () => {
+    const { prompt } = buildClassifyPrompt({ ...snapshot, promptVersion: 10, examples: [example] });
+    expect(prompt).toContain("## Past corrections by the user (learn from these)");
+    expect(prompt).toContain(`- Input: "${example.input}"`);
+  });
+
+  const closedBy = (revoked: "here" | "elsewhere") => {
+    const [first, ...rest] = snapshot.candidates;
+    if (!first) throw new Error("fixture has candidates");
+    return {
+      ...snapshot,
+      candidates: [{ ...first, status: "Cancelled", statusCategory: "done", revoked }, ...rest],
+    };
+  };
+
+  test("a candidate a revoke closed says so, with the rule", () => {
+    const first = snapshot.candidates[0];
+    const here = buildClassifyPrompt(closedBy("here"));
+    expect(here.prompt).toContain(
+      `] ${first?.summary} (${first?.reasons.join(", ")}); created by mistake and revoked by the user in this conversation (closed)`,
+    );
+    expect(buildClassifyPrompt(closedBy("elsewhere")).prompt).toContain(
+      "; created by mistake and revoked by the user in another conversation (closed)",
+    );
+    // The input naming it counts only outside the thread that revoked it.
+    expect(here.system).toContain(
+      "for one revoked in this conversation, only the user's own instruction naming it counts, not the input, which led to the mistake; for one revoked in another conversation, the input naming its key counts too.",
+    );
+    expect(buildClassifyPrompt(snapshot).system).not.toContain("created by mistake");
+  });
+
+  const answer = (o: Partial<ItemOutput>): ItemOutput => ({
+    summary: "Ana chases the export",
+    question: null,
+    confidence: 0.9,
+    proposals: [],
+    ...o,
+  });
+
+  test("a question or summary naming a deleted ticket fails unless the user named it", () => {
+    const s = { ...snapshot, deleted: ["PAY-41"] };
+    const asked = answer({ question: "You asked why PAY-41 has no story points; how many?" });
+    expect(validateItemOutput(asked, s)).toEqual([
+      "The question names PAY-41, a ticket the user revoked (it was deleted). Do not mention it unless the user names it.",
+    ]);
+    expect(
+      validateItemOutput(answer({ summary: "Chase on PAY-41", question: "Which ticket?" }), s),
+    ).toEqual([
+      "The summary names PAY-41, a ticket the user revoked (it was deleted). Do not mention it unless the user names it.",
+    ]);
+    // A rationale is checked too.
+    expect(
+      validateItemOutput(
+        answer({
+          proposals: [
+            {
+              kind: "add_comment",
+              target: "PAY-2",
+              body: "Chased.",
+              ...base,
+              rationale: "Like PAY-41",
+            },
+          ],
+        }),
+        s,
+      ),
+    ).toContain(
+      "Proposal 1 (add_comment) rationale names PAY-41, a ticket the user revoked (it was deleted). Do not mention it unless the user names it.",
+    );
+    // Named by the user, in the input or an instruction: fine.
+    expect(validateItemOutput(asked, { ...s, quote: `${s.quote} What about PAY-41?` })).toEqual([]);
+    expect(
+      validateItemOutput(asked, {
+        ...s,
+        thread: { instructions: ["is PAY-41 gone?"], decided: [], pending: [] },
+      }),
+    ).toEqual([]);
+  });
+
+  test("text naming a ticket a revoke closed fails unless the user named it", () => {
+    const asked = answer({ question: "Should PAY-1 get story points?" });
+    const error =
+      "The question names PAY-1, a ticket the user revoked (it was closed). Do not mention it unless the user names it.";
+    expect(validateItemOutput(asked, closedBy("elsewhere"))).toEqual([error]);
+    // Reached by search but not offered: still not to be mentioned.
+    expect(validateItemOutput(asked, { ...snapshot, revokedClosed: ["PAY-1"] })).toEqual([error]);
+    // Another thread revoked it: the input naming it counts.
+    const named = `${snapshot.quote} PAY-1 too.`;
+    expect(validateItemOutput(asked, { ...closedBy("elsewhere"), quote: named })).toEqual([]);
+    // This thread revoked it: only the user's instruction counts.
+    expect(validateItemOutput(asked, { ...closedBy("here"), quote: named })).toEqual([error]);
+    expect(
+      validateItemOutput(asked, {
+        ...closedBy("here"),
+        thread: { instructions: ["reopen PAY-1"], decided: [], pending: [] },
+      }),
+    ).toEqual([]);
+  });
+
+  test("a proposal on a ticket a revoke deleted fails with the reason", () => {
+    const errors = validateItemOutput(
+      {
+        summary: "s",
+        question: null,
+        confidence: 0.9,
+        proposals: [{ kind: "add_comment", target: "PAY-41", body: "Still on it.", ...base }],
+      },
+      { ...snapshot, deleted: ["PAY-41"] },
+    );
+    expect(errors).toContain(
+      "Proposal 1 (add_comment): target PAY-41 was deleted when the user revoked it, so it no longer exists. Do not target, comment on or link to it.",
+    );
+    expect(errors.join(" ")).not.toContain("not one of the candidate issues");
   });
 });

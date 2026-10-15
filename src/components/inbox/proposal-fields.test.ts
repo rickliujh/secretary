@@ -1,12 +1,128 @@
 import { describe, expect, test } from "bun:test";
 import { ProposalPayloadSchema, parsePayload } from "@/services/proposals/schema";
 import {
+  FIELD_SPECS,
   fromFormValues,
   isEditable,
   issueOptions,
   toFormValues,
   viewPayload,
 } from "./proposal-fields";
+
+describe("story points in the edit form (D55)", () => {
+  const create = ProposalPayloadSchema.parse({
+    kind: "create_issue",
+    ref: "$new:1",
+    projectKey: "PAY",
+    issueType: "Story",
+    summary: "Export credit notes",
+    storyPoints: 5,
+    storyPointsEstimated: true,
+  });
+
+  test("an untouched suggestion stays a suggestion", () => {
+    expect(toFormValues(create).storyPoints).toBe("5");
+    expect(ProposalPayloadSchema.parse(fromFormValues(create, toFormValues(create)))).toEqual(
+      create,
+    );
+  });
+
+  test("changing or clearing the points makes them the user's", () => {
+    const changed = ProposalPayloadSchema.parse(
+      fromFormValues(create, { ...toFormValues(create), storyPoints: "8" }),
+    );
+    expect(changed).toMatchObject({ storyPoints: 8, storyPointsEstimated: false });
+    const cleared = ProposalPayloadSchema.parse(
+      fromFormValues(create, { ...toFormValues(create), storyPoints: "" }),
+    );
+    expect(cleared).toMatchObject({
+      storyPoints: null,
+      storyPointsEstimated: false,
+      storyPointsCleared: true,
+    });
+    // Setting a number again ends the clear.
+    const again = ProposalPayloadSchema.parse(
+      fromFormValues(cleared, { ...toFormValues(cleared), storyPoints: "2" }),
+    );
+    expect(again).toMatchObject({ storyPoints: 2, storyPointsCleared: false });
+  });
+
+  test("text that is no number fails validation; empty on an update means no change", () => {
+    expect(
+      ProposalPayloadSchema.safeParse(
+        fromFormValues(create, { ...toFormValues(create), storyPoints: "lots" }),
+      ).success,
+    ).toBe(false);
+    const update = ProposalPayloadSchema.parse({
+      kind: "update_issue",
+      target: "PAY-12",
+      changes: { storyPoints: 5 },
+    });
+    expect(fromFormValues(update, { ...toFormValues(update), changes__storyPoints: "3" })).toEqual({
+      kind: "update_issue",
+      target: "PAY-12",
+      changes: { storyPoints: 3 },
+    });
+    expect(
+      fromFormValues(update, {
+        ...toFormValues(update),
+        changes__summary: "New title",
+        changes__storyPoints: "",
+      }),
+    ).toEqual({ kind: "update_issue", target: "PAY-12", changes: { summary: "New title" } });
+  });
+
+  test("an Epic gets no points: the type change drops them and the field hides", () => {
+    const values = { ...toFormValues(create), issueType: "Epic" };
+    const epic = ProposalPayloadSchema.parse(fromFormValues(create, values));
+    expect(epic).toMatchObject({
+      issueType: "Epic",
+      storyPoints: null,
+      storyPointsEstimated: false,
+      storyPointsCleared: false,
+    });
+    const spec = FIELD_SPECS.create_issue.find((s) => s.path === "storyPoints");
+    expect(spec?.hidden?.(values)).toBe(true);
+    expect(spec?.hidden?.(toFormValues(create))).toBe(false);
+  });
+
+  test("an update clears the ticket's points with the checkbox (FR-15.3), and round-trips", () => {
+    const update = ProposalPayloadSchema.parse({
+      kind: "update_issue",
+      target: "PAY-12",
+      changes: { summary: "x" },
+    });
+    const ticked = { ...toFormValues(update), changes__storyPoints__clear: "true" };
+    const cleared = ProposalPayloadSchema.parse(fromFormValues(update, ticked));
+    expect(cleared).toEqual({
+      kind: "update_issue",
+      target: "PAY-12",
+      changes: { summary: "x", storyPoints: null },
+    });
+    const form = toFormValues(cleared);
+    expect(form.changes__storyPoints__clear).toBe("true");
+    expect(form.changes__storyPoints).toBe("");
+    expect(fromFormValues(cleared, form)).toEqual(cleared);
+    // The number field hides while the box is ticked; unticked, empty means no change.
+    const number = FIELD_SPECS.update_issue.find((s) => s.type === "number");
+    expect(number?.hidden?.(form)).toBe(true);
+    expect(fromFormValues(cleared, { ...form, changes__storyPoints__clear: "" })).toEqual({
+      kind: "update_issue",
+      target: "PAY-12",
+      changes: { summary: "x" },
+    });
+  });
+
+  test("a stored create without points reads as none on the card", () => {
+    const old = { ...create } as Record<string, unknown>;
+    delete old.storyPoints;
+    delete old.storyPointsEstimated;
+    expect(viewPayload(old as never)).toMatchObject({
+      storyPoints: null,
+      storyPointsEstimated: false,
+    });
+  });
+});
 
 describe("proposal edit form values", () => {
   test("round trip keeps unchanged payloads identical", () => {

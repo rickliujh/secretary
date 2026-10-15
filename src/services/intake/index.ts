@@ -25,6 +25,11 @@ export type TriageInput = {
   /** Where pasted input is from. */
   source: Source;
   senderPersonId: string | null;
+  /**
+   * "chat" when the chat wrote the text for the user (propose_actions): it is not
+   * their own words, so numbers in it need a points cue (D55).
+   */
+  author?: "chat";
   /** Local date as YYYY-MM-DD; defaults to today. */
   today?: string;
   onProgress?: (message: string) => void;

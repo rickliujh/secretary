@@ -14,6 +14,7 @@ const home = {
     label: "small-ask",
     joinActiveSprint: true,
     hintDismissed: false,
+    defaultPoints: null,
   },
 };
 const e = {
@@ -80,6 +81,7 @@ describe("intake with a small-asks home (FR-10.2)", () => {
       joinSprint: true,
       issueTypes: ["Task"],
       defaultType: "Task",
+      defaultPoints: null,
     });
     expect(r.props.map((p) => p.kind)).toEqual(["create_issue", "link_dependency"]);
     expect(r.props[0]?.payload).toMatchObject({

@@ -1,4 +1,10 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  type Mutation,
+  useIsMutating,
+  useMutation,
+  useMutationState,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -23,6 +29,9 @@ const DECISION_KEYS = [
   queryKeys.memories,
 ];
 
+/** What a saved edit changes: the thread and the sprint fits that count its creates. */
+const SAVE_EDIT_KEYS = [queryKeys.inbox, ["tickets", "sprint-fit"]] as const;
+
 export function useInvalidateAfterDecision() {
   const client = useQueryClient();
   return () => {
@@ -35,6 +44,83 @@ const summarise = (r: TriageResult) =>
     ? `${r.proposals} proposal${r.proposals === 1 ? "" : "s"}${r.questions ? ` and ${r.questions} question${r.questions === 1 ? "" : "s"}` : ""} to review`
     : "Nothing to do in that input";
 
+/** Names saves of a pending proposal's edits (D44 rows, D57 sprint switch). */
+export const SAVE_EDIT_MUTATION = ["save-edit"] as const;
+/** Names intake turns that revise a thread: replies and re-triage. */
+export const INTAKE_TURN_MUTATION = ["intake-turn"] as const;
+
+export type SaveEditInput = { id: string; edited: ProposalPayload; inboxItemId?: string | null };
+
+const saveOf = (m: Pick<Mutation, "state">) => (m.state.variables ?? null) as SaveEditInput | null;
+
+/**
+ * Saves of pending proposals' edits still being written, by proposal id. Saves
+ * of one proposal run in order, and an approve (or Approve all, or Track)
+ * waits for them, so it always reads the newest choice without the buttons
+ * being disabled while a save runs (D57).
+ */
+const writes = new Map<string, { inboxItemId: string | null; done: Promise<unknown> }>();
+
+const writeEdit = (i: SaveEditInput) =>
+  Effect.tryPromise({
+    try: () => {
+      const before = writes.get(i.id)?.done.catch(() => undefined) ?? Promise.resolve();
+      const done = before.then(() =>
+        run(Effect.flatMap(Proposals, (p) => p.saveEdit(i.id, i.edited))),
+      );
+      const entry = { inboxItemId: i.inboxItemId ?? null, done };
+      writes.set(i.id, entry);
+      void done
+        .catch(() => undefined)
+        .finally(() => {
+          if (writes.get(i.id) === entry) writes.delete(i.id);
+        });
+      return done;
+    },
+    catch: (e) => e,
+  });
+
+/** Waits for the edits being written to these proposals, or to any in a thread. */
+const afterWrites = (filter: { ids?: readonly string[]; inboxItemId?: string }) =>
+  Effect.promise(() =>
+    Promise.all(
+      [...writes.entries()]
+        .filter(([id, w]) =>
+          filter.ids ? filter.ids.includes(id) : w.inboxItemId === filter.inboxItemId,
+        )
+        .map(([, w]) => w.done.catch(() => undefined)),
+    ),
+  );
+
+/** The newest edit of this proposal still being saved, from any component; null when none. */
+export function usePendingEdit(id: string): ProposalPayload | null {
+  const pending = useMutationState({
+    filters: {
+      mutationKey: SAVE_EDIT_MUTATION,
+      status: "pending",
+      predicate: (m) => saveOf(m)?.id === id,
+    },
+    select: (m) => saveOf(m)?.edited ?? null,
+  });
+  return pending.at(-1) ?? null;
+}
+
+/** An intake turn (a reply or a re-triage) is revising this thread. */
+export function useTurnRunning(inboxItemId: string | null) {
+  return (
+    useIsMutating({
+      mutationKey: INTAKE_TURN_MUTATION,
+      predicate: (m) => {
+        const v = m.state.variables as { inboxItemId?: string } | string | undefined;
+        return (
+          !!inboxItemId &&
+          (v === inboxItemId || (typeof v === "object" && v?.inboxItemId === inboxItemId))
+        );
+      },
+    }) > 0
+  );
+}
+
 /** Runs one intake turn with progress messages and a cancel button. */
 function useIntakeTurn<I>(
   f: (
@@ -43,12 +129,14 @@ function useIntakeTurn<I>(
     onProgress: (m: string) => void,
   ) => Effect.Effect<TriageResult, unknown>,
   onDone?: (inboxItemId: string) => void,
+  mutationKey?: readonly unknown[],
 ) {
   const onError = useErrorToast();
   const invalidate = useInvalidateAfterDecision();
   const [progress, setProgress] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
   const mutation = useMutation({
+    ...(mutationKey ? { mutationKey } : {}),
     mutationFn: (input: I) => {
       controller.current = new AbortController();
       return run(
@@ -82,15 +170,35 @@ export function useTriage(onDone?: (inboxItemId: string) => void) {
 
 /** Replies in a thread: new input, an instruction or an answer (D22). */
 export function useReply() {
-  return useIntakeTurn((i, input: Omit<ReplyInput, "onProgress">, onProgress) =>
-    i.reply({ ...input, onProgress }),
+  return useIntakeTurn(
+    (i, input: Omit<ReplyInput, "onProgress">, onProgress) => i.reply({ ...input, onProgress }),
+    undefined,
+    INTAKE_TURN_MUTATION,
   );
 }
 
 /** A decision can partly apply before it fails, so views refresh either way. */
-function useDecisionMutation<A, E, I>(program: (input: I) => Effect.Effect<A, E, AppServices>) {
-  return useAppMutation(program, { invalidate: DECISION_KEYS, invalidateOnError: true });
+function useDecisionMutation<A, E, I>(
+  program: (input: I) => Effect.Effect<A, E, AppServices>,
+  mutationKey?: readonly unknown[],
+  opts: { awaitRefresh?: boolean } = {},
+) {
+  return useAppMutation(program, {
+    invalidate: DECISION_KEYS,
+    invalidateOnError: true,
+    ...(mutationKey ? { mutationKey } : {}),
+    ...opts,
+  });
 }
+
+/** Names revoke mutations, so every Revoke of a thread can wait while one runs. */
+export const REVOKE_MUTATION = ["revoke"] as const;
+/** What a running revoke carries: the proposal and its thread. */
+export type RevokeInput = {
+  id: string;
+  inboxItemId: string | null;
+  confirmed: readonly string[];
+};
 
 const withProposals =
   <A, E, I>(f: (p: Proposals["Type"], input: I) => Effect.Effect<A, E>) =>
@@ -99,11 +207,15 @@ const withProposals =
 
 export function useDecisions() {
   const approve = useDecisionMutation(
-    withProposals((p, i: { id: string; edited?: ProposalPayload }) => p.approve(i.id, i.edited)),
+    withProposals((p, i: { id: string; edited?: ProposalPayload }) =>
+      Effect.zipRight(afterWrites({ ids: [i.id] }), p.approve(i.id, i.edited)),
+    ),
   );
   const reject = useDecisionMutation(withProposals((p, id: string) => p.reject(id)));
   const approveAll = useDecisionMutation(
-    withProposals((p, inboxItemId: string) => p.approveAll(inboxItemId)),
+    withProposals((p, inboxItemId: string) =>
+      Effect.zipRight(afterWrites({ inboxItemId }), p.approveAll(inboxItemId)),
+    ),
   );
   const dismiss = useDecisionMutation(
     withProposals((p, inboxItemId: string) => p.dismiss(inboxItemId)),
@@ -112,15 +224,29 @@ export function useDecisions() {
   const track = useDecisionMutation(
     withProposals(
       (p, i: { ids: readonly string[]; edits?: Readonly<Record<string, ProposalPayload>> }) =>
-        p.track(i.ids, i.edits),
+        Effect.zipRight(afterWrites({ ids: i.ids }), p.track(i.ids, i.edits)),
     ),
   );
-  /** Keeps a row change on a pending proposal, so any approve uses it (D44). */
-  const saveEdit = useDecisionMutation(
-    withProposals((p, i: { id: string; edited: ProposalPayload }) => p.saveEdit(i.id, i.edited)),
+  /**
+   * Keeps a row change or the sprint switch on a pending proposal, so any
+   * approve uses it (D44, D57). It changes only that proposal, so only the
+   * Inbox and the sprint fits are read again, and it stays pending until they
+   * are back, so a switch shows the new value throughout (`usePendingEdit`).
+   */
+  const saveEdit = useAppMutation(writeEdit, {
+    invalidate: SAVE_EDIT_KEYS,
+    invalidateOnError: true,
+    mutationKey: SAVE_EDIT_MUTATION,
+    awaitRefresh: true,
+  });
+  /** Revoke (FR-14): the steps the user confirmed; a failed step comes back as a result. */
+  const revoke = useDecisionMutation(
+    withProposals((p, i: RevokeInput) => p.revoke(i.id, i.confirmed)),
+    REVOKE_MUTATION,
   );
-  const retriage = useDecisionMutation((inboxItemId: string) =>
-    Effect.flatMap(Intake, (i) => i.retriage(inboxItemId)),
+  const retriage = useDecisionMutation(
+    (inboxItemId: string) => Effect.flatMap(Intake, (i) => i.retriage(inboxItemId)),
+    INTAKE_TURN_MUTATION,
   );
-  return { approve, reject, approveAll, track, saveEdit, dismiss, retriage };
+  return { approve, reject, approveAll, track, saveEdit, dismiss, retriage, revoke };
 }

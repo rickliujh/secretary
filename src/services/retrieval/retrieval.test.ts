@@ -111,4 +111,37 @@ describe("Retrieval.snapshot", () => {
       m3: 1,
     });
   });
+
+  test("excluded keys are never candidates, however retrieval finds them (FR-14.6)", async () => {
+    const { layer } = syncedJiraLayer([]);
+    const quote = "the ledger export PAY-2 is blocked, can you chase?";
+    const keys = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          yield* markViewed("PAY-4");
+          const retrieval = yield* Retrieval;
+          const snap = (exclude?: string[]) =>
+            Effect.map(
+              retrieval.snapshot({
+                quote,
+                source: "teams",
+                senderPersonId: null,
+                references: extractReferences(quote, []),
+                today: "2026-09-24",
+                ...(exclude ? { exclude } : {}),
+              }),
+              (s) => s.candidates.map((c) => c.key),
+            );
+          return { all: yield* snap(), without: yield* snap(["PAY-2", "PAY-4"]) };
+        }),
+        Layer.provideMerge(RetrievalLive, layer),
+      ),
+    );
+    expect(keys.all).toContain("PAY-2");
+    expect(keys.all).toContain("PAY-4");
+    expect(keys.without).not.toContain("PAY-2");
+    expect(keys.without).not.toContain("PAY-4");
+    expect(keys.without).toContain("OPS-7");
+  });
 });

@@ -381,6 +381,64 @@ Checklist
   blockers and sprint work.
 - Done on a small ask transitions it in the mock Jira and the row leaves the list.
 
+## Phase 17: Revoke an approval (FR-14, D54)
+
+Needs Phases 11 to 16. Branch `feat/17-revoke`, stacked on `feat/11-small-asks`.
+
+Tasks
+1. Undo data: each Executor path records `undo` in the proposal result as D54 (1)
+   lists, read just before the write; tests per kind against the stubbed Jira.
+2. Reverse actions in the Jira client and the Executor: delete issue, my-permissions
+   check, delete comment, move to backlog, plus the existing transition, field
+   update, assign, sprint move and link deletion; the cancel-status choice as a pure
+   function with tests (cancelled/canceled, won't do, rejected, declined, then done).
+3. A pure revoke planner (`src/services/proposals/revoke.ts`): steps per kind, the
+   cascade from a create to what acts on it, impossibility reasons, the
+   "changed since" check; unit tests for every kind and the cascade.
+4. `Proposals.revokePlan` and `Proposals.revoke`, status `revoked`, `revokeError`,
+   resumable runs; the cache follows (deleted rows removed, others refreshed).
+5. UI: Revoke on executed proposal cards and on tracked small-ask rows, a
+   confirmation dialog listing the steps (shadcn AlertDialog), the revoked badge and
+   message, warnings and the retry path; disabled with the reason when impossible.
+6. Mock Jira: delete issue, delete comment, my-permissions (with a switch for a user
+   without delete permission), backlog moves, and a cancelled status in a workflow.
+
+Checklist
+- FR-14 AC passes against the mock Jira, both with and without delete permission.
+- Every kind has a revoke test; a field changed in Jira after approval is kept and
+  named in a warning; a failed step leaves the proposal resumable.
+- typecheck, lint, tests and cargo checks pass; CHANGELOG has the phase entry.
+
+## Phase 18: Story points on proposals (FR-15, D55)
+
+Needs Phase 17. Branch `feat/18-story-points`, stacked on `feat/17-revoke`.
+
+Tasks
+1. Schema and settings: `storyPoints` and `storyPointsEstimated` on create_issue,
+   `storyPoints` in update_issue changes, `smallAsks.defaultPoints`; describePayload
+   and the payload mapping; unit tests.
+2. Scale from the cache as a pure query with tests (projects in play first, top 8 by
+   frequency, ascending).
+3. Classify prompt version 12: the scale section, the `storyPoints` and
+   `pointsSource` output fields, the rules (use stated points; estimate only new
+   tickets and only from the scale; never re-estimate an existing ticket), and code
+   validation with repair messages; the small-ask default in payload building.
+4. Jira client `editMetaFields(key)`; the Executor picks the field from create or
+   edit metadata, writes the number, warns or fails as D55 says; update_issue undo
+   records the previous points and revoke restores them.
+5. UI: Story points in the edit dialog, on the small-ask row (saved at once) and on
+   cards ("suggested" while estimated); the default in Settings > Jira > Small asks.
+6. Mock Jira: the story point field on create screens (not Epic or Sub-task),
+   editmeta, values stored on create and update.
+7. Live eval cases: stated points on a new ticket, a suggestion from the scale, and
+   "is more like a 5" on an existing ticket.
+
+Checklist
+- FR-15 AC passes against the mock Jira.
+- Validation rejects estimates outside the scale, stated points not in the input,
+  and estimates on existing tickets.
+- typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
+
 ## Phase 19: Inline pasted text in the message box (FR-2.8, D56)
 
 Branch `feat/19-inline-paste` from `main`.
@@ -403,4 +461,37 @@ Checklist
 - Pasting inside a sentence keeps it there; the model gets one sentence with «…».
 - A pasted message on its own lines is still classified as input.
 - typecheck, lint, tests and build pass; CHANGELOG has the entry.
+
+## Phase 20: New tickets and the sprint (FR-16, D57)
+
+Needs Phase 18 (story points). Branch `feat/20-sprint-fit`, stacked on
+`feat/18-story-points`.
+
+Tasks
+1. Settings: `sprint.daysPerPoint` (number or null) with the zod schema and a
+   Settings > General > Sprint field that shows the derived rate when empty.
+2. `sprints/fit.ts` (pure, tests): working days left, load, rate (setting, else
+   velocity on the board, else none), verdict (fits, tight, over, unknown), the
+   headline and detail lines. Cover: today is the last day, the end has passed, no
+   rate, unestimated tickets, a ticket without points, another assignee, other
+   creates of the thread joining.
+3. Payload: `joinSprintChosen`; `joinSprint` for every create (small ask from the
+   setting; otherwise due on or before the sprint end; never Epics or sub-tasks);
+   revisions and re-triage keep a chosen value. Correction examples leave
+   `joinSprint` out.
+4. `sprints/fit-query.ts` and a TanStack Query hook per thread, invalidated after
+   sync and proposal edits; the same sprint pick as the Executor.
+5. UI: the switch with its verdict line and Details popover on the create card,
+   the chip on the small-ask row, the switch in the edit dialog (saved at once
+   through `Proposals.saveEdit`), executed cards showing the result; the Today
+   Sprint work header line; the chat `sprint_points` additions.
+6. Mock Jira: whatever the AC needs (a sprint with dates and the user's tickets in
+   it, the move into the sprint on create).
+
+Checklist
+- FR-16 AC passes against the mock Jira.
+- Fit tests cover the cases in task 2; payload tests cover the defaults and the
+  chosen value surviving a revision.
+- No change to the classify prompt or its version.
+- typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
 

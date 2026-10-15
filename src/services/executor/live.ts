@@ -21,8 +21,15 @@ import { parseLinkTypes } from "@/services/blockers/logic";
 import { type BlockLink, blockLinks } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
 import { nextFollowupAfter } from "@/services/dependencies/logic";
-import { logFollowup, mirror, setDates, setStatus } from "@/services/dependencies/queries";
+import {
+  deleteDependency,
+  logFollowup,
+  mirror,
+  setDates,
+  setStatus,
+} from "@/services/dependencies/queries";
 import { CreatedIssueSchema, JiraClient, JiraError } from "@/services/jira";
+import { pointsFieldForIssue, storyPointFields } from "@/services/jira/fields";
 import { parseIssueLinks } from "@/services/jira/schemas";
 import {
   describeWaitUpdate,
@@ -31,13 +38,15 @@ import {
   type ProposalPayload,
 } from "@/services/proposals/schema";
 import { Settings, settingsOrDefault } from "@/services/settings";
-import { userActiveSprints } from "@/services/sprints/active";
+import { joinSprintFor } from "@/services/sprints/active";
 import { Sync } from "@/services/sync";
+import { forgetDeleted } from "@/services/sync/deleted";
 import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import {
   describeAction,
   Executor,
   ExecutorError,
+  type ExecutorShape,
   type JiraAction,
   JiraActionSchema,
   type ProposalResult,
@@ -49,6 +58,42 @@ import {
   MappingError,
   proposalTextToWiki,
 } from "./jira-mapping";
+import { PERSON_COLUMNS, pickColumns, type ReverseOp, TEAM_COLUMNS } from "./reverse";
+import {
+  type IssueField,
+  type IssueFieldValues,
+  issueFieldIds,
+  issueFieldValues,
+  issueStatus,
+  issueUserNames,
+  openSprint,
+  type Undo,
+  type UndoOf,
+  undoOf,
+  type WaitState,
+} from "./undo";
+
+/** A wait's state columns, as update_dependency's undo keeps them (D54). */
+const waitState = (d: typeof dependencies.$inferSelect): WaitState => ({
+  status: d.status,
+  expectedAt: d.expectedAt,
+  nextFollowupAt: d.nextFollowupAt,
+  resolvedAt: d.resolvedAt,
+  notifiedOn: d.notifiedOn,
+});
+
+/** The columns a local update changes, before and after, for revoking it (D54). */
+const changedColumns = (row: Record<string, unknown>, set: Record<string, unknown>) => {
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(set)) {
+    const was = row[k] ?? null;
+    if (JSON.stringify(was) === JSON.stringify(v ?? null)) continue;
+    before[k] = was;
+    after[k] = v ?? null;
+  }
+  return { before, after };
+};
 
 const make = Effect.gen(function* () {
   const jira = yield* JiraClient;
@@ -120,6 +165,41 @@ const make = Effect.gen(function* () {
       ];
     });
 
+  /**
+   * Removes a deleted issue from the cache, with its comments and Secretary's notes
+   * on it, and keeps its tombstone so no sync stores it again and no thread offers
+   * it (FR-14.6).
+   */
+  const forgetIssue = (key: string, proposalId: string | null) =>
+    withDb(forgetDeleted(key, proposalId));
+
+  /**
+   * The undo data an earlier attempt of this proposal recorded (D54): a retry
+   * after a failed step keeps what the first attempt read before it wrote.
+   */
+  const priorUndo = <K extends Undo["kind"]>(proposalId: string, kind: K) =>
+    Effect.map(
+      q((d) =>
+        d
+          .select({ result: proposals.result })
+          .from(proposals)
+          .where(eq(proposals.id, proposalId))
+          .get(),
+      ),
+      (row): UndoOf<K> | null => {
+        const u = undoOf(row?.result);
+        return u?.kind === kind ? (u as UndoOf<K>) : null;
+      },
+    );
+
+  /**
+   * Keeps the undo data on the proposal before the writes start, so a step that
+   * fails part way does not lose what the first attempt replaced (`Proposals.approve`
+   * keeps it on the failed result).
+   */
+  const keepUndo = (proposalId: string, undo: Undo) =>
+    q((d) => d.update(proposals).set({ result: { undo } }).where(eq(proposals.id, proposalId)));
+
   /** A single user-initiated or approved Jira write: validate, send, log, re-fetch. */
   const run = (input: JiraAction, opts: { proposalId?: string } = {}) =>
     Effect.gen(function* () {
@@ -168,10 +248,15 @@ const make = Effect.gen(function* () {
       });
       logger.info(`${describeAction(action)}: done`);
 
+      // A deleted issue leaves the cache with what Secretary kept about it (D54).
+      if (action.kind === "delete_issue")
+        yield* forgetIssue(action.issueKey, opts.proposalId ?? null);
       // Show Jira's truth after every write (design.md 7.3). Remote links are
       // not part of the cached issue, so those writes need no re-fetch.
       const touchesIssue =
-        action.kind !== "upsert_remote_link" && action.kind !== "delete_remote_link";
+        action.kind !== "upsert_remote_link" &&
+        action.kind !== "delete_remote_link" &&
+        action.kind !== "delete_issue";
       const refreshed = yield* (
         touchesIssue ? sync.refreshIssue(action.issueKey) : Effect.void
       ).pipe(
@@ -216,6 +301,7 @@ const make = Effect.gen(function* () {
               assignee: p.assignee,
               dueDate: p.dueDate,
               labels: p.labels,
+              storyPoints: p.storyPoints,
             },
             { deployment, fieldIds, fields, knownUsers },
           ),
@@ -287,18 +373,24 @@ const make = Effect.gen(function* () {
         );
       }
       let message = `Created ${key}`;
-      // A failed sprint move is a warning, not a failure (D44). Sub-tasks follow their parent.
-      if (p.joinSprint && !type.subtask) {
+      let sprint: string | undefined;
+      // A failed sprint move is a warning, not a failure (D44). Sub-tasks follow
+      // their parent; an Epic never joins (D57).
+      if (p.joinSprint && !type.subtask && !/^epic$/i.test(type.name)) {
         const joined = yield* afterCreate(
           "joining the active sprint",
           joinActiveSprint(key, p.projectKey, proposalId),
         );
-        if (joined?.sprint) message += ` in sprint ${joined.sprint}`;
+        if (joined?.sprint) {
+          sprint = joined.sprint;
+          message += ` in sprint ${joined.sprint}`;
+        }
         if (joined?.warning) warnings.push(joined.warning);
       }
       return {
         message,
         issueKey: key,
+        ...(sprint ? { sprint } : {}),
         ...(warnings.length ? { warning: warnings.join(" ") } : {}),
       } satisfies ProposalResult;
     });
@@ -325,10 +417,13 @@ const make = Effect.gen(function* () {
               .all(),
           )
         : [];
-      const sprint = userActiveSprints(state.sprints, mine, me ?? null, {
-        preferProject: projectKey,
-        boardProjects: state.boardProjects,
-      })[0];
+      const sprint = joinSprintFor(
+        state.sprints,
+        mine,
+        me ?? null,
+        projectKey,
+        state.boardProjects,
+      );
       if (!sprint)
         return {
           sprint: null,
@@ -346,6 +441,25 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
+    });
+
+  /**
+   * The story point field to write on an issue (D55): on its edit screen, the one
+   * holding its points, else the first; without one the update fails, naming why.
+   */
+  const editScreenPointsField = (issueKey: string, issueFields: Record<string, unknown>) =>
+    Effect.gen(function* () {
+      const { effective } = yield* sync.fieldInfo;
+      const meta = yield* jira.getEditMeta(issueKey);
+      const field = pointsFieldForIssue(effective, Object.keys(meta.fields), issueFields);
+      if (!field)
+        return yield* fail(
+          "invalid",
+          storyPointFields(effective).length
+            ? `The edit screen of ${issueKey} has no story point field, so its story points cannot be set. Add the field to the screen in Jira, or remove the points from the proposal.`
+            : `No story point field was found in Jira, so the story points of ${issueKey} cannot be set. Set the field in Settings > Jira, or remove the points from the proposal.`,
+        );
+      return field;
     });
 
   /** The target's "blocks" links, read from Jira (not the cache) for the direction check. */
@@ -381,6 +495,7 @@ const make = Effect.gen(function* () {
         return {
           message: `${p.target} is already blocked by ${p.blocker}`,
           issueKey: p.target,
+          undo: { kind: "link_issues", issueKey: p.target, linkId: null },
         } satisfies ProposalResult;
       }
       if (blocksBlocker(before).length > 0)
@@ -389,6 +504,19 @@ const make = Effect.gen(function* () {
           `${p.target} already blocks ${p.blocker} in Jira, so it cannot also wait for it: the two would block each other. Remove that link in Jira first if it is wrong.`,
         );
       const existing = new Set(before.flatMap((l) => (l.id ? [l.id] : [])));
+      // The link this approval made, for revoking it (D54): one between the two
+      // issues that was not there before.
+      const undo = (links: readonly BlockLink[]): Undo => ({
+        kind: "link_issues",
+        issueKey: p.target,
+        linkId:
+          links.find(
+            (l) =>
+              l.key === p.blocker && l.direction === "blockedBy" && l.id && !existing.has(l.id),
+          )?.id ??
+          links.find((l) => l.key === p.blocker && l.id && !existing.has(l.id))?.id ??
+          null,
+      });
       const link = (swapped: boolean) =>
         run(
           {
@@ -402,7 +530,8 @@ const make = Effect.gen(function* () {
         );
       yield* link(false);
       const after = yield* blockLinksOf(p.target);
-      if (isRight(after)) return { message, issueKey: p.target } satisfies ProposalResult;
+      if (isRight(after))
+        return { message, issueKey: p.target, undo: undo(after) } satisfies ProposalResult;
       // Only a link that was not there before this POST is ours to replace.
       const wrong = blocksBlocker(after).find((l) => l.id && !existing.has(l.id));
       if (!wrong?.id)
@@ -410,6 +539,7 @@ const make = Effect.gen(function* () {
           message: `Linked ${p.target} and ${p.blocker}`,
           issueKey: p.target,
           warning: `Jira does not show ${p.target} as blocked by ${p.blocker} after linking them; check the link in Jira.`,
+          undo: undo(after),
         } satisfies ProposalResult;
       // The instance stored it the other way round: replace it with the swapped form.
       logger.warn(`${p.target} came out blocking ${p.blocker}; linking it the other way`);
@@ -429,12 +559,14 @@ const make = Effect.gen(function* () {
             : e,
         ),
       );
-      if (isRight(yield* blockLinksOf(p.target)))
-        return { message, issueKey: p.target } satisfies ProposalResult;
+      const final = yield* blockLinksOf(p.target);
+      if (isRight(final))
+        return { message, issueKey: p.target, undo: undo(final) } satisfies ProposalResult;
       return {
         message: `Linked ${p.target} and ${p.blocker}`,
         issueKey: p.target,
         warning: `Jira still does not show ${p.target} as blocked by ${p.blocker}; check the link in Jira.`,
+        undo: undo(final),
       } satisfies ProposalResult;
     });
 
@@ -454,6 +586,8 @@ const make = Effect.gen(function* () {
           `${p.target} cannot move to ${p.toStatus} from its current status (available: ${available.map((x) => x.to.name).join(", ") || "none"}).`,
         );
       }
+      // The status it leaves, for revoking the move (D54).
+      const from = issueStatus((yield* jira.getIssue(p.target, { fields: ["status"] })).fields);
       yield* run(
         { kind: "transition", issueKey: p.target, transitionId: t.id, transitionName: t.to.name },
         { proposalId },
@@ -461,6 +595,16 @@ const make = Effect.gen(function* () {
       return {
         message: `Moved ${p.target} to ${t.to.name}`,
         issueKey: p.target,
+        ...(from
+          ? {
+              undo: {
+                kind: "transition_issue",
+                issueKey: p.target,
+                fromStatus: from.name,
+                toStatus: t.to.name,
+              },
+            }
+          : {}),
       } satisfies ProposalResult;
     });
 
@@ -489,8 +633,16 @@ const make = Effect.gen(function* () {
         return {
           message: `${p.target} is already in sprint ${p.sprintName}`,
           issueKey: p.target,
+          undo: { kind: "move_to_sprint", issueKey: p.target, moved: false, sprintId: p.sprintId },
         } satisfies ProposalResult;
       }
+      // The open sprint it leaves (null: the backlog), for revoking the move (D54).
+      const sprintField = (yield* sync.fieldInfo).effective.sprint;
+      const previous = sprintField
+        ? openSprint(
+            (yield* jira.getIssue(p.target, { fields: [sprintField] })).fields[sprintField],
+          )
+        : undefined;
       yield* run(
         {
           kind: "move_to_sprint",
@@ -500,7 +652,17 @@ const make = Effect.gen(function* () {
         },
         { proposalId },
       );
-      return { message, issueKey: p.target } satisfies ProposalResult;
+      return {
+        message,
+        issueKey: p.target,
+        undo: {
+          kind: "move_to_sprint",
+          issueKey: p.target,
+          moved: previous?.id !== p.sprintId,
+          sprintId: p.sprintId,
+          ...(previous === undefined ? {} : { previous }),
+        },
+      } satisfies ProposalResult;
     });
 
   /**
@@ -517,6 +679,14 @@ const make = Effect.gen(function* () {
       if (!dep) return yield* fail("invalid", "That dependency no longer exists.");
       const what = `${dep.issueKey} waits on ${dep.label}`;
       const ids = { dependencyId: dep.id, issueKey: dep.issueKey };
+      // A retry keeps the state the first attempt found, before it changed anything.
+      const prior = yield* priorUndo(proposalId, "update_dependency");
+      if (dep.status === "resolved" && prior?.before)
+        return {
+          message: `${what} was already resolved`,
+          ...ids,
+          undo: { ...prior, after: waitState(dep) },
+        } satisfies ProposalResult;
       if (dep.status === "resolved") {
         if (p.action !== "resolve")
           return yield* fail(
@@ -524,16 +694,26 @@ const make = Effect.gen(function* () {
             `${what} is resolved; reopen it on the Waiting page first.`,
           );
         yield* audit(proposalId, "update_dependency", dep.id, p, { skipped: "already resolved" });
-        return { message: `${what} was already resolved`, ...ids } satisfies ProposalResult;
+        return {
+          message: `${what} was already resolved`,
+          ...ids,
+          undo: {
+            kind: "update_dependency",
+            dependencyId: dep.id,
+            before: null,
+            after: null,
+            followupId: null,
+          },
+        } satisfies ProposalResult;
       }
-      // The Waiting page's functions read the Executor (for the remote link), the
-      // settings (the chase interval) and the database from their context.
-      const local = <A, E>(e: Effect.Effect<A, E, Executor | Settings | Db>) =>
-        e.pipe(
-          Effect.provideService(Executor, self),
-          Effect.provideService(Settings, settings),
-          Effect.provideService(Db, db),
-        );
+      const before = prior?.before ?? waitState(dep);
+      yield* keepUndo(proposalId, {
+        kind: "update_dependency",
+        dependencyId: dep.id,
+        before,
+        after: null,
+        followupId: null,
+      });
       if (p.action !== "resolve" && p.expectedAt && p.expectedAt !== dep.expectedAt)
         yield* local(setDates(dep.id, { expectedAt: p.expectedAt }, { mirror: false }));
       const summary = (
@@ -585,7 +765,7 @@ const make = Effect.gen(function* () {
           logFollowup(dep.id, { channel: p.channel, summary, nextFollowupAt }),
         );
       if (p.action === "resolve") yield* local(setStatus(dep.id, "resolved", { mirror: false }));
-      const warning = yield* local(mirror(dep.id, "refresh")).pipe(
+      const warning = yield* local(mirror(dep.id, "refresh", { proposalId })).pipe(
         Effect.as(null),
         Effect.catchAll((e) =>
           Effect.succeed(
@@ -594,13 +774,28 @@ const make = Effect.gen(function* () {
         ),
       );
       yield* audit(proposalId, "update_dependency", dep.id, p, { followupId });
+      const now = yield* q((d) =>
+        d.select().from(dependencies).where(eq(dependencies.id, dep.id)).get(),
+      );
+      const undo: Undo = {
+        kind: "update_dependency",
+        dependencyId: dep.id,
+        before,
+        after: now ? waitState(now) : null,
+        followupId,
+      };
       const message =
         p.action === "resolve"
           ? `Resolved: ${what}`
           : p.action === "log_reply"
             ? `Logged the reply on ${what}`
             : `Rescheduled ${what}`;
-      return { message, ...ids, ...(warning ? { warning } : {}) } satisfies ProposalResult;
+      return {
+        message,
+        ...ids,
+        ...(warning ? { warning } : {}),
+        undo,
+      } satisfies ProposalResult;
     });
 
   const runProposal = (
@@ -616,28 +811,38 @@ const make = Effect.gen(function* () {
         );
       }
       const { proposalId } = opts;
-      const jiraAction = (action: JiraAction, message: string) =>
-        Effect.as(run(action, { proposalId }), {
-          message,
-          issueKey: action.issueKey,
-        } satisfies ProposalResult);
 
       switch (payload.kind) {
         case "create_issue":
           return yield* createIssue(payload, proposalId);
         case "add_comment": {
           const safe = proposalTextToWiki(payload.bodyMd, yield* knownJiraUsers(payload.target));
-          const result = yield* jiraAction(
+          const { response } = yield* run(
             {
               kind: "add_comment",
               issueKey: payload.target,
               bodyMarkdown: payload.bodyMd,
               bodyWiki: safe.wiki,
             },
-            `Commented on ${payload.target}`,
+            { proposalId },
           );
+          // The new comment's id, for revoking it (D54).
+          const commentId = (response as { id?: unknown } | null)?.id;
           const warning = wikiSafetyWarning(safe, "comment");
-          return warning ? { ...result, warning } : result;
+          return {
+            message: `Commented on ${payload.target}`,
+            issueKey: payload.target,
+            ...(warning ? { warning } : {}),
+            ...(typeof commentId === "string" || typeof commentId === "number"
+              ? {
+                  undo: {
+                    kind: "add_comment",
+                    issueKey: payload.target,
+                    commentId: String(commentId),
+                  },
+                }
+              : {}),
+          } satisfies ProposalResult;
         }
         case "transition_issue":
           return yield* transition(payload, proposalId);
@@ -645,8 +850,52 @@ const make = Effect.gen(function* () {
           return yield* moveToSprint(payload, proposalId);
         case "update_issue": {
           const { assignee, ...fields } = payload.changes;
+          // A retry keeps the values the first attempt replaced: the earliest per field.
+          const prior = yield* priorUndo(proposalId, "update_issue");
+          // The values it replaces, read just before, for revoking it (D54). With
+          // points, every story point field, to write where the issue holds them (D55).
+          const keys = Object.keys(payload.changes) as IssueField[];
+          const wantsPoints = fields.storyPoints !== undefined;
+          const pointFieldIds = wantsPoints
+            ? [
+                ...storyPointFields((yield* sync.fieldInfo).effective),
+                ...(prior?.pointsField ? [prior.pointsField] : []),
+              ]
+            : [];
+          const current = yield* jira.getIssue(payload.target, {
+            fields: [...new Set([...issueFieldIds(keys), ...pointFieldIds])],
+          });
+          // A retry writes the field the first attempt chose.
+          const pointsField = wantsPoints
+            ? (prior?.pointsField ?? (yield* editScreenPointsField(payload.target, current.fields)))
+            : undefined;
+          const before: IssueFieldValues = {
+            ...issueFieldValues(current.fields, keys, pointsField),
+            ...Object.fromEntries(
+              keys.filter((k) => prior && k in prior.before).map((k) => [k, prior?.before[k]]),
+            ),
+          };
+          const after: IssueFieldValues = { ...payload.changes };
+          const names = { ...issueUserNames(current.fields, keys), ...prior?.names };
+          const undo: Undo = {
+            kind: "update_issue",
+            issueKey: payload.target,
+            before,
+            after,
+            ...(Object.keys(names).length ? { names } : {}),
+            ...(pointsField ? { pointsField } : {}),
+          };
+          yield* keepUndo(proposalId, undo);
           if (Object.keys(fields).length > 0) {
-            yield* run({ kind: "update_fields", issueKey: payload.target, fields }, { proposalId });
+            yield* run(
+              {
+                kind: "update_fields",
+                issueKey: payload.target,
+                fields,
+                ...(pointsField ? { pointsField } : {}),
+              },
+              { proposalId },
+            );
           }
           if (assignee !== undefined) {
             yield* run(
@@ -657,6 +906,7 @@ const make = Effect.gen(function* () {
           return {
             message: `Updated ${payload.target}`,
             issueKey: payload.target,
+            undo,
           } satisfies ProposalResult;
         }
         case "link_dependency": {
@@ -700,7 +950,10 @@ const make = Effect.gen(function* () {
           };
           yield* q((d) => d.update(people).set(set).where(eq(people.id, person.id)));
           yield* audit(proposalId, "update_person", person.id, set, null);
-          return { message: `Updated ${person.displayName}` } satisfies ProposalResult;
+          return {
+            message: `Updated ${person.displayName}`,
+            undo: { kind: "update_person", personId: person.id, ...changedColumns(person, set) },
+          } satisfies ProposalResult;
         }
         case "update_team": {
           const team = yield* q((d) =>
@@ -710,7 +963,10 @@ const make = Effect.gen(function* () {
           const set = { ...payload.changes, notesMd: appendNote(team.notesMd, payload.noteAppend) };
           yield* q((d) => d.update(teams).set(set).where(eq(teams.id, team.id)));
           yield* audit(proposalId, "update_team", team.id, set, null);
-          return { message: `Updated ${team.name}` } satisfies ProposalResult;
+          return {
+            message: `Updated ${team.name}`,
+            undo: { kind: "update_team", teamId: team.id, ...changedColumns(team, set) },
+          } satisfies ProposalResult;
         }
         case "remember": {
           const id = newId();
@@ -757,9 +1013,123 @@ const make = Effect.gen(function* () {
       }
     });
 
-  const self = Executor.of({
+  /** The Waiting page's functions read the Executor, the settings and the database. */
+  const local = <A, E>(e: Effect.Effect<A, E, Executor | Settings | Db>) =>
+    e.pipe(
+      Effect.provideService(Executor, self),
+      Effect.provideService(Settings, settings),
+      Effect.provideService(Db, db),
+    );
+
+  /** One write that revokes an approval (D54 (3)); a warning when it ran but part did not. */
+  const reverse = (op: ReverseOp, opts: { proposalId: string }) =>
+    Effect.gen(function* () {
+      const { proposalId } = opts;
+      switch (op.kind) {
+        case "jira":
+          yield* run(op.action, { proposalId });
+          return {};
+        case "transition_to": {
+          // Chosen now, from the issue's status now: an earlier step may have moved it.
+          const now = issueStatus(
+            (yield* jira.getIssue(op.issueKey, { fields: ["status"] })).fields,
+          );
+          if (now && now.name.toLowerCase() === op.status.toLowerCase()) return {};
+          const available = yield* jira.getTransitions(op.issueKey);
+          const t = available.find((x) => x.to.name.toLowerCase() === op.status.toLowerCase());
+          if (!t)
+            return yield* fail(
+              "invalid",
+              `${op.issueKey} cannot move to ${op.status} from ${now?.name ?? "its status"} (available: ${available.map((x) => x.to.name).join(", ") || "none"}).`,
+            );
+          yield* run(
+            {
+              kind: "transition",
+              issueKey: op.issueKey,
+              transitionId: t.id,
+              transitionName: t.to.name,
+            },
+            { proposalId },
+          );
+          return {};
+        }
+        case "delete_wait":
+          yield* local(deleteDependency(op.dependencyId, { proposalId }));
+          yield* audit(proposalId, "revoke_wait", op.dependencyId, op, null);
+          return {};
+        case "restore_wait": {
+          const state = op.state;
+          if (state)
+            yield* q((d) =>
+              d.update(dependencies).set(state).where(eq(dependencies.id, op.dependencyId)),
+            );
+          if (op.followupId) {
+            const followupId = op.followupId;
+            yield* q((d) => d.delete(followups).where(eq(followups.id, followupId)));
+          }
+          yield* audit(proposalId, "revoke_wait_update", op.dependencyId, op, null);
+          const warning = yield* local(mirror(op.dependencyId, "refresh", { proposalId })).pipe(
+            Effect.as(undefined),
+            Effect.catchAll((e) =>
+              Effect.succeed(
+                `The wait was put back here, but its link in Jira was not updated: ${e.message}`,
+              ),
+            ),
+          );
+          return warning ? { warning } : {};
+        }
+        case "restore_person": {
+          const set = pickColumns(op.set, PERSON_COLUMNS);
+          if (Object.keys(set).length)
+            yield* q((d) => d.update(people).set(set).where(eq(people.id, op.personId)));
+          yield* audit(proposalId, "revoke_person", op.personId, set, null);
+          return {};
+        }
+        case "restore_team": {
+          const set = pickColumns(op.set, TEAM_COLUMNS);
+          if (Object.keys(set).length)
+            yield* q((d) => d.update(teams).set(set).where(eq(teams.id, op.teamId)));
+          yield* audit(proposalId, "revoke_team", op.teamId, set, null);
+          return {};
+        }
+        case "delete_memory":
+          yield* q((d) => d.delete(memories).where(eq(memories.id, op.memoryId)));
+          yield* audit(proposalId, "revoke_memory", op.memoryId, op, null);
+          return {};
+        case "forget_issue":
+          yield* forgetIssue(op.issueKey, proposalId);
+          yield* audit(proposalId, "forget_issue", op.issueKey, op, null);
+          return {};
+        case "delete_draft": {
+          // Only a draft: a message that was sent or copied cannot be taken back.
+          const gone = yield* q((d) =>
+            d
+              .delete(communications)
+              .where(
+                and(eq(communications.id, op.communicationId), eq(communications.status, "draft")),
+              )
+              .returning({ id: communications.id }),
+          );
+          if (gone.length === 0) {
+            const still = yield* q((d) =>
+              d
+                .select({ status: communications.status })
+                .from(communications)
+                .where(eq(communications.id, op.communicationId))
+                .get(),
+            );
+            if (still) return yield* fail("invalid", `The draft was ${still.status}, so it stays.`);
+          }
+          yield* audit(proposalId, "revoke_draft", op.communicationId, op, null);
+          return {};
+        }
+      }
+    });
+
+  const self: ExecutorShape = Executor.of({
     runProposal,
     run: (input, opts = {}) => run(input, opts),
+    reverse,
   });
   return self;
 });

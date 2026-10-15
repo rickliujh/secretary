@@ -73,6 +73,11 @@ export const CommentSchema = z.object({
 });
 export type JiraComment = z.infer<typeof CommentSchema>;
 
+/** `GET /mypermissions`: whether the user holds each permission asked for. */
+export const MyPermissionsSchema = z.object({
+  permissions: z.record(z.string(), z.object({ havePermission: z.boolean() })),
+});
+
 export const CommentPageSchema = z.object({
   startAt: z.number(),
   maxResults: z.number(),
@@ -264,7 +269,12 @@ export const ProjectStatusesSchema = z.array(
   z.object({
     name: z.string(),
     subtask: z.boolean().optional(),
-    statuses: z.array(z.object({ name: z.string() })),
+    statuses: z.array(
+      z.object({
+        name: z.string(),
+        statusCategory: z.object({ key: z.string() }).optional(),
+      }),
+    ),
   }),
 );
 export type ProjectStatuses = z.infer<typeof ProjectStatusesSchema>;

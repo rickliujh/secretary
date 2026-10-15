@@ -101,6 +101,25 @@ export const issueMeta = sqliteTable("issue_meta", {
   unblockedBy: text("unblocked_by"),
   /** When the one OS notification for the wake-up was sent. */
   unblockNotifiedAt: text("unblock_notified_at"),
+  /**
+   * When the user revoked the create of this ticket and the revoke closed it rather
+   * than deleting it (FR-14.6, D54): every thread is told so.
+   */
+  revokedAt: text("revoked_at"),
+});
+
+/**
+ * Tickets a revoke deleted (FR-14.6, D54). The row outlives the cached issue, so
+ * sync never stores the ticket again, retrieval never offers it from any source,
+ * and validation rejects a proposal that targets it, in every thread.
+ */
+export const deletedIssues = sqliteTable("deleted_issues", {
+  issueKey: text("issue_key").primaryKey(),
+  /** Jira's id when the cache held it: an issue with another id under the key lifts the row. */
+  issueId: text("issue_id"),
+  deletedAt: text("deleted_at").notNull(),
+  /** The proposal whose revoke deleted it. */
+  proposalId: text("proposal_id"),
 });
 
 export const issueNotes = sqliteTable(
@@ -359,7 +378,8 @@ export const proposals = sqliteTable(
     confidence: real("confidence"),
     status: text("status", {
       // superseded: replaced by a later turn of the thread before it was decided (D22).
-      enum: ["pending", "approved", "rejected", "executed", "failed", "superseded"],
+      // revoked: executed, then undone by the user (D54).
+      enum: ["pending", "approved", "rejected", "executed", "failed", "superseded", "revoked"],
     })
       .notNull()
       .default("pending"),

@@ -261,6 +261,7 @@ export function ThreadView({ id }: { id: string }) {
   });
   const lookups = useLookups();
   const { approveAll, dismiss, retriage } = useDecisions();
+  // Approve all waits for a save in this thread (the sprint switch, a row field) to land (D57).
   const reply = useReply();
   const [skipAnswer, setSkipAnswer] = useState<string | null>(null);
   const d = detail.data;

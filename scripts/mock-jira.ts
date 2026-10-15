@@ -16,8 +16,13 @@
  * `/rest/agile/1.0/board/{id}/sprint` serves that history, and each issue's
  * Sprint field names the sprint it was created in, plus the active one when
  * unfinished work was carried over. `POST /rest/agile/1.0/sprint/{id}/issue`
- * moves issues into a sprint. Stories, tasks and bugs carry Story Points
- * (1, 2, 3, 5, 8, 13; some unestimated).
+ * moves issues into a sprint; an issue the app creates starts in the backlog,
+ * as in Jira, until it is moved. Stories, tasks and bugs carry Story Points
+ * (1, 2, 3, 5, 8, 13; some unestimated). Their create and edit screens have
+ * the Story Points field (not Epic or Sub-task, D55); with --cloud also "Story
+ * point estimate", empty until written, as on Cloud sites with both (D35).
+ * Like Jira, a create or edit that sets a field its screen lacks, or points
+ * that are not a number, is refused with 400.
  *
  * Change history: every other issue has a status change and some an assignee
  * change in the last few days, plus an older priority change; status,
@@ -32,6 +37,16 @@
  * `key in (...)` on its own (the blocker check) returns just those keys; in the
  * Cloud shape one unknown key fails it with 400, as Cloud does. Tests can also
  * hide issues (403), move them to a new key, and cap the search page size.
+ *
+ * Revoking (D54): `DELETE /issue/{key}` (refused for an issue with sub-tasks,
+ * and with 403 when `canDelete` is false), `GET /mypermissions`, `GET` and
+ * `DELETE /issue/{key}/comment/{id}`, `POST /rest/agile/1.0/backlog/issue`, and
+ * with `--cancel-status` a done-category Cancelled status. `--no-delete` plays a
+ * user without the delete permission; tests can also refuse the delete of one
+ * issue and the assigning of one user. Transitions follow a workflow: which are
+ * available depends on the issue's status, and `POST /transitions` refuses one
+ * that is not available from it. With `laggingSearch` (tests) a deleted issue
+ * still comes back from searches, as Cloud's eventually consistent index may.
  *
  *   bun run mock:jira --cloud         # Cloud shape: Basic auth, POST /search/jql
  *                                     # token paging (old /search is 410), account
@@ -72,8 +87,12 @@ type Issue = {
   links: { type: "Blocks"; inward: string }[];
   /** Story Points; null when unestimated. */
   points: number | null;
+  /** Cloud's "Story point estimate" (--cloud only); empty unless written. */
+  estimate?: number | null;
   /** Set when the issue was moved into a sprint through the Agile API. */
   movedToSprint?: number;
+  /** Set when the issue was moved to the backlog through the Agile API: no open sprint. */
+  inBacklog?: boolean;
   /** Changelog, oldest first. */
   history?: History[];
   remoteLinks?: {
@@ -89,11 +108,31 @@ const STATUSES = {
   Blocked: { id: "10400", category: "indeterminate" },
   "In Review": { id: "10401", category: "indeterminate" },
   Done: { id: "10002", category: "done" },
+  /** A done-category status a revoked ticket can end in (D54); only with `cancelStatus`. */
+  Cancelled: { id: "10003", category: "done" },
 } as const;
-const TRANSITIONS = Object.keys(STATUSES).map((name, i) => ({
-  id: String((i + 1) * 10 + 1),
-  name,
-}));
+/** Statuses seeded issues start in. */
+const SEEDED_STATUSES = ["To Do", "In Progress", "Blocked", "In Review", "Done"] as const;
+type StatusName = keyof typeof STATUSES;
+const STATUS_NAMES = Object.keys(STATUSES) as StatusName[];
+/**
+ * The workflow: which statuses each status moves to. Like a real workflow it is
+ * not global, so a transition id read in one status is refused in another.
+ */
+const WORKFLOW: Record<StatusName, readonly StatusName[]> = {
+  "To Do": ["In Progress", "Blocked", "Done", "Cancelled"],
+  "In Progress": ["To Do", "Blocked", "In Review", "Done", "Cancelled"],
+  Blocked: ["To Do", "In Progress", "Done", "Cancelled"],
+  "In Review": ["In Progress", "Blocked", "Done", "Cancelled"],
+  Done: ["To Do", "In Progress"],
+  Cancelled: ["To Do"],
+};
+/** The transitions out of a status; each id belongs to one from-to pair. */
+const transitionsFrom = (from: StatusName) =>
+  WORKFLOW[from].map((to) => ({
+    id: String((STATUS_NAMES.indexOf(from) + 1) * 10 + STATUS_NAMES.indexOf(to) + 1),
+    name: to,
+  }));
 const ISSUE_TYPES = ["Epic", "Story", "Task", "Bug", "Sub-task"] as const;
 const LINK_TYPES = [
   { id: "10000", name: "Blocks", inward: "is blocked by", outward: "blocks" },
@@ -107,6 +146,8 @@ const EPIC_LINK = "customfield_10100";
 const EPIC_NAME = "customfield_10102";
 const SPRINT = "customfield_10104";
 const STORY_POINTS = "customfield_10106";
+/** Cloud's "Story point estimate" (jsw-story-points), served with --cloud beside Story Points (D35). */
+const ESTIMATE = "customfield_10016";
 /** Cycled by issue id so points do not disturb the seeded random sequence. */
 const POINTS = [3, 1, 5, 2, 8, 3, null, 2, 5, 1, 3, 13, 2, null, 5, 1, 8] as const;
 
@@ -176,6 +217,8 @@ function issueSprints(issue: Issue, now = Date.now()): string[] | null {
   const active = sprintIndex(now);
   const createdAt = new Date(issue.created.replace("+0000", "Z")).getTime();
   const created = Math.min(sprintIndex(createdAt), active);
+  if (issue.inBacklog)
+    return [sprints[created]].filter((s): s is Sprint => s?.state === "closed").map(sprintString);
   const moved = sprints.findIndex((s) => s.id === issue.movedToSprint);
   if (moved >= 0)
     return (created < moved ? [sprints[created], sprints[moved]] : [sprints[moved]])
@@ -228,6 +271,7 @@ const PREVIOUS_STATUS: Record<keyof typeof STATUSES, keyof typeof STATUSES> = {
   Blocked: "In Progress",
   "In Review": "In Progress",
   Done: "In Review",
+  Cancelled: "To Do",
 };
 
 const statusItem = (from: keyof typeof STATUSES, to: keyof typeof STATUSES): ChangeItem => ({
@@ -313,7 +357,7 @@ export function generate(total: number, now = Date.now()): Map<string, Issue> {
       type,
       summary: `${pick(VERBS)} ${topic}`,
       description: `Context for the ${topic} work.\n\nh3. Notes\n* check with the platform team\n* see {{INC00${Math.floor(10000 + rand() * 89999)}}}`,
-      status: pick(Object.keys(STATUSES) as (keyof typeof STATUSES)[]),
+      status: pick(SEEDED_STATUSES),
       priority: pick(PRIORITIES),
       assignee: rand() < 0.2 ? null : pick(USERS),
       reporter: pick(USERS),
@@ -465,7 +509,9 @@ function issueJson(
       resolutiondate: issue.status === "Done" ? issue.updated : null,
       ...(cloud ? {} : { [EPIC_LINK]: issue.epic, [EPIC_NAME]: issue.epicName }),
       [SPRINT]: issueSprints(issue),
+      subtasks: [...all.values()].filter((i) => i.parent === issue.key).map(linkedIssue),
       [STORY_POINTS]: issue.points,
+      ...(cloud ? { [ESTIMATE]: issue.estimate ?? null } : {}),
       // Both sides: on `to` the other issue is inward ("is blocked by"), on `from` outward.
       issuelinks: links.flatMap((l) => {
         const type = {
@@ -521,6 +567,31 @@ export type MockOptions = {
   moved?: Map<string, string>;
   /** Most issues on one search page, below what was asked (Cloud may do this). */
   searchPageSize?: number;
+  /**
+   * Whether the user holds DELETE_ISSUES (default true): `GET /mypermissions`
+   * says so and `DELETE /issue/{key}` answers 403 without it (D54).
+   */
+  canDelete?: boolean;
+  /** Add the done-category Cancelled status to the workflow (D54). */
+  cancelStatus?: boolean;
+  /**
+   * Keys whose delete Jira refuses with 403 although the user holds the
+   * permission (issue security, a workflow that denies deleting).
+   */
+  undeletable?: Set<string>;
+  /** Users who can no longer be assigned: `PUT /assignee` answers 400. */
+  unassignable?: Set<string>;
+  /**
+   * Projects whose create screens have no Story Points field (D55); the edit
+   * screen still has it.
+   */
+  noPointsOnCreate?: Set<string>;
+  /**
+   * A search index that has not caught up (Cloud's search is eventually
+   * consistent): a deleted issue still comes back from searches, as it was when
+   * deleted, while `GET /issue/{key}` answers 404 (FR-14.6).
+   */
+  laggingSearch?: boolean;
 };
 
 export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}) {
@@ -530,12 +601,75 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
     issue.updated = new Date().toISOString().replace("Z", "+0000");
   };
   const blocks = LINK_TYPES[0];
+  const inWorkflow = (name: StatusName) => opts.cancelStatus || name !== "Cancelled";
+  const available = (issue: Issue) =>
+    transitionsFrom(issue.status).filter((t) => inWorkflow(t.name));
   let nextLink = 10000;
   const links: MockLink[] = [];
+  /** Deleted issues a lagging search index still returns. */
+  const indexed = new Map<string, Issue>();
   for (const issue of issues.values())
     for (const l of issue.links)
       links.push({ id: String(nextLink++), type: blocks, from: l.inward, to: issue.key });
   const issueOut = (issue: Issue, embed?: number) => issueJson(issue, issues, embed, links, cloud);
+
+  /** Standard types (not Epic or Sub-task) have the story point fields (D55). */
+  const pointed = (type: string | undefined) => type !== "Epic" && type !== "Sub-task";
+  /** The story point fields of a screen: Cloud has "Story point estimate" as well (D35). */
+  const pointFields = () => [
+    ...(cloud ? [{ fieldId: ESTIMATE, name: "Story point estimate", required: false }] : []),
+    { fieldId: STORY_POINTS, name: "Story Points", required: false },
+  ];
+  /** The create screen of a project and type, as createmeta serves it. */
+  const createScreen = (project: string, type: string | undefined) => [
+    { fieldId: "project", name: "Project", required: true },
+    { fieldId: "issuetype", name: "Issue Type", required: true },
+    { fieldId: "summary", name: "Summary", required: true },
+    { fieldId: "description", name: "Description", required: false },
+    { fieldId: "priority", name: "Priority", required: false, hasDefaultValue: true },
+    { fieldId: "assignee", name: "Assignee", required: false },
+    { fieldId: "duedate", name: "Due Date", required: false },
+    { fieldId: "labels", name: "Labels", required: false },
+    ...(pointed(type) && !opts.noPointsOnCreate?.has(project) ? pointFields() : []),
+    ...(type === "Sub-task" ? [{ fieldId: "parent", name: "Parent", required: true }] : []),
+    ...(cloud
+      ? pointed(type)
+        ? [{ fieldId: "parent", name: "Parent", required: false }]
+        : []
+      : [
+          ...(type === "Epic" ? [{ fieldId: EPIC_NAME, name: "Epic Name", required: true }] : []),
+          ...(pointed(type) ? [{ fieldId: EPIC_LINK, name: "Epic Link", required: false }] : []),
+        ]),
+  ];
+  /** An issue's edit screen, as editmeta serves it. */
+  const editScreen = (issue: Issue) => {
+    const meta = (name: string) => ({ name, required: false, operations: ["set"] });
+    return {
+      summary: meta("Summary"),
+      description: meta("Description"),
+      priority: meta("Priority"),
+      duedate: meta("Due Date"),
+      labels: meta("Labels"),
+      ...(pointed(issue.type)
+        ? {
+            ...(cloud ? { parent: meta("Parent") } : { [EPIC_LINK]: meta("Epic Link") }),
+            ...Object.fromEntries(pointFields().map((f) => [f.fieldId, meta(f.name)])),
+          }
+        : {}),
+    };
+  };
+  /** Jira's 400 for a field the screen does not have, or points that are not a number. */
+  const screenProblem = (fields: Record<string, unknown>, screen: readonly string[]) => {
+    const allowed = new Set(screen);
+    const errors: Record<string, string> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (!allowed.has(k))
+        errors[k] = `Field '${k}' cannot be set. It is not on the appropriate screen, or unknown.`;
+      else if ((k === STORY_POINTS || k === ESTIMATE) && v !== null && typeof v !== "number")
+        errors[k] = "Operation value must be a number.";
+    }
+    return Object.keys(errors).length ? json({ errorMessages: [], errors }, 400) : null;
+  };
 
   const handler = async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
@@ -581,6 +715,22 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       for (const issue of found)
         if (issue) {
           issue.movedToSprint = sprintId;
+          issue.inBacklog = false;
+          touch(issue);
+        }
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname === "/rest/agile/1.0/backlog/issue" && req.method === "POST") {
+      const body = (await req.json().catch(() => undefined)) as { issues?: unknown } | undefined;
+      const keys = Array.isArray(body?.issues) ? body.issues.map(String) : [];
+      if (keys.length === 0 || keys.length > 50) return error("Between 1 and 50 issues required.");
+      const found = keys.map((k) => issues.get(k));
+      const missing = keys.filter((_, i) => !found[i]);
+      if (missing.length) return error(`Issues do not exist: ${missing.join(", ")}`);
+      for (const issue of found)
+        if (issue) {
+          issue.movedToSprint = undefined;
+          issue.inBacklog = true;
           touch(issue);
         }
       return new Response(null, { status: 204 });
@@ -593,6 +743,19 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
 
     if (path === "myself") return json({ ...userJson(USERS[0] ?? null), timeZone: "UTC" });
     if (path === "issueLinkType") return json({ issueLinkTypes: LINK_TYPES });
+    if (path === "mypermissions") {
+      const key = url.searchParams.get("issueKey") ?? "";
+      if (key && !issues.has(key)) return error("Issue Does Not Exist", 404);
+      const asked = (url.searchParams.get("permissions") ?? "").split(",").filter(Boolean);
+      return json({
+        permissions: Object.fromEntries(
+          asked.map((p) => [
+            p,
+            { key: p, havePermission: p === "DELETE_ISSUES" ? opts.canDelete !== false : true },
+          ]),
+        ),
+      });
+    }
     if (path === "issueLink" && req.method === "POST") {
       const type = LINK_TYPES.find(
         (t) => t.name === (body?.type as { name?: string } | undefined)?.name,
@@ -666,6 +829,20 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
             customId: 10104,
           },
         },
+        ...(cloud
+          ? [
+              {
+                id: ESTIMATE,
+                name: "Story point estimate",
+                custom: true,
+                schema: {
+                  type: "number",
+                  custom: "com.pyxis.greenhopper.jira:jsw-story-points",
+                  customId: 10016,
+                },
+              },
+            ]
+          : []),
         {
           id: STORY_POINTS,
           name: "Story Points",
@@ -699,7 +876,7 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
           id: name,
           name,
           subtask: name === "Sub-task",
-          statuses: (Object.keys(STATUSES) as (keyof typeof STATUSES)[]).map(status),
+          statuses: STATUS_NAMES.filter(inWorkflow).map(status),
         })),
       );
     }
@@ -715,7 +892,7 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       const jql = String(body?.jql ?? "");
       const startAt = cloud ? Number(body?.nextPageToken ?? 0) : Number(body?.startAt ?? 0);
       const max = Math.min(Number(body?.maxResults ?? 50), 100, opts.searchPageSize ?? 100);
-      let list = [...issues.values()].filter((i) => !opts.hidden?.has(i.key));
+      let list = [...issues.values(), ...indexed.values()].filter((i) => !opts.hidden?.has(i.key));
       const parents = /^\(parent in \(([^)]*)\)\)/.exec(jql)?.[1]?.split(/,\s*/);
       if (parents) list = list.filter((i) => i.parent && parents.includes(i.parent));
       // The blocker check reads exactly these keys (D45); a moved key finds the issue's new key.
@@ -754,29 +931,7 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
         const types = ISSUE_TYPES.map((t) => ({ id: t, name: t, subtask: t === "Sub-task" }));
         return json(cloud ? { issueTypes: types } : { isLast: true, values: types });
       }
-      const fieldsMeta = [
-        { fieldId: "project", name: "Project", required: true },
-        { fieldId: "issuetype", name: "Issue Type", required: true },
-        { fieldId: "summary", name: "Summary", required: true },
-        { fieldId: "description", name: "Description", required: false },
-        { fieldId: "priority", name: "Priority", required: false, hasDefaultValue: true },
-        { fieldId: "assignee", name: "Assignee", required: false },
-        { fieldId: "duedate", name: "Due Date", required: false },
-        { fieldId: "labels", name: "Labels", required: false },
-        ...(meta[2] === "Sub-task" ? [{ fieldId: "parent", name: "Parent", required: true }] : []),
-        ...(cloud
-          ? meta[2] !== "Epic" && meta[2] !== "Sub-task"
-            ? [{ fieldId: "parent", name: "Parent", required: false }]
-            : []
-          : [
-              ...(meta[2] === "Epic"
-                ? [{ fieldId: EPIC_NAME, name: "Epic Name", required: true }]
-                : []),
-              ...(meta[2] !== "Epic" && meta[2] !== "Sub-task"
-                ? [{ fieldId: EPIC_LINK, name: "Epic Link", required: false }]
-                : []),
-            ]),
-      ];
+      const fieldsMeta = createScreen(meta[1] ?? "", meta[2]);
       return json(cloud ? { fields: fieldsMeta } : { isLast: true, values: fieldsMeta });
     }
     if (path === "issue" && req.method === "POST") {
@@ -785,6 +940,12 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       const type = (f.issuetype as { id?: string } | undefined)?.id as Issue["type"] | undefined;
       if (!["PAY", "OPS"].includes(project) || !type)
         return error("project and issuetype are required");
+      // Like Jira: a field the create screen does not have is refused.
+      const refused = screenProblem(
+        f,
+        createScreen(project, type).map((x) => x.fieldId),
+      );
+      if (refused) return refused;
       if (type === "Epic" && !cloud && !f[EPIC_NAME])
         return json({ errorMessages: [], errors: { [EPIC_NAME]: "Epic Name is required." } }, 400);
       const count = [...issues.values()].filter((i) => i.project === project).length;
@@ -817,6 +978,9 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
         comments: [],
         links: [],
         points: typeof f[STORY_POINTS] === "number" ? (f[STORY_POINTS] as number) : null,
+        ...(cloud && typeof f[ESTIMATE] === "number" ? { estimate: f[ESTIMATE] as number } : {}),
+        // Like Jira, a new issue is in the backlog until it is moved into a sprint (D57).
+        inBacklog: true,
       };
       issues.set(created.key, created);
       return json(
@@ -865,6 +1029,11 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       }
       if (sub === "" && req.method === "PUT") {
         const f = (body?.fields ?? {}) as Record<string, unknown>;
+        // Like Jira: a field the edit screen does not have is refused.
+        const refused = screenProblem(f, Object.keys(editScreen(issue)));
+        if (refused) return refused;
+        if (cloud && ESTIMATE in f)
+          issue.estimate = typeof f[ESTIMATE] === "number" ? (f[ESTIMATE] as number) : null;
         if ("summary" in f) issue.summary = String(f.summary);
         if ("description" in f) issue.description = (f.description as string | null) ?? null;
         if ("priority" in f) {
@@ -900,11 +1069,48 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       }
       if (sub === "/assignee" && req.method === "PUT") {
         const assignee = userFrom(body);
+        if (assignee && opts.unassignable?.has(assignee.name))
+          return json(
+            {
+              errorMessages: [],
+              errors: { assignee: `User '${assignee.name}' cannot be assigned issues.` },
+            },
+            400,
+          );
         if (assignee?.name !== issue.assignee?.name)
           addHistory(issue, USERS[0] as User, Date.now(), [assigneeItem(issue.assignee, assignee)]);
         issue.assignee = assignee;
         touch(issue);
         return new Response(null, { status: 204 });
+      }
+      if (sub === "" && req.method === "DELETE") {
+        if (opts.canDelete === false)
+          return error("You do not have permission to delete issues in this project.", 403);
+        if (opts.undeletable?.has(issue.key))
+          return error("You do not have permission to delete this issue.", 403);
+        const subtasks = [...issues.values()].filter((i) => i.parent === issue.key);
+        if (subtasks.length && url.searchParams.get("deleteSubtasks") !== "true")
+          return error(
+            "The issue has subtasks. Set deleteSubtasks to true to delete them with it.",
+          );
+        if (opts.laggingSearch) for (const i of [...subtasks, issue]) indexed.set(i.key, i);
+        for (const sub of subtasks) issues.delete(sub.key);
+        issues.delete(issue.key);
+        for (let i = links.length - 1; i >= 0; i--)
+          if (links[i]?.from === issue.key || links[i]?.to === issue.key) links.splice(i, 1);
+        return new Response(null, { status: 204 });
+      }
+      const commentPath = /^\/comment\/(\d+)$/.exec(sub);
+      if (commentPath) {
+        const i = issue.comments.findIndex((c) => c.id === commentPath[1]);
+        const found = issue.comments[i];
+        if (!found) return error("Can not find a comment for the id.", 404);
+        if (req.method === "GET") return json(commentJson(found, userJson));
+        if (req.method === "DELETE") {
+          issue.comments.splice(i, 1);
+          touch(issue);
+          return new Response(null, { status: 204 });
+        }
       }
       if (sub === "/comment" && req.method === "GET")
         return json({
@@ -928,32 +1134,23 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       }
       if (sub === "/transitions" && req.method === "GET")
         return json({
-          transitions: TRANSITIONS.filter((t) => t.name !== issue.status).map((t) => ({
-            ...t,
-            to: status(t.name as keyof typeof STATUSES),
-          })),
+          transitions: available(issue).map((t) => ({ ...t, to: status(t.name) })),
         });
       if (sub === "/transitions" && req.method === "POST") {
-        const t = TRANSITIONS.find(
+        // Only a transition out of the current status: an id from another is refused.
+        const t = available(issue).find(
           (x) => x.id === (body?.transition as { id?: string } | undefined)?.id,
         );
         if (!t)
           return error("It seems that you have tried to perform an illegal workflow operation.");
-        addHistory(issue, USERS[0] as User, Date.now(), [
-          statusItem(issue.status, t.name as keyof typeof STATUSES),
-        ]);
-        issue.status = t.name as keyof typeof STATUSES;
+        addHistory(issue, USERS[0] as User, Date.now(), [statusItem(issue.status, t.name)]);
+        issue.status = t.name;
         touch(issue);
         return new Response(null, { status: 204 });
       }
       if (sub === "/editmeta")
         return json({
-          fields:
-            issue.type === "Sub-task" || issue.type === "Epic"
-              ? {}
-              : cloud
-                ? { parent: { name: "Parent", required: false, operations: ["set"] } }
-                : { [EPIC_LINK]: { name: "Epic Link", required: false, operations: ["set"] } },
+          fields: editScreen(issue),
         });
       if (sub === "/remotelink" && req.method === "GET") return json(issue.remoteLinks ?? []);
       if (sub === "/remotelink" && req.method === "POST") {
@@ -976,7 +1173,10 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       }
       if (sub === "/remotelink" && req.method === "DELETE") {
         const globalId = url.searchParams.get("globalId");
-        issue.remoteLinks = (issue.remoteLinks ?? []).filter((l) => l.globalId !== globalId);
+        const kept = (issue.remoteLinks ?? []).filter((l) => l.globalId !== globalId);
+        if (kept.length === (issue.remoteLinks ?? []).length)
+          return error("No remote link with that global id.", 404);
+        issue.remoteLinks = kept;
         return new Response(null, { status: 204 });
       }
     }
@@ -991,7 +1191,12 @@ if (import.meta.main) {
   const cloud = args.includes("--cloud");
   Bun.serve({
     port,
-    fetch: createHandler(issues, { cloud, reversedLinks: args.includes("--reversed-links") }),
+    fetch: createHandler(issues, {
+      cloud,
+      reversedLinks: args.includes("--reversed-links"),
+      canDelete: !args.includes("--no-delete"),
+      cancelStatus: args.includes("--cancel-status"),
+    }),
   });
   console.log(
     `Mock Jira ${cloud ? "Cloud (any email and token)" : "DC"} on http://localhost:${port} with ${issues.size} issues (tracked epic suggestion: PAY-1)`,

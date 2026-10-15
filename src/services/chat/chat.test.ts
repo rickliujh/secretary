@@ -3,13 +3,15 @@ import type { UIMessage, UIMessageChunk } from "ai";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { issueMeta, jiraIssues, people, proposals } from "@/db/schema";
+import { addBusinessDays, localDate } from "@/lib/dates";
 import { query } from "@/services/db";
 import { createDependency } from "@/services/dependencies/queries";
 import { createPerson, createTeam } from "@/services/directory/queries";
 import { Intake } from "@/services/intake";
 import { FIXTURE_VAULT_DIR, loadVaultFromDisk } from "@/services/sources/test";
+import { workingDaysBetween } from "@/services/sprints/fit";
 import { getState, SYNC_KEYS, setState } from "@/services/sync/state";
-import { drainStream, promptOf } from "@/test/helpers";
+import { drainStream, promptOf, readThread } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { Chat } from ".";
@@ -106,6 +108,55 @@ describe("Chat (D25)", () => {
     expect(r.output.proposed).toEqual(["Comment on PAY-4"]);
     expect(r.rows.map((p) => [p.kind, p.status])).toEqual([["add_comment", "pending"]]);
     expect(text(r.chunks)).toContain("approve it in the Inbox");
+  });
+
+  test("the chat's request is not the user's own words: its numbers need a points cue (D55)", async () => {
+    const e = { rationale: "asked in chat", evidence: "points", confidence: 0.9 };
+    const update = {
+      kind: "update_issue",
+      target: "PAY-4",
+      storyPoints: "8",
+      pointsSource: "stated",
+      ...e,
+    };
+    const { layer, models } = intakeTestLayer({
+      "std-m": [
+        {
+          toolCall: {
+            name: "propose_actions",
+            // A number from a tool result, in the chat model's words and without a cue.
+            input: { request: "Fix the points on PAY-4: the refinement page says 8" },
+          },
+        },
+        out({ summary: "Points on PAY-4", question: null, confidence: 0.9, proposals: [update] }),
+        out({
+          summary: "Points on PAY-4",
+          question: "How many story points should PAY-4 have?",
+          confidence: 0.9,
+          proposals: [],
+        }),
+        { text: "I asked in the Inbox how many points PAY-4 should have." },
+      ],
+    });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const stream = yield* (yield* Chat).stream({
+            messages: ask("set the points on PAY-4 from the refinement page"),
+          });
+          const chunks = yield* Effect.promise(() => drainStream(stream));
+          const output = toolOutputs(chunks)[0] as { threadId: string };
+          return yield* readThread(output.threadId);
+        }),
+        layer,
+      ),
+    );
+    expect(r.messages[0]?.content).toMatchObject({ source: "typed", author: "chat" });
+    expect(r.items[0]?.snapshot).toMatchObject({ source: "typed", ownInput: false });
+    // The 8 went to repair, so the thread asks instead of proposing it.
+    expect(promptOf(models.calls, 2)).toContain("storyPoints 8 is not given as story points");
+    expect(r.props.map((p) => p.kind)).toEqual(["needs_clarification"]);
   });
 
   test("a draft request goes to the Inbox and the model is told not to write the draft", async () => {
@@ -297,6 +348,86 @@ describe("story points (D35)", () => {
       done: 3,
       remaining: 5,
       unestimated: ["OPS-7"],
+      // D57: the sprint has ended and no rate is known, so no verdict.
+      workingDaysLeft: 0,
+      daysPerPoint: null,
+      remainingDays: null,
+      verdict: "unknown",
+    });
+  });
+});
+
+describe("sprint room in chat (D57)", () => {
+  test("with a rate: days and the verdict for the active sprint, none for a closed one", async () => {
+    const { layer } = intakeTestLayer(
+      {
+        "std-m": [
+          { toolCall: { name: "sprint_points", input: { sprint: "PAY 14" } } },
+          { toolCall: { name: "sprint_points", input: {} } },
+          { text: "Done." },
+        ],
+      },
+      [],
+      { settings: { sprint: { daysPerPoint: 0.5, lastDay: "jira" } } },
+    );
+    const today = localDate();
+    const left = workingDaysBetween(today, addBusinessDays(today, 9));
+    const chunks = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const me = yield* getState(SYNC_KEYS.username);
+          yield* setState(SYNC_KEYS.fields, JSON.stringify({ storyPoints: "customfield_10106" }));
+          yield* setState(
+            SYNC_KEYS.sprints,
+            JSON.stringify({
+              sprints: [
+                {
+                  id: 6,
+                  name: "PAY 14",
+                  state: "closed",
+                  boardId: 1,
+                  start: "2026-08-31",
+                  end: "2026-09-14",
+                },
+                {
+                  id: 7,
+                  name: "PAY 15",
+                  state: "active",
+                  boardId: 1,
+                  start: "2026-09-14",
+                  end: addBusinessDays(today, 9),
+                },
+              ],
+            }),
+          );
+          const set = (key: string, v: Partial<typeof jiraIssues.$inferInsert>) =>
+            query((d) => d.update(jiraIssues).set(v).where(eq(jiraIssues.key, key)));
+          const base = { assignee: me, isSubtask: false, issueType: "Story" };
+          yield* set("PAY-3", { ...base, sprint: "PAY 15", storyPoints: 5, statusCategory: "new" });
+          yield* set("PAY-4", { ...base, sprint: "PAY 14", storyPoints: 3, statusCategory: "new" });
+          const stream = yield* (yield* Chat).stream({ messages: ask("do I have room?") });
+          return yield* Effect.promise(() => drainStream(stream));
+        }),
+        layer,
+      ),
+    );
+    const [closed, active] = toolOutputs(chunks) as Record<string, unknown>[];
+    expect(closed).toMatchObject({
+      sprint: { name: "PAY 14", state: "closed" },
+      workingDaysLeft: 0,
+      daysPerPoint: { days: 0.5, source: "Settings" },
+      remainingDays: 1.5,
+    });
+    expect(closed).not.toHaveProperty("verdict");
+    expect(closed).not.toHaveProperty("room");
+    expect(active).toMatchObject({
+      sprint: { name: "PAY 15", state: "active" },
+      // Ten working days from a weekday; nine when the test runs at a weekend.
+      workingDaysLeft: left,
+      remainingDays: 2.5,
+      verdict: "fits",
+      room: `Fits: about 2.5 of ${left} working days`,
     });
   });
 });
@@ -451,6 +582,7 @@ describe("small asks and blockers in the chat (D49)", () => {
             label: "small-ask",
             joinActiveSprint: true,
             hintDismissed: false,
+            defaultPoints: null,
           },
         },
       },
