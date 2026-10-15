@@ -1463,3 +1463,62 @@ Built
 Known limits
 - On update_issue an empty points field means "no change"; clearing uses the
   checkbox.
+
+## Phase 20: New tickets and the sprint (2026-10-15)
+
+Built
+- Payload (D57): create_issue gains `joinSprintChosen` (default false). Payload
+  building sets `joinSprint` for every create: a small ask from Settings as
+  before; any other create on when its due date is on or before the end of the
+  sprint it would join; Epics and sub-tasks never. The snapshot carries the
+  user's active sprints (`userSprints`) and a revision's `thread.sprintChoices`,
+  neither shown to the model: the classify prompt and its version (12) are
+  unchanged. A chosen value survives revisions and re-triage; an unchosen one is
+  recomputed.
+- One sprint pick everywhere (`joinSprintFor`): the Executor at approval, the
+  cards and payload defaults. The Executor never moves an Epic and records the
+  sprint on its result.
+- `sprints/fit.ts` (pure): working days left (Monday to Friday, today in full,
+  0 once ended), the user's open load in the sprint (as sprint points count
+  it), the rate (Settings, else the working days of the last three closed
+  sprints on the board over the points the user finished, else none), the
+  verdict (fits within 85 percent of the days left, tight within all of them,
+  over above; unknown without a rate or, while the sprint has room, for a ticket
+  without points), a headline with "plus N unestimated", and detail lines.
+  Creates assigned to someone else are shown and not counted.
+- `sprints/fit-query.ts`: the fit of a thread's open creates (with its other
+  pending creates that join the same sprint) and the user's sprint load, read
+  per thread with TanStack Query under the "tickets" key, so sync and every
+  decision, edits included, refresh them; the rate setting is part of the key.
+- Settings > General: "Sprint: one story point is about [ ] working days"
+  (`sprint.daysPerPoint`, 0.05 to 10, empty by default), with the derived rate
+  as placeholder and text when empty.
+- UI: the create card's Sprint row is a switch "Add to <sprint>" with "ends Fri
+  17 Oct, 3 working days left", the verdict line (fits and unknown muted, tight
+  amber, over destructive) and a Details popover (your open tickets there, the
+  other new tickets here, this ticket, the rate and its source, a Settings
+  link); a board that does not show the project is called out; without an active
+  sprint "No active sprint; it goes to the backlog". Executed cards say where the
+  ticket went. The small-ask row has a "Sprint" toggle chip with a verdict dot
+  and the same details; the edit dialog has the switch. The switch saves at once
+  through `Proposals.saveEdit` and marks the value chosen.
+- Corrections: `joinSprint` and `joinSprintChosen` are left out of correction
+  and revision examples, an approval that changed only them records none, and
+  `payloadChanges` ignores them.
+- Today's Sprint work header shows the user's sprint, its days left and the load
+  in days with its verdict. The chat's `sprint_points` adds `workingDaysLeft`,
+  `daysPerPoint` with its source, `remainingDays`, and for the user's own tickets
+  the verdict and its headline.
+- Mock Jira: an issue the app creates stays in the backlog until it is moved
+  into a sprint, as in Jira.
+- Tests: fit (today is the last day, the end has passed, no rate, unestimated
+  tickets, a ticket without points, another assignee, other creates of the
+  thread joining, velocity rate), payload defaults and the chosen value through
+  a revision, the unchanged prompt, corrections without the switch, the chat
+  tool's new fields, and the FR-16 AC against the mock Jira (fits at 2 of 3
+  days, over at 3.5 of 3, on joins the sprint after a re-triage, off stays in
+  the backlog).
+
+Known limits
+- Days off, public holidays, partial days and Jira's remaining estimates are not
+  counted; in-progress tickets count in full.

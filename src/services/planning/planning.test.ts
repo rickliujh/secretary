@@ -93,7 +93,7 @@ describe("Planning (D30)", () => {
       ["PAY-4", "backlog"],
       ["OPS-7", "pickup"],
     ]);
-    expect(r.prep.velocity.sprints[0]).toEqual({
+    expect(r.prep.velocity.sprints[0]).toMatchObject({
       name: "Payments 14",
       points: 3,
       issues: 1,

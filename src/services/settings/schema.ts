@@ -149,6 +149,10 @@ export const SmallAsksSettingsSchema = z.object({
 });
 export type SmallAsksSettings = z.infer<typeof SmallAsksSettingsSchema>;
 
+/** Bounds of `sprint.daysPerPoint` (D57). */
+export const MIN_DAYS_PER_POINT = 0.05;
+export const MAX_DAYS_PER_POINT = 10;
+
 export const DEFAULT_CAPTURE_SHORTCUT = "CommandOrControl+Shift+Space";
 
 export const SettingsSchema = z.object({
@@ -181,6 +185,20 @@ export const SettingsSchema = z.object({
     .prefault({}),
   scoring: ScoringWeightsSchema.prefault({}),
   smallAsks: SmallAsksSettingsSchema.prefault({}),
+  sprint: z
+    .object({
+      /**
+       * Working days one story point takes (D57); null: the rate of the user's
+       * last closed sprints on the board, when there is one.
+       */
+      daysPerPoint: z
+        .number()
+        .min(MIN_DAYS_PER_POINT)
+        .max(MAX_DAYS_PER_POINT)
+        .nullable()
+        .default(null),
+    })
+    .prefault({}),
   dataSources: z.array(DataSourceSchema).default([]),
   /** Suggested questions for the chat, in order (D42). */
   suggestedPrompts: z.array(SuggestedPromptSchema).max(12).default(DEFAULT_SUGGESTED_PROMPTS),

@@ -7,6 +7,8 @@ import { CheckCheck, Clock, MessagesSquare, Pin, Send } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { FollowupDialog } from "@/components/dependencies/followup-dialog";
 import { useChaseDraft } from "@/components/drafts/use-drafts";
+import { VerdictLine } from "@/components/inbox/sprint-choice";
+import { useUserSprintLoad } from "@/components/inbox/use-sprint-fit";
 import { TicketLink, useTicketPanel } from "@/components/tickets/ticket-link";
 import { TONE } from "@/components/tone";
 import { Badge } from "@/components/ui/badge";
@@ -507,6 +509,21 @@ function SprintItem({ row, sprintEnd }: { row: SprintRow; sprintEnd: string | nu
   );
 }
 
+/** The user's sprint load in days with its verdict, no ticket added (D57). */
+function SprintLoad() {
+  const load = useUserSprintLoad();
+  const { sprint, fit } = load.data ?? {};
+  if (!sprint || !fit) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-2">
+      <span>
+        {sprint.name}: {sprint.when}.
+      </span>
+      <VerdictLine fit={fit} sprint={sprint} />
+    </div>
+  );
+}
+
 export function SprintWork({ today }: { today: Today }) {
   const f = today.focus;
   return (
@@ -514,9 +531,14 @@ export function SprintWork({ today }: { today: Today }) {
       title="Sprint work"
       count={today.sprintWork.length}
       description={
-        f.mode === "sprint"
-          ? `${f.sprints.join(" and ")}${f.endsOn ? `, ending ${f.endsOn}` : ""}${today.snoozed ? `; ${today.snoozed} snoozed` : ""}.`
-          : `No active sprint: ranked from ${today.inScope} open tickets in scope${today.snoozed ? `; ${today.snoozed} snoozed` : ""}.`
+        f.mode === "sprint" ? (
+          <>
+            {`${f.sprints.join(" and ")}${f.endsOn ? `, ending ${f.endsOn}` : ""}${today.snoozed ? `; ${today.snoozed} snoozed` : ""}.`}
+            <SprintLoad />
+          </>
+        ) : (
+          `No active sprint: ranked from ${today.inScope} open tickets in scope${today.snoozed ? `; ${today.snoozed} snoozed` : ""}.`
+        )
       }
     >
       <Rows

@@ -37,7 +37,12 @@ import {
 } from "@/prompts/segment";
 import { bindDb, Db } from "@/services/db";
 import { Llm } from "@/services/llm";
-import { describePayload, effectivePayload, issueRefs } from "@/services/proposals/schema";
+import {
+  describePayload,
+  effectivePayload,
+  issueRefs,
+  withoutCodeFields,
+} from "@/services/proposals/schema";
 import { Retrieval } from "@/services/retrieval";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sync } from "@/services/sync";
@@ -297,6 +302,14 @@ const make = Effect.gen(function* () {
         if (p.kind === "create_issue" && !local.has(p.ref))
           local.set(p.ref, `$new:${local.size + 1}`);
       }
+      // The sprint switch the user set stays through the revision (D57); code's, never the model's.
+      const sprintChoices: Record<string, boolean> = {};
+      for (const r of job.revising) {
+        const p = effectivePayload(r);
+        const ref = p.kind === "create_issue" ? local.get(p.ref) : undefined;
+        if (p.kind === "create_issue" && p.joinSprintChosen && ref)
+          sprintChoices[ref] = p.joinSprint;
+      }
       const pending = job.revising.flatMap((r) => {
         if (r.kind === "needs_clarification") return [];
         const shape = fromPayload(effectivePayload(r), local);
@@ -332,6 +345,7 @@ const make = Effect.gen(function* () {
               pending,
               others,
               ...(questions.length ? { questions } : {}),
+              ...(Object.keys(sprintChoices).length ? { sprintChoices } : {}),
             }
           : null;
       const site = { jiraHost: jiraHost((yield* settingsOrDefault(settingsSvc)).jira.baseUrl) };
@@ -520,11 +534,12 @@ const make = Effect.gen(function* () {
         );
       }
       // FR-7.2: a requested change is a correction worth learning from.
+      // The sprint switch is code's field, so it is no part of the example (D57).
       const before = opts.supersede
         .filter((r) => r.kind !== "needs_clarification")
-        .map(effectivePayload);
+        .map((r) => withoutCodeFields(effectivePayload(r)));
       if (opts.instruction && before.length) {
-        const after = merged.map((m) => m.payload);
+        const after = merged.map((m) => withoutCodeFields(m.payload));
         yield* q((d) =>
           d.insert(memories).values({
             id: newId(),

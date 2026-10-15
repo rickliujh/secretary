@@ -27,6 +27,8 @@ export type ProposalResult = {
   /** Something that did not happen though the proposal ran, e.g. a failed sprint move (D44). */
   warning?: string;
   issueKey?: string;
+  /** The sprint a created issue joined (D57); absent when it stayed in the backlog. */
+  sprint?: string;
   dependencyId?: string;
   memoryId?: string;
   communicationId?: string;

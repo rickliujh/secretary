@@ -27,7 +27,9 @@ import { ProposalCard } from "./proposal-card";
 import { editedPoints, issueOptions } from "./proposal-fields";
 import { RevokeControl, RevokeOutcome } from "./revoke-control";
 import { SMALL_ASK_KEYS } from "./small-ask-keys";
+import { SprintChip } from "./sprint-choice";
 import { useDecisions } from "./use-inbox";
+import { useThreadSprintFits } from "./use-sprint-fit";
 
 type Result = { message?: string; error?: string; issueKey?: string; warning?: string } | null;
 
@@ -65,6 +67,7 @@ export function SmallAskRow({
   const [issueType, setIssueType] = useState(payload.issueType);
   const [epic, setEpic] = useState(payload.epic ?? "");
   const [points, setPoints] = useState(pointsText(storedPoints));
+  const [join, setJoin] = useState(payload.joinSprint);
   const [open, setOpen] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   // A reply in the thread can replace the proposal; start again from the new one.
@@ -72,9 +75,11 @@ export function SmallAskRow({
     setIssueType(payload.issueType);
     setEpic(payload.epic ?? "");
     setPoints(pointsText(storedPoints));
-  }, [payload.issueType, payload.epic, storedPoints]);
+    setJoin(payload.joinSprint);
+  }, [payload.issueType, payload.epic, storedPoints, payload.joinSprint]);
 
   const subtask = isSubtaskType(payload.issueType, home.data?.home?.subtaskTypes);
+  const fits = useThreadSprintFits(create.inboxItemId);
   const types = [...new Set([...(home.data?.home?.issueTypes ?? []), payload.issueType])];
   const ids = trackOrder(create, members);
   const createOpen = create.status === "pending" || create.status === "failed";
@@ -95,16 +100,18 @@ export function SmallAskRow({
     ? (lookups.person.get(payload.requesterPersonId)?.displayName ?? null)
     : null;
 
-  type RowValues = { issueType: string; epic: string; points: number | null };
+  type RowValues = { issueType: string; epic: string; points: number | null; join: boolean };
   const current = (): RowValues => {
     const typed = parsePointsInput(points);
-    return { issueType, epic, points: typed === undefined ? storedPoints : typed };
+    return { issueType, epic, points: typed === undefined ? storedPoints : typed, join };
   };
   /** The create with the row's values; points the user changed are no longer a suggestion (D55). */
   const edited = (v: RowValues): ProposalPayload => ({
     ...payload,
     issueType: v.issueType,
     epic: v.epic || null,
+    // The sprint switch the user set is kept through revisions (D57).
+    ...(v.join !== payload.joinSprint ? { joinSprint: v.join, joinSprintChosen: true } : {}),
     ...(editedPoints(payload, { issueType: v.issueType, storyPoints: v.points }) as {
       storyPoints: number | null;
       storyPointsEstimated: boolean;
@@ -115,6 +122,7 @@ export function SmallAskRow({
     setIssueType(payload.issueType);
     setEpic(payload.epic ?? "");
     setPoints(pointsText(storedPoints));
+    setJoin(payload.joinSprint);
   };
   // A change is saved on the pending create at once, so its card, Approve all and
   // Track all use it (D44). A failed create sends its changes with Retry instead.
@@ -122,6 +130,7 @@ export function SmallAskRow({
     setIssueType(next.issueType);
     setEpic(next.epic);
     setPoints(pointsText(next.points));
+    setJoin(next.join);
     if (create.status !== "pending") return;
     saveEdit.mutate({ id: create.id, edited: edited(next) }, { onError: reset });
   };
@@ -136,7 +145,8 @@ export function SmallAskRow({
     const changed =
       v.issueType !== payload.issueType ||
       (v.epic || null) !== payload.epic ||
-      v.points !== storedPoints;
+      v.points !== storedPoints ||
+      v.join !== payload.joinSprint;
     // Row changes are an edit of the create, recorded like any other (FR-7.2).
     const edits: Record<string, ProposalPayload> =
       changed && createOpen ? { [create.id]: edited(v) } : {};
@@ -236,6 +246,14 @@ export function SmallAskRow({
           />
           {payload.storyPointsEstimated && storedPoints !== null && (
             <span className="text-xs text-muted-foreground">suggested</span>
+          )}
+          {!subtask && (
+            <SprintChip
+              choice={fits.data?.[create.id]}
+              checked={join}
+              disabled={busy}
+              onChange={(j) => change({ ...current(), join: j })}
+            />
           )}
           <span className="text-xs text-muted-foreground">in {payload.projectKey}</span>
           <span className="ml-auto" />

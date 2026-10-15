@@ -65,6 +65,7 @@ describe("Settings schema", () => {
         hintDismissed: false,
         defaultPoints: null,
       },
+      sprint: { daysPerPoint: null },
       network: {
         proxyMode: "system",
         proxyUrl: "",

@@ -38,7 +38,7 @@ import {
   type ProposalPayload,
 } from "@/services/proposals/schema";
 import { Settings, settingsOrDefault } from "@/services/settings";
-import { userActiveSprints } from "@/services/sprints/active";
+import { joinSprintFor } from "@/services/sprints/active";
 import { Sync } from "@/services/sync";
 import { forgetDeleted } from "@/services/sync/deleted";
 import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
@@ -373,18 +373,24 @@ const make = Effect.gen(function* () {
         );
       }
       let message = `Created ${key}`;
-      // A failed sprint move is a warning, not a failure (D44). Sub-tasks follow their parent.
-      if (p.joinSprint && !type.subtask) {
+      let sprint: string | undefined;
+      // A failed sprint move is a warning, not a failure (D44). Sub-tasks follow
+      // their parent; an Epic never joins (D57).
+      if (p.joinSprint && !type.subtask && !/^epic$/i.test(type.name)) {
         const joined = yield* afterCreate(
           "joining the active sprint",
           joinActiveSprint(key, p.projectKey, proposalId),
         );
-        if (joined?.sprint) message += ` in sprint ${joined.sprint}`;
+        if (joined?.sprint) {
+          sprint = joined.sprint;
+          message += ` in sprint ${joined.sprint}`;
+        }
         if (joined?.warning) warnings.push(joined.warning);
       }
       return {
         message,
         issueKey: key,
+        ...(sprint ? { sprint } : {}),
         ...(warnings.length ? { warning: warnings.join(" ") } : {}),
       } satisfies ProposalResult;
     });
@@ -411,10 +417,13 @@ const make = Effect.gen(function* () {
               .all(),
           )
         : [];
-      const sprint = userActiveSprints(state.sprints, mine, me ?? null, {
-        preferProject: projectKey,
-        boardProjects: state.boardProjects,
-      })[0];
+      const sprint = joinSprintFor(
+        state.sprints,
+        mine,
+        me ?? null,
+        projectKey,
+        state.boardProjects,
+      );
       if (!sprint)
         return {
           sprint: null,

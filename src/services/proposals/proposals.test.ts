@@ -12,6 +12,7 @@ import createFields from "@/test/fixtures/jira/createmeta-PAY-story.json";
 import { fixtureIssues, syncedJiraLayer, syncOnce } from "@/test/seed";
 import { json, noContent, type StubRoute } from "@/test/stub-fetch";
 import {
+  CreateIssue,
   type ProposalError,
   ProposalPayloadSchema,
   Proposals,
@@ -551,6 +552,37 @@ describe("Proposals", () => {
     expect((fields?.issuetype as { id?: string } | undefined)?.id).toBe(
       issueTypes.values.find((t) => t.name === "Bug")?.id,
     );
+  });
+
+  test("the sprint switch is no correction; an edit with it leaves it out (D57)", async () => {
+    const { layer } = setup();
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const { ids } = yield* seed([create, create]);
+          const svc = yield* Proposals;
+          const [a = "", b = ""] = ids;
+          const switched = CreateIssue.parse({
+            ...create,
+            joinSprint: true,
+            joinSprintChosen: true,
+          });
+          yield* svc.saveEdit(a, switched);
+          yield* svc.approve(a);
+          const memsAfterSwitch = yield* query((d) => d.select().from(memories).all());
+          yield* svc.approve(b, { ...switched, summary: "Backfill the refund totals" });
+          return { memsAfterSwitch, mems: yield* query((d) => d.select().from(memories).all()) };
+        }),
+        layer,
+      ),
+    );
+    expect(r.memsAfterSwitch.filter((m) => m.kind === "example")).toHaveLength(0);
+    const examples = r.mems.filter((m) => m.kind === "example");
+    expect(examples).toHaveLength(1);
+    expect(examples[0]?.exampleAfter).toMatchObject({ summary: "Backfill the refund totals" });
+    expect(examples[0]?.exampleAfter).not.toHaveProperty("joinSprint");
+    expect(examples[0]?.exampleBefore).not.toHaveProperty("joinSprintChosen");
   });
 
   test("Track after a saved change records it once; saving the original clears it", async () => {

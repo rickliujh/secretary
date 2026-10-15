@@ -346,6 +346,11 @@ describe("story points (D35)", () => {
       done: 3,
       remaining: 5,
       unestimated: ["OPS-7"],
+      // D57: the sprint has ended and no rate is known, so no verdict.
+      workingDaysLeft: 0,
+      daysPerPoint: null,
+      remainingDays: null,
+      verdict: "unknown",
     });
   });
 });

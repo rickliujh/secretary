@@ -98,6 +98,10 @@ describe("proposal payloads", () => {
     expect(payloadChanges(before, { ...before, ref: "$new:2", assignee: "ana.b" })).toEqual([
       "assignee: (none) -> ana.b",
     ]);
+    // The sprint switch is code's field: never a correction (D57).
+    expect(payloadChanges(before, { ...before, joinSprint: true, joinSprintChosen: true })).toEqual(
+      [],
+    );
     const update = UpdateIssue.parse({
       kind: "update_issue",
       target: "PAY-4",
@@ -212,6 +216,7 @@ describe("parsePayload", () => {
       smallAsk: false,
       requesterPersonId: null,
       joinSprint: false,
+      joinSprintChosen: false,
       storyPoints: null,
       storyPointsEstimated: false,
       storyPointsCleared: false,

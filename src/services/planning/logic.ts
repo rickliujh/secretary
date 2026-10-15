@@ -46,7 +46,14 @@ export type Candidate = {
 };
 
 export type Velocity = {
-  sprints: { name: string; points: number; issues: number; unestimated: number }[];
+  sprints: {
+    name: string;
+    start: string | null;
+    end: string | null;
+    points: number;
+    issues: number;
+    unestimated: number;
+  }[];
   /** Average completed points per sprint; null without closed sprints to learn from. */
   average: number | null;
 };
@@ -80,7 +87,7 @@ export function sprintPair(
  */
 export function velocity(
   sprints: readonly SprintInfo[],
-  issues: readonly PlanIssue[],
+  issues: readonly Pick<PlanIssue, "assignee" | "resolved" | "storyPoints">[],
   me: string,
   boardId: number | null,
 ): Velocity {
@@ -99,6 +106,8 @@ export function velocity(
     });
     return {
       name: s.name,
+      start: s.start,
+      end: s.end,
       points: done.reduce((n, i) => n + (i.storyPoints ?? 0), 0),
       issues: done.length,
       unestimated: done.filter((i) => i.storyPoints === null).length,

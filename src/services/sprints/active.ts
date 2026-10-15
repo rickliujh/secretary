@@ -63,3 +63,29 @@ export function userActiveSprint(
     userActiveSprints(sprints, issues, me)[0] ?? sprints.find((s) => s.state === "active") ?? null
   );
 }
+
+type BoardProjects = Readonly<Record<string, readonly string[]>>;
+
+/** Whether the sprint's board shows issues of `projectKey` (from synced issues, D23). */
+export const boardShowsProject = (
+  sprint: Pick<SprintInfo, "boardId">,
+  projectKey: string,
+  boardProjects: BoardProjects,
+) => sprint.boardId !== null && (boardProjects[String(sprint.boardId)] ?? []).includes(projectKey);
+
+/**
+ * The sprint a new ticket of `projectKey` joins (D44, D57): one pick for the
+ * Executor, the Inbox card and payload defaults. Null when no active sprint
+ * holds the user's work.
+ */
+export function joinSprintFor(
+  sprints: readonly SprintInfo[],
+  issues: readonly SprintIssue[],
+  me: string | null,
+  projectKey: string,
+  boardProjects: BoardProjects,
+): SprintInfo | null {
+  return (
+    userActiveSprints(sprints, issues, me, { preferProject: projectKey, boardProjects })[0] ?? null
+  );
+}

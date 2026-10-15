@@ -42,6 +42,7 @@ describe("withLinkedItems", () => {
     smallAsk: false,
     requesterPersonId: null,
     joinSprint: false,
+    joinSprintChosen: false,
     storyPoints: null,
     storyPointsEstimated: false,
     storyPointsCleared: false,
