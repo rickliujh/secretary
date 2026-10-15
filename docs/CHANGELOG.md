@@ -1340,6 +1340,36 @@ Thread context (FR-14.6)
   older records, retrieval exclusion, and against the mock a tracked ask revoked
   (deleted, deleted in Jira first, and closed) followed by another turn.
 
+Across threads (FR-14.6, 2026-10-15)
+- A ticket a revoke deletes (or finds gone) gets a tombstone in the new
+  `deleted_issues` table, written before its cache rows go; the rows go by key
+  and by Jira id, so a moved copy goes too. Sync drops it from every page (Cloud's
+  eventually consistent search may still return it) and from `refreshIssue`,
+  skips it as a parent epic, and sweeps any copy a racing write left after each
+  run and refresh. Retrieval never offers it from any source in any thread and
+  drops it from references and open waits; validation says it was deleted when
+  the user revoked it; approving a proposal that acts on it in Jira is refused (a
+  draft that mentions it and a wait update are not).
+- A ticket a revoke closes gets `issue_meta.revoked_at`, cleared when sync or a
+  refresh sees it reopened. While closed it is offered only when named (the
+  `mentioned` source), never by search, recency, sender, tracking or as an epic;
+  its candidate line reads "created by mistake and revoked by the user in this
+  conversation" or "in another conversation" (closed), with a rule not to act on,
+  ask about or mention it unless reopening it when asked or when named (in the
+  revoking thread only an instruction counts).
+- `validateItemOutput` rejects a question, summary or proposal text that names a
+  ticket a revoke deleted or closed unless the user's own words name it.
+- Correction examples from a thread whose create was revoked are left out of
+  retrieval; the others are labelled as past examples from other inputs, never
+  something the user said in this conversation (prompt version 11 only).
+- Migration 0014 adds the table and column and backfills them from revoked
+  records. The mock's `laggingSearch` keeps returning deleted issues from search.
+- Tests: two threads against the mock (deleted with a lagging search; closed,
+  then named in a third thread, then reopened) through a full and an incremental
+  sync; sync runs, a refresh and a parent epic under a trigger that refuses any
+  write of a tombstoned row; the tombstone module, forgetting by id, clearing on
+  reopen and the backfill; the prompt lines and the validation messages.
+
 Known limits
 - The revoke comment is matched among the newest 100 comments of the ticket.
 - Deleting a ticket leaves waits created outside its thread pointing at the

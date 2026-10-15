@@ -528,3 +528,141 @@ describe("revoked proposals in the thread context (FR-14.6, prompt version 11)",
     expect(system).not.toContain("revoked");
   });
 });
+
+describe("across threads (FR-14.6, prompt version 11)", () => {
+  const example = {
+    input:
+      "set up Datadog monitoring for the appset webhook\nThe user asked: why has this no story points?",
+    proposed: "Create Task in PAY: Set up Datadog monitoring",
+    corrected: "Create Task in PAY: Set up Datadog monitoring (changed story points)",
+  };
+
+  test("past corrections read as examples from other inputs, not as said here", () => {
+    const { prompt } = buildClassifyPrompt({ ...snapshot, examples: [example] });
+    expect(prompt).toContain(
+      "## Past corrections by the user, from other inputs (learn the pattern only)\nThese are past examples from other, earlier inputs and conversations, not about the current input.",
+    );
+    expect(prompt).toContain(
+      "never treat it as something the user said or asked in this conversation",
+    );
+    expect(prompt).toContain(
+      `- Earlier input (another conversation): "${example.input}"\n  Proposed then: ${example.proposed}`,
+    );
+    expect(prompt).not.toContain("(learn from these)");
+  });
+
+  test("snapshots before prompt version 11 replay the old examples block", () => {
+    const { prompt } = buildClassifyPrompt({ ...snapshot, promptVersion: 10, examples: [example] });
+    expect(prompt).toContain("## Past corrections by the user (learn from these)");
+    expect(prompt).toContain(`- Input: "${example.input}"`);
+  });
+
+  const closedBy = (revoked: "here" | "elsewhere") => {
+    const [first, ...rest] = snapshot.candidates;
+    if (!first) throw new Error("fixture has candidates");
+    return {
+      ...snapshot,
+      candidates: [{ ...first, status: "Cancelled", statusCategory: "done", revoked }, ...rest],
+    };
+  };
+
+  test("a candidate a revoke closed says so, with the rule", () => {
+    const first = snapshot.candidates[0];
+    const here = buildClassifyPrompt(closedBy("here"));
+    expect(here.prompt).toContain(
+      `] ${first?.summary} (${first?.reasons.join(", ")}); created by mistake and revoked by the user in this conversation (closed)`,
+    );
+    expect(buildClassifyPrompt(closedBy("elsewhere")).prompt).toContain(
+      "; created by mistake and revoked by the user in another conversation (closed)",
+    );
+    // The input naming it counts only outside the thread that revoked it.
+    expect(here.system).toContain(
+      "for one revoked in this conversation, only the user's own instruction naming it counts, not the input, which led to the mistake; for one revoked in another conversation, the input naming its key counts too.",
+    );
+    expect(buildClassifyPrompt(snapshot).system).not.toContain("created by mistake");
+  });
+
+  const answer = (o: Partial<ItemOutput>): ItemOutput => ({
+    summary: "Ana chases the export",
+    question: null,
+    confidence: 0.9,
+    proposals: [],
+    ...o,
+  });
+
+  test("a question or summary naming a deleted ticket fails unless the user named it", () => {
+    const s = { ...snapshot, deleted: ["PAY-41"] };
+    const asked = answer({ question: "You asked why PAY-41 has no story points; how many?" });
+    expect(validateItemOutput(asked, s)).toEqual([
+      "The question names PAY-41, a ticket the user revoked (it was deleted). Do not mention it unless the user names it.",
+    ]);
+    expect(
+      validateItemOutput(answer({ summary: "Chase on PAY-41", question: "Which ticket?" }), s),
+    ).toEqual([
+      "The summary names PAY-41, a ticket the user revoked (it was deleted). Do not mention it unless the user names it.",
+    ]);
+    // A rationale is checked too.
+    expect(
+      validateItemOutput(
+        answer({
+          proposals: [
+            {
+              kind: "add_comment",
+              target: "PAY-2",
+              body: "Chased.",
+              ...base,
+              rationale: "Like PAY-41",
+            },
+          ],
+        }),
+        s,
+      ),
+    ).toContain(
+      "Proposal 1 (add_comment) rationale names PAY-41, a ticket the user revoked (it was deleted). Do not mention it unless the user names it.",
+    );
+    // Named by the user, in the input or an instruction: fine.
+    expect(validateItemOutput(asked, { ...s, quote: `${s.quote} What about PAY-41?` })).toEqual([]);
+    expect(
+      validateItemOutput(asked, {
+        ...s,
+        thread: { instructions: ["is PAY-41 gone?"], decided: [], pending: [] },
+      }),
+    ).toEqual([]);
+  });
+
+  test("text naming a ticket a revoke closed fails unless the user named it", () => {
+    const asked = answer({ question: "Should PAY-1 get story points?" });
+    const error =
+      "The question names PAY-1, a ticket the user revoked (it was closed). Do not mention it unless the user names it.";
+    expect(validateItemOutput(asked, closedBy("elsewhere"))).toEqual([error]);
+    // Reached by search but not offered: still not to be mentioned.
+    expect(validateItemOutput(asked, { ...snapshot, revokedClosed: ["PAY-1"] })).toEqual([error]);
+    // Another thread revoked it: the input naming it counts.
+    const named = `${snapshot.quote} PAY-1 too.`;
+    expect(validateItemOutput(asked, { ...closedBy("elsewhere"), quote: named })).toEqual([]);
+    // This thread revoked it: only the user's instruction counts.
+    expect(validateItemOutput(asked, { ...closedBy("here"), quote: named })).toEqual([error]);
+    expect(
+      validateItemOutput(asked, {
+        ...closedBy("here"),
+        thread: { instructions: ["reopen PAY-1"], decided: [], pending: [] },
+      }),
+    ).toEqual([]);
+  });
+
+  test("a proposal on a ticket a revoke deleted fails with the reason", () => {
+    const errors = validateItemOutput(
+      {
+        summary: "s",
+        question: null,
+        confidence: 0.9,
+        proposals: [{ kind: "add_comment", target: "PAY-41", body: "Still on it.", ...base }],
+      },
+      { ...snapshot, deleted: ["PAY-41"] },
+    );
+    expect(errors).toContain(
+      "Proposal 1 (add_comment): target PAY-41 was deleted when the user revoked it, so it no longer exists. Do not target, comment on or link to it.",
+    );
+    expect(errors.join(" ")).not.toContain("not one of the candidate issues");
+  });
+});

@@ -44,7 +44,8 @@
  * user without the delete permission; tests can also refuse the delete of one
  * issue and the assigning of one user. Transitions follow a workflow: which are
  * available depends on the issue's status, and `POST /transitions` refuses one
- * that is not available from it.
+ * that is not available from it. With `laggingSearch` (tests) a deleted issue
+ * still comes back from searches, as Cloud's eventually consistent index may.
  *
  *   bun run mock:jira --cloud         # Cloud shape: Basic auth, POST /search/jql
  *                                     # token paging (old /search is 410), account
@@ -584,6 +585,12 @@ export type MockOptions = {
    * screen still has it.
    */
   noPointsOnCreate?: Set<string>;
+  /**
+   * A search index that has not caught up (Cloud's search is eventually
+   * consistent): a deleted issue still comes back from searches, as it was when
+   * deleted, while `GET /issue/{key}` answers 404 (FR-14.6).
+   */
+  laggingSearch?: boolean;
 };
 
 export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}) {
@@ -598,6 +605,8 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
     transitionsFrom(issue.status).filter((t) => inWorkflow(t.name));
   let nextLink = 10000;
   const links: MockLink[] = [];
+  /** Deleted issues a lagging search index still returns. */
+  const indexed = new Map<string, Issue>();
   for (const issue of issues.values())
     for (const l of issue.links)
       links.push({ id: String(nextLink++), type: blocks, from: l.inward, to: issue.key });
@@ -882,7 +891,7 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       const jql = String(body?.jql ?? "");
       const startAt = cloud ? Number(body?.nextPageToken ?? 0) : Number(body?.startAt ?? 0);
       const max = Math.min(Number(body?.maxResults ?? 50), 100, opts.searchPageSize ?? 100);
-      let list = [...issues.values()].filter((i) => !opts.hidden?.has(i.key));
+      let list = [...issues.values(), ...indexed.values()].filter((i) => !opts.hidden?.has(i.key));
       const parents = /^\(parent in \(([^)]*)\)\)/.exec(jql)?.[1]?.split(/,\s*/);
       if (parents) list = list.filter((i) => i.parent && parents.includes(i.parent));
       // The blocker check reads exactly these keys (D45); a moved key finds the issue's new key.
@@ -1081,6 +1090,7 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
           return error(
             "The issue has subtasks. Set deleteSubtasks to true to delete them with it.",
           );
+        if (opts.laggingSearch) for (const i of [...subtasks, issue]) indexed.set(i.key, i);
         for (const sub of subtasks) issues.delete(sub.key);
         issues.delete(issue.key);
         for (let i = links.length - 1; i >= 0; i--)

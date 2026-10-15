@@ -6,7 +6,6 @@ import {
   dependencies,
   followups,
   issueMeta,
-  jiraComments,
   jiraIssues,
   memories,
   people,
@@ -41,6 +40,7 @@ import {
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { userActiveSprints } from "@/services/sprints/active";
 import { Sync } from "@/services/sync";
+import { forgetDeleted } from "@/services/sync/deleted";
 import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import {
   describeAction,
@@ -165,13 +165,13 @@ const make = Effect.gen(function* () {
       ];
     });
 
-  /** Removes a deleted issue from the cache, with its comments and Secretary's notes on it. */
-  const forgetIssue = (key: string) =>
-    Effect.gen(function* () {
-      yield* q((d) => d.delete(jiraComments).where(eq(jiraComments.issueKey, key)));
-      yield* q((d) => d.delete(issueMeta).where(eq(issueMeta.issueKey, key)));
-      yield* q((d) => d.delete(jiraIssues).where(eq(jiraIssues.key, key)));
-    });
+  /**
+   * Removes a deleted issue from the cache, with its comments and Secretary's notes
+   * on it, and keeps its tombstone so no sync stores it again and no thread offers
+   * it (FR-14.6).
+   */
+  const forgetIssue = (key: string, proposalId: string | null) =>
+    withDb(forgetDeleted(key, proposalId));
 
   /**
    * The undo data an earlier attempt of this proposal recorded (D54): a retry
@@ -249,7 +249,8 @@ const make = Effect.gen(function* () {
       logger.info(`${describeAction(action)}: done`);
 
       // A deleted issue leaves the cache with what Secretary kept about it (D54).
-      if (action.kind === "delete_issue") yield* forgetIssue(action.issueKey);
+      if (action.kind === "delete_issue")
+        yield* forgetIssue(action.issueKey, opts.proposalId ?? null);
       // Show Jira's truth after every write (design.md 7.3). Remote links are
       // not part of the cached issue, so those writes need no re-fetch.
       const touchesIssue =
@@ -1087,7 +1088,7 @@ const make = Effect.gen(function* () {
           yield* audit(proposalId, "revoke_memory", op.memoryId, op, null);
           return {};
         case "forget_issue":
-          yield* forgetIssue(op.issueKey);
+          yield* forgetIssue(op.issueKey, proposalId);
           yield* audit(proposalId, "forget_issue", op.issueKey, op, null);
           return {};
         case "delete_draft": {

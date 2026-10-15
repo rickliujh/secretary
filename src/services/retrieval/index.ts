@@ -15,6 +15,8 @@ export type SnapshotRequest = {
   thread?: ThreadContext | null;
   /** Keys never offered, whatever finds them: tickets a revoke deleted (FR-14.6). */
   exclude?: readonly string[];
+  /** Tickets this thread created and then revoked (FR-14.6), for how a closed one reads. */
+  revokedHere?: readonly string[];
 };
 
 export interface RetrievalShape {
