@@ -147,6 +147,43 @@ describe("precedence", () => {
     expect(t.sprintWork.map((r) => r.issue.key)).toEqual(["X-1"]);
   });
 
+  test("a backlog ticket joins Sprint work for its due date, not for being idle", () => {
+    const idle = "2026-09-14T09:00:00.000Z";
+    const t = build({
+      issues: [
+        issue("S-1"),
+        issue("BL-1", { sprint: null, status: "To Do", statusCategory: "new", updated: idle }),
+        issue("BL-2", { sprint: null, status: "On hold" }),
+        issue("BL-3", { sprint: null, updated: idle, dueDate: "2026-10-09" }),
+      ],
+      dependencies: [],
+      comments: [],
+      woken: [],
+    });
+    expect(t.sprintWork.map((r) => [r.issue.key, r.risks])).toEqual([
+      ["S-1", []],
+      ["BL-3", []],
+    ]);
+  });
+
+  test("with no work in a sprint, an idle ticket is still at risk", () => {
+    const t = build({
+      issues: [
+        issue("BL-1", {
+          sprint: null,
+          status: "To Do",
+          statusCategory: "new",
+          updated: "2026-09-14T09:00:00.000Z",
+        }),
+      ],
+      dependencies: [],
+      comments: [],
+      woken: [],
+    });
+    expect(t.focus).toEqual({ mode: "scope" });
+    expect(t.sprintWork.map((r) => r.issue.key)).toEqual(["BL-1"]);
+  });
+
   test("small asks are never Sprint work, even in the sprint", () => {
     const t = build({
       issues: [ask("A-1"), issue("S-1")],

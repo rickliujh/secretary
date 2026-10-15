@@ -327,14 +327,20 @@ export function rankWork(
     seen.add(c.issueKey);
   }
 
+  // While the user's work is in a sprint, a ticket outside it (the backlog) is at
+  // risk only for its due date: backlog tickets sit idle, blocked or on hold by
+  // nature, and their waits and blockers are listed on their own.
   const atRisk: Flagged[] = [];
   for (const i of scoped) {
     const reasons: string[] = [];
-    const b = blocks.get(i.key);
-    if (b?.blockedBy.length) reasons.push(`Blocked by ${b.blockedBy.slice(0, 2).join(", ")}`);
-    else if (/block|on hold/i.test(i.status)) reasons.push(`Status is ${i.status}`);
-    const idle = staleValue(i.updated, today).idle;
-    if (idle >= AT_RISK_IDLE_DAYS) reasons.push(`No updates for ${idle} days`);
+    const planned = focus.mode === "scope" || sprintKeys.has(i.key) || i.pinned;
+    if (planned) {
+      const b = blocks.get(i.key);
+      if (b?.blockedBy.length) reasons.push(`Blocked by ${b.blockedBy.slice(0, 2).join(", ")}`);
+      else if (/block|on hold/i.test(i.status)) reasons.push(`Status is ${i.status}`);
+      const idle = staleValue(i.updated, today).idle;
+      if (idle >= AT_RISK_IDLE_DAYS) reasons.push(`No updates for ${idle} days`);
+    }
     if (i.dueDate) {
       const left = daysBetween(today, i.dueDate);
       if (left < 0) reasons.push(`${-left} day${left === -1 ? "" : "s"} past due`);
@@ -342,7 +348,7 @@ export function rankWork(
         reasons.push(`Due in ${left} day${left === 1 ? "" : "s"} and not started`);
     }
     const dep = depsByIssue.get(i.key)?.[0];
-    if (dep && dep.overdueDays > 0)
+    if (planned && dep && dep.overdueDays > 0)
       reasons.push(`Waiting on ${dep.label} (${dep.overdueDays}d overdue)`);
     if (reasons.length) atRisk.push({ issue: i, reasons });
   }
