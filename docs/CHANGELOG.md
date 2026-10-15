@@ -1528,6 +1528,12 @@ Built
   the card shows the stored choice, and when it fails the switch still works;
   Today names the end date once; the rate field takes "0,5"; fits refresh on a
   new day.
+- A sprint's last day is the user's choice: Settings > General > "A sprint's
+  last day" (`sprint.lastDay`): follow Jira's end time (default; the option shows
+  the active sprint's end time when known), count it as a working day, or not
+  count it (the sprint ends that morning; on that day it ends today with 0 days
+  left). Every day count uses it: cards, the chip, Today, chat, and the derived
+  rate's sprint days.
 
 Known limits
 - Days off, public holidays, partial days and Jira's remaining estimates are not

@@ -3,6 +3,7 @@ import {
   chooseRate,
   halfDays,
   halfDaysUp,
+  jiraEndTime,
   type LoadIssue,
   lastSprintDay,
   shownDays,
@@ -32,7 +33,7 @@ describe("working days", () => {
 
   test("today is the last day: one day left", () => {
     expect(workingDaysLeft(sprint, "2026-10-19")).toBe(1);
-    expect(sprintWhen(sprint, "2026-10-19")).toBe("ends Mon 19 Oct, 1 working day left");
+    expect(sprintWhen(sprint, "2026-10-19")).toBe("ends today, 1 working day left");
   });
 
   test("the end has passed: none left, and it says it is not closed yet", () => {
@@ -64,6 +65,55 @@ describe("working days", () => {
     expect(sprintWhen({ start: null, end: "2026-10-17" }, "2026-10-15")).toBe(
       "ends Sat 17 Oct, 2 working days left",
     );
+  });
+});
+
+describe("a sprint's last day (Settings)", () => {
+  // Ends Monday 2026-10-19; Jira's end time is local (no zone), so every time zone reads the same.
+  const morning = { ...sprint, endAt: "2026-10-19T09:00:00", state: "active" };
+  const evening = { ...sprint, endAt: "2026-10-19T17:00:00", state: "active" };
+
+  test("jira: follows the end time; a date only counts", () => {
+    expect(workingDaysLeft(morning, "2026-10-15", "jira")).toBe(2);
+    expect(workingDaysLeft(evening, "2026-10-15", "jira")).toBe(3);
+    expect(workingDaysLeft(sprint, "2026-10-15", "jira")).toBe(3);
+    // Today is the last day.
+    expect(workingDaysLeft(evening, "2026-10-19", "jira")).toBe(1);
+    expect(workingDaysLeft(morning, "2026-10-19", "jira")).toBe(0);
+    expect(sprintWhen(evening, "2026-10-19", "jira")).toBe("ends today, 1 working day left");
+  });
+
+  test("full: the last day always counts", () => {
+    expect(lastSprintDay(morning, "full")).toBe("2026-10-19");
+    expect(workingDaysLeft(morning, "2026-10-15", "full")).toBe(3);
+    expect(workingDaysLeft(morning, "2026-10-19", "full")).toBe(1);
+    expect(sprintWhen(morning, "2026-10-19", "full")).toBe("ends today, 1 working day left");
+  });
+
+  test("none: the sprint ends that morning; on its last day none are left, and it still ends today", () => {
+    expect(lastSprintDay(evening, "none")).toBe("2026-10-18");
+    expect(workingDaysLeft(evening, "2026-10-15", "none")).toBe(2);
+    expect(workingDaysLeft(evening, "2026-10-19", "none")).toBe(0);
+    expect(sprintWhen(evening, "2026-10-19", "none")).toBe("ends today, 0 working days left");
+    expect(sprintWhen(evening, "2026-10-20", "none")).toBe("ended Mon 19 Oct, not closed yet");
+  });
+
+  test("the velocity rate counts each sprint's days the same way", () => {
+    const rows = [
+      { start: "2026-09-21", end: "2026-10-02", endAt: "2026-10-02T17:00:00", points: 10 },
+    ];
+    expect(velocityRate(rows, "full")?.daysPerPoint).toBe(1);
+    expect(velocityRate(rows, "none")?.daysPerPoint).toBe(0.9);
+    expect(velocityRate([{ ...rows[0], endAt: "2026-10-02T09:00:00" }], "jira")?.daysPerPoint).toBe(
+      0.9,
+    );
+  });
+
+  test("Jira's end time as Settings shows it", () => {
+    expect(jiraEndTime("2026-10-19T10:00:00")).toEqual({ time: "10:00", counts: false });
+    expect(jiraEndTime("2026-10-19T17:30:00")).toEqual({ time: "17:30", counts: true });
+    expect(jiraEndTime("2026-10-19")).toBeNull();
+    expect(jiraEndTime(null)).toBeNull();
   });
 });
 

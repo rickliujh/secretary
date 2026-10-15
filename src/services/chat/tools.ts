@@ -443,7 +443,7 @@ export function chatTools(
               who,
               ...r,
               tickets: r.tickets.slice(0, 40),
-              workingDaysLeft: workingDaysLeft(picked, today),
+              workingDaysLeft: workingDaysLeft(picked, today, data.lastDay),
               daysPerPoint: rate
                 ? {
                     days: Math.round(rate.daysPerPoint * 100) / 100,

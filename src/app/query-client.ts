@@ -24,10 +24,10 @@ export const queryKeys = {
    * Sprint fit of a thread's new tickets and the user's sprint load (D57); under
    * "tickets", so sync and decisions (proposal edits included) refresh them.
    */
-  sprintFit: (inboxItemId: string, daysPerPoint: number | null, today: string) =>
-    ["tickets", "sprint-fit", inboxItemId, daysPerPoint, today] as const,
-  sprintLoad: (daysPerPoint: number | null, today: string) =>
-    ["tickets", "sprint-load", daysPerPoint, today] as const,
+  sprintFit: (inboxItemId: string, settings: readonly unknown[], today: string) =>
+    ["tickets", "sprint-fit", inboxItemId, ...settings, today] as const,
+  sprintLoad: (settings: readonly unknown[], today: string) =>
+    ["tickets", "sprint-load", ...settings, today] as const,
   /** Sprint > Epics (D50); under "tickets" like Today. */
   epicHealth: ["tickets", "epic-health"] as const,
   /** When the sweep's weekly pass over untouched asks last ran (D49). */

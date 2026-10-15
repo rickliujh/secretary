@@ -65,7 +65,7 @@ describe("Settings schema", () => {
         hintDismissed: false,
         defaultPoints: null,
       },
-      sprint: { daysPerPoint: null },
+      sprint: { daysPerPoint: null, lastDay: "jira" },
       network: {
         proxyMode: "system",
         proxyUrl: "",
@@ -78,6 +78,11 @@ describe("Settings schema", () => {
   });
 
   test("small-asks home: defaults, and labels without spaces (D44)", () => {
+    // A store from before the last-day setting parses with Jira's end time (D57).
+    expect(SettingsSchema.parse({ sprint: { daysPerPoint: 0.5 } }).sprint).toEqual({
+      daysPerPoint: 0.5,
+      lastDay: "jira",
+    });
     expect(SettingsSchema.parse({ smallAsks: { projectKey: "ASK" } }).smallAsks).toEqual({
       projectKey: "ASK",
       label: "small-ask",

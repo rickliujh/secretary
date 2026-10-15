@@ -2,7 +2,7 @@
  * Sprint fit reads for the Inbox, Today and Settings (D57). Keys sit under
  * "tickets", so a sync and every decision (proposal edits included) refresh
  * them; the rate setting and the local date are part of the key, so changing
- * the setting or a new day (seen when the window gets focus again) does too.
+ * a setting or a new day (seen when the window gets focus again) does too.
  */
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -12,7 +12,11 @@ import { run } from "@/app/runtime";
 import { localDate } from "@/lib/dates";
 import { threadSprintFits, userSprintLoad } from "@/services/sprints/fit-query";
 
-const useDaysPerPoint = () => useSettings().data?.sprint.daysPerPoint ?? null;
+/** The sprint settings the fit reads (rate and last day), for the query keys. */
+const useSprintSettings = () => {
+  const sprint = useSettings().data?.sprint;
+  return [sprint?.daysPerPoint ?? null, sprint?.lastDay ?? "jira"] as const;
+};
 
 /** Today's local date, read again when the window gets focus or every few minutes. */
 function useLocalDate() {
@@ -31,10 +35,10 @@ function useLocalDate() {
 
 /** The sprint choice of each open create in a thread, by proposal id. */
 export function useThreadSprintFits(inboxItemId: string | null, enabled = true) {
-  const perPoint = useDaysPerPoint();
+  const settings = useSprintSettings();
   const today = useLocalDate();
   return useQuery({
-    queryKey: queryKeys.sprintFit(inboxItemId ?? "", perPoint, today),
+    queryKey: queryKeys.sprintFit(inboxItemId ?? "", settings, today),
     queryFn: ({ signal }) => run(threadSprintFits(inboxItemId ?? "", today), signal),
     enabled: enabled && !!inboxItemId,
     refetchOnWindowFocus: true,
@@ -43,10 +47,10 @@ export function useThreadSprintFits(inboxItemId: string | null, enabled = true) 
 
 /** The user's sprint and its load without a new ticket (Today, Settings). */
 export function useUserSprintLoad() {
-  const perPoint = useDaysPerPoint();
+  const settings = useSprintSettings();
   const today = useLocalDate();
   return useQuery({
-    queryKey: queryKeys.sprintLoad(perPoint, today),
+    queryKey: queryKeys.sprintLoad(settings, today),
     queryFn: ({ signal }) => run(userSprintLoad(today), signal),
     refetchOnWindowFocus: true,
   });

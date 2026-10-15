@@ -50,6 +50,8 @@ export type Velocity = {
     name: string;
     start: string | null;
     end: string | null;
+    /** Jira's end timestamp, for the working days of the sprint (D57). */
+    endAt: string | null;
     points: number;
     issues: number;
     unestimated: number;
@@ -108,6 +110,7 @@ export function velocity(
       name: s.name,
       start: s.start,
       end: s.end,
+      endAt: s.endAt ?? null,
       points: done.reduce((n, i) => n + (i.storyPoints ?? 0), 0),
       issues: done.length,
       unestimated: done.filter((i) => i.storyPoints === null).length,

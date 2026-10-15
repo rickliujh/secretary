@@ -394,7 +394,8 @@ unchanged.
 - FR-16.3 (Must) Settings say what a story point means in working days (for
   example 1 point = 0.5 days). Left empty, the app uses the rate of the user's last
   three closed sprints on that board and says so; with neither, it shows points and
-  days without a verdict and links to the setting.
+  days without a verdict and links to the setting. Settings also say whether a
+  sprint's last day counts.
 - FR-16.4 (Should) Today's Sprint work shows the same sprint load in its header,
   and the chat's sprint points answer includes the working days left and the load in
   days.

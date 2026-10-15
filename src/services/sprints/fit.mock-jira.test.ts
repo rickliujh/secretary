@@ -87,7 +87,7 @@ function setup(opts: { third?: boolean } = {}) {
     ...jiraSettings({ baseUrl: `http://localhost:${server.port}`, trackedEpics: [] }),
     providers: [testProvider],
     tiers: { fast: null, standard: { providerId: "p1", model: "std-m" }, strong: null },
-    sprint: { daysPerPoint: 0.5 },
+    sprint: { daysPerPoint: 0.5, lastDay: "jira" },
   });
   const models = makeScriptedModels({ "std-m": [out(answer), out(answer)] });
   const llm = Layer.provideMerge(

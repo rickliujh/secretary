@@ -5,6 +5,14 @@
  * Days off, holidays and Jira's remaining-estimate fields are not counted.
  */
 
+import type { LastDayMode } from "@/services/settings/schema";
+
+/**
+ * Whether a sprint's last day counts (Settings, D57): "jira" follows Jira's end
+ * time, "full" always counts it, "none" never does (the sprint ends that morning).
+ */
+export type { LastDayMode };
+
 const DAY_MS = 86_400_000;
 const toUtc = (date: string) => Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
@@ -50,14 +58,19 @@ type SprintDates = {
 const pad = (n: number) => String(n).padStart(2, "0");
 const localDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
+const dayBefore = (date: string) => new Date(toUtc(date) - DAY_MS).toISOString().slice(0, 10);
+
 /**
- * The sprint's last working day for the count: its end date, or, when Jira's
- * end carries a time of day, the local date of that moment, which counts only
- * when it is at or after 12:00 local (a sprint that ends at 09:00 Monday leaves
- * Monday out). Null without an end.
+ * The sprint's last working day for the count. "full": its end date. "none":
+ * the day before it. "jira": its end date, or, when Jira's end carries a time
+ * of day, the local date of that moment, which counts only when it is at or
+ * after 12:00 local (a sprint that ends at 09:00 Monday leaves Monday out).
+ * Null without an end.
  */
-export function lastSprintDay(sprint: SprintDates): string | null {
+export function lastSprintDay(sprint: SprintDates, mode: LastDayMode = "jira"): string | null {
   if (!sprint.end) return null;
+  if (mode === "full") return sprint.end.slice(0, 10);
+  if (mode === "none") return dayBefore(sprint.end);
   const at = sprint.endAt;
   if (!at || !/T\d{2}:\d{2}/.test(at)) return sprint.end.slice(0, 10);
   const d = new Date(at);
@@ -67,11 +80,28 @@ export function lastSprintDay(sprint: SprintDates): string | null {
 }
 
 /**
+ * Jira's end time of day in local time ("10:00") and whether "jira" mode counts
+ * that day (at or after 12:00); null when the end has no time of day.
+ */
+export function jiraEndTime(
+  endAt: string | null | undefined,
+): { time: string; counts: boolean } | null {
+  if (!endAt || !/T\d{2}:\d{2}/.test(endAt)) return null;
+  const d = new Date(endAt);
+  if (Number.isNaN(d.getTime())) return null;
+  return { time: `${pad(d.getHours())}:${pad(d.getMinutes())}`, counts: d.getHours() >= 12 };
+}
+
+/**
  * Working days left in a sprint: from max(today, its start) to its last day
  * (`lastSprintDay`), both included (today counts in full); 0 once it has passed.
  */
-export function workingDaysLeft(sprint: SprintDates, today: string): number {
-  const last = lastSprintDay(sprint);
+export function workingDaysLeft(
+  sprint: SprintDates,
+  today: string,
+  mode: LastDayMode = "jira",
+): number {
+  const last = lastSprintDay(sprint, mode);
   if (!last) return 0;
   const from = sprint.start && sprint.start > today ? sprint.start : today;
   return workingDaysBetween(from, last);
@@ -84,16 +114,17 @@ export function shortDay(date: string): string {
 }
 
 /**
- * "ends Fri 17 Oct, 3 working days left"; past its end, "ended Tue 14 Oct", and
- * "not closed yet" while Jira still has it active.
+ * "ends Fri 17 Oct, 3 working days left" ("ends today" on its end date, even
+ * when that day does not count); past its end, "ended Tue 14 Oct", and "not
+ * closed yet" while Jira still has it active.
  */
-export function sprintWhen(sprint: SprintDates, today: string) {
+export function sprintWhen(sprint: SprintDates, today: string, mode: LastDayMode = "jira") {
   if (!sprint.end) return "no end date";
   const end = sprint.end.slice(0, 10);
   if (end < today)
     return `ended ${shortDay(end)}${sprint.state === "active" ? ", not closed yet" : ""}`;
-  const left = workingDaysLeft(sprint, today);
-  return `ends ${shortDay(end)}, ${left} working ${left === 1 ? "day" : "days"} left`;
+  const left = workingDaysLeft(sprint, today, mode);
+  return `ends ${end === today ? "today" : shortDay(end)}, ${left} working ${left === 1 ? "day" : "days"} left`;
 }
 
 /** One cached ticket as the load counts it (D35's rules). */
@@ -151,12 +182,22 @@ export type Rate = {
  * Null without sprints or finished points.
  */
 export function velocityRate(
-  rows: readonly { start: string | null; end: string | null; points: number }[],
+  rows: readonly {
+    start: string | null;
+    end: string | null;
+    endAt?: string | null;
+    points: number;
+  }[],
+  mode: LastDayMode = "jira",
 ): Rate | null {
   const dated = rows.filter((r) => r.start && r.end);
   const points = dated.reduce((n, r) => n + r.points, 0);
   if (!dated.length || points <= 0) return null;
-  const days = dated.reduce((n, r) => n + workingDaysBetween(r.start ?? "", r.end ?? ""), 0);
+  // Each sprint's working days, its last day counted as Settings say.
+  const days = dated.reduce(
+    (n, r) => n + workingDaysBetween(r.start ?? "", lastSprintDay(r, mode) ?? ""),
+    0,
+  );
   if (days <= 0) return null;
   return { daysPerPoint: days / points, source: "velocity", sprints: dated.length };
 }

@@ -19,6 +19,7 @@ import {
   chooseRate,
   type Fit,
   type FitTicket,
+  type LastDayMode,
   type LoadIssue,
   type Rate,
   sprintFit,
@@ -53,7 +54,14 @@ export const fitData = Effect.gen(function* () {
           .all(),
       )
     : [];
-  return { me, state, projectMeta, mine, daysPerPoint: settings.sprint.daysPerPoint };
+  return {
+    me,
+    state,
+    projectMeta,
+    mine,
+    daysPerPoint: settings.sprint.daysPerPoint,
+    lastDay: settings.sprint.lastDay,
+  };
 });
 export type FitData = Effect.Effect.Success<typeof fitData>;
 
@@ -63,7 +71,7 @@ export function rateOn(
   boardId: number | null,
 ): { rate: Rate | null; derived: Rate | null } {
   const derived = data.me
-    ? velocityRate(velocity(data.state.sprints, data.mine, data.me, boardId).sprints)
+    ? velocityRate(velocity(data.state.sprints, data.mine, data.me, boardId).sprints, data.lastDay)
     : null;
   return { rate: chooseRate(data.daysPerPoint, derived), derived };
 }
@@ -78,15 +86,18 @@ export type SprintView = {
   when: string;
   daysLeft: number;
   ended: boolean;
+  /** Jira's end timestamp, for Settings' example of how the last day counts. */
+  endAt: string | null;
 };
 
-const viewOf = (s: SprintInfo, today: string): SprintView => ({
+const viewOf = (s: SprintInfo, today: string, mode: LastDayMode): SprintView => ({
   id: s.id,
   name: s.name,
   start: s.start,
   end: s.end,
-  when: sprintWhen(s, today),
-  daysLeft: workingDaysLeft(s, today),
+  when: sprintWhen(s, today, mode),
+  daysLeft: workingDaysLeft(s, today, mode),
+  endAt: s.endAt ?? null,
   // Past its end while Jira still has it active: "ended, not closed yet".
   ended: s.state === "active" && !!s.end && s.end.slice(0, 10) < today,
 });
@@ -98,7 +109,7 @@ export function loadFit(
   today: string,
   extra: { others?: FitTicket[]; ticket?: FitTicket | null } = {},
 ): Fit {
-  const view = viewOf(sprint, today);
+  const view = viewOf(sprint, today, data.lastDay);
   return sprintFit({
     daysLeft: view.daysLeft,
     ended: view.ended,
@@ -199,7 +210,7 @@ export const threadSprintFits = (inboxItemId: string, today = localDate()) =>
         .map((o) => ticketOf(o.p));
       out[c.id] = {
         kind: "sprint",
-        sprint: viewOf(sprint, today),
+        sprint: viewOf(sprint, today, data.lastDay),
         offBoard: !boardShowsProject(sprint, c.p.projectKey, data.state.boardProjects),
         fit: loadFit(data, sprint, today, { others: joining, ticket: ticketOf(c.p) }),
       };
@@ -218,6 +229,10 @@ export const userSprintLoad = (today = localDate()) =>
     const sprint = userActiveSprints(data.state.sprints, data.mine, data.me)[0] ?? null;
     const { derived } = rateOn(data, sprint?.boardId ?? null);
     if (!sprint) return { sprint: null, fit: null, derived };
-    return { sprint: viewOf(sprint, today), fit: loadFit(data, sprint, today), derived };
+    return {
+      sprint: viewOf(sprint, today, data.lastDay),
+      fit: loadFit(data, sprint, today),
+      derived,
+    };
   });
 export type UserSprintLoad = Effect.Effect.Success<ReturnType<typeof userSprintLoad>>;

@@ -24,7 +24,15 @@ const ctx: PlanContext = {
   capacity: 8,
   velocity: {
     sprints: [
-      { name: "Payments 14", start: null, end: null, points: 8, issues: 3, unestimated: 0 },
+      {
+        name: "Payments 14",
+        start: null,
+        end: null,
+        endAt: null,
+        points: 8,
+        issues: 3,
+        unestimated: 0,
+      },
     ],
     average: 8,
   },

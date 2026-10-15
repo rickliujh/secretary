@@ -368,7 +368,7 @@ describe("sprint room in chat (D57)", () => {
         ],
       },
       [],
-      { settings: { sprint: { daysPerPoint: 0.5 } } },
+      { settings: { sprint: { daysPerPoint: 0.5, lastDay: "jira" } } },
     );
     const today = localDate();
     const left = workingDaysBetween(today, addBusinessDays(today, 9));

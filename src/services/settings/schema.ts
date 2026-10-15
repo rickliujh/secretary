@@ -149,6 +149,10 @@ export const SmallAsksSettingsSchema = z.object({
 });
 export type SmallAsksSettings = z.infer<typeof SmallAsksSettingsSchema>;
 
+/** How a sprint's last day counts (D57); kept here so the schema has no service imports. */
+export const LAST_DAY_MODES = ["jira", "full", "none"] as const;
+export type LastDayMode = (typeof LAST_DAY_MODES)[number];
+
 /** Bounds of `sprint.daysPerPoint` (D57). */
 export const MIN_DAYS_PER_POINT = 0.05;
 export const MAX_DAYS_PER_POINT = 10;
@@ -197,6 +201,11 @@ export const SettingsSchema = z.object({
         .max(MAX_DAYS_PER_POINT)
         .nullable()
         .default(null),
+      /**
+       * Whether a sprint's last day counts as a working day (D57): follow Jira's
+       * end time (at or after 12:00 local counts), always, or never.
+       */
+      lastDay: z.enum(LAST_DAY_MODES).default("jira"),
     })
     .prefault({}),
   dataSources: z.array(DataSourceSchema).default([]),
