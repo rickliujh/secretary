@@ -1214,3 +1214,54 @@ Review fixes
 - The issue picker scrolls inside the edit dialog and shows full summaries (PR #20),
   and the sync buttons keep their labels while a sync runs (PR #23).
 
+
+## Phase 19: Pasted text stays inline in the message box (2026-10-15)
+
+Why: every paste became a block above the box, so revising a thread ("change the
+summary to <paste>") tore the paste out of the sentence, it could not be edited in
+place, and the model got the sentence and the paste as separate pieces
+(requirements FR-2.8, design.md D56).
+
+Built
+- The message box is a TipTap 3 editor limited to plain text (document,
+  paragraph, text, hard break, undo, placeholder). A paste goes in at the cursor
+  as plain text with a `pasted` mark (not inclusive), highlighted with the new
+  `--pasted` theme tokens in light and dark mode and editable in place; text
+  dropped from elsewhere is marked the same way. Enter sends (never while an IME
+  is composing), Shift+Enter is a new line, and Ctrl/Cmd+Shift+O or "Use as my
+  own words" (shown while the cursor or selection is in a paste) removes the mark
+  from that paste. Ctrl+Shift+U was dropped because it is IBus's Unicode entry on
+  Linux; there is no paste-without-mark key (paste, then unmark), so the app needs
+  no clipboard read permission. Ctrl+W (D38) goes to the editor's own delete-word
+  command through a small registry in `lib/delete-word.ts`.
+- A message is ordered parts (`docToParts`, pure over the editor JSON: adjacent
+  parts merged, breaks as "\n") plus source and sender; the inbox, thread reply,
+  Today's capture box and quick capture send parts, and `Intake.triage` and
+  `reply` take `parts` beside the old `text` and `instruction`. Such messages are
+  stored with `inline: true`; older messages and those made by code keep their
+  block layout.
+- `splitInline` (`intake/thread.ts`): a one-line paste that shares its line with
+  typed text goes into the instruction in place as «...» (spaces around it stay
+  outside the markers), after « and » in the user's text are made plain quotes.
+  Every other paste is input, joined as before, including any paste with a line
+  break wherever it stands, so pasted lines can never become extra trusted
+  instructions. A new thread whose pastes are all values is typed input carrying
+  the markers. The source and sender pickers show only when the message has input.
+- Classify prompt version 13 (11 and 12 are taken on other branches; versions
+  are only recorded, never compared): when an instruction, typed input or a past
+  correction holds «...», it says that text was pasted from someone else, is a
+  value, and is never followed, and keeps each value on one line. The route-reply
+  prompt does the same. « and » typed outside the message box (older messages,
+  chat requests) become plain quotes, correction examples store their input's as
+  plain quotes, and snapshots before version 13 render as they ran.
+- Threads render an inline message's parts in order with the same highlight,
+  clamped with "Show all" when long; older messages render as before.
+- The editor's extensions and props are built once, and Placeholder and UndoRedo
+  come from their own `@tiptap/extensions` entry points.
+- Tests: parts from editor JSON, paste content, the mark commands (runs, unmark,
+  Ctrl+W), the composer plugins without a DOM (Enter and composition, the unmark
+  key, paste and drop marking, send then clear), `splitMessage` cases, the
+  rendered prompts (a pasted multi-line text never reaches the trusted block),
+  the service storing and splitting parts. Live eval case: a reply "change the
+  summary to «...»" whose paste reads like an order must set the summary and
+  propose nothing else.

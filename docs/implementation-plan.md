@@ -387,7 +387,7 @@ Branch `feat/19-inline-paste` from `main`.
 
 Tasks
 1. Composer on TipTap (plain-text schema, `pasted` mark, paste handler, unmark
-   button and Ctrl/Cmd+Shift+U, Ctrl/Cmd+Shift+V, Enter/Shift+Enter, Ctrl+W, disabled
+   button and Ctrl/Cmd+Shift+O, Enter/Shift+Enter, Ctrl+W, disabled
    while busy, placeholder). `ComposerMessage` becomes ordered parts; every caller
    (inbox new thread, thread reply, quick thread, capture dialog) follows.
 2. `splitMessage` and `partsOf` for inline runs, with unit tests: standalone paste,

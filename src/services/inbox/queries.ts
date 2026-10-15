@@ -79,6 +79,8 @@ export type ThreadMessage =
       role: "user";
       createdAt: string;
       parts: MessagePart[];
+      /** Parts laid out in order as written, pastes inside lines (D56). */
+      inline: boolean;
       source: string | null;
       answers: string | null;
       /** Set when a feature started the thread; such threads take no replies. */
@@ -94,6 +96,7 @@ const toMessage = (m: typeof inboxMessages.$inferSelect): ThreadMessage => {
       role: "user",
       createdAt: m.createdAt,
       parts: c.success ? c.data.parts : [],
+      inline: c.success ? !!c.data.inline : false,
       source: c.success ? (c.data.source ?? null) : null,
       answers: c.success ? (c.data.answers ?? null) : null,
       origin: c.success ? (c.data.origin ?? null) : null,

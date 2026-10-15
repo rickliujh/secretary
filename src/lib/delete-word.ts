@@ -16,12 +16,31 @@ const TEXT_INPUTS = new Set(["text", "search", "url", "email", "tel", "password"
 const isTextField = (el: Element | null): el is HTMLInputElement | HTMLTextAreaElement =>
   el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && TEXT_INPUTS.has(el.type));
 
+/** Rich editors that delete the word themselves, by their editable element. */
+const editors = new WeakMap<Element, () => void>();
+
+/**
+ * Lets a rich editor (the message box, D56) handle Ctrl+W through its own
+ * commands while `el` has focus. Returns the unregister function.
+ */
+export function registerWordDelete(el: Element, deleteWord: () => void): () => void {
+  editors.set(el, deleteWord);
+  return () => {
+    if (editors.get(el) === deleteWord) editors.delete(el);
+  };
+}
+
 /**
  * Deletes the selection, or the word before the cursor, in the focused text field.
  * Goes through the editing commands so undo and React's onChange both work.
  */
 export function deleteWordInFocused(): void {
   const el = document.activeElement;
+  const editor = el && editors.get(el);
+  if (editor) {
+    editor();
+    return;
+  }
   if (isTextField(el)) {
     if (el.readOnly || el.disabled) return;
     const end = el.selectionEnd ?? el.value.length;

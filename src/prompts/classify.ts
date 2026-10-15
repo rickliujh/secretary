@@ -25,9 +25,20 @@ import type { Reason } from "@/services/retrieval/ranking";
 import { sameWaitSubject } from "@/services/retrieval/waits";
 import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small-asks/home";
 import type { PromptSprint } from "@/services/sprints/calendar";
-import { HARD_RULES, untrusted } from "./common";
+import {
+  HARD_RULES,
+  hasPasteMarker,
+  oneLineValues,
+  PASTED_IN_INSTRUCTION,
+  untrusted,
+} from "./common";
 
-export const CLASSIFY_PROMPT_VERSION = 10;
+/**
+ * Recorded with each classified item. 13 adds pastes inside instructions as «...»
+ * (D56); 11 and 12 belong to other branches, and nothing compares versions in
+ * order, so the gap is harmless.
+ */
+export const CLASSIFY_PROMPT_VERSION = 13;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 
 export type CandidateIssue = {
@@ -1039,6 +1050,12 @@ ${
       : ""
   }`;
 
+  // Pasted values in the user's words (D56); older snapshots replay as they ran.
+  const values = s.promptVersion >= 13;
+  const rule = (texts: readonly string[]) =>
+    values && texts.some(hasPasteMarker) ? `\n${PASTED_IN_INSTRUCTION}` : "";
+  const words = (text: string) => (values ? oneLineValues(text) : text);
+
   const blocks: string[] = [];
   if (s.memories.length) {
     blocks.push(
@@ -1050,9 +1067,9 @@ ${
       `## Past corrections by the user (learn from these)\n${s.examples
         .map(
           (e) =>
-            `- Input: "${e.input}"\n  Proposed: ${e.proposed}\n  ${e.corrected ? `User changed it to: ${e.corrected}` : "User rejected it."}`,
+            `- Input: "${words(e.input)}"\n  Proposed: ${e.proposed}\n  ${e.corrected ? `User changed it to: ${e.corrected}` : "User rejected it."}`,
         )
-        .join("\n")}`,
+        .join("\n")}${rule(s.examples.map((e) => e.input))}`,
     );
   }
   blocks.push(
@@ -1132,11 +1149,16 @@ ${
     `## Input\n${untrusted(s.quote, {
       source: s.source,
       from: s.sender ? line([s.sender.displayName, s.sender.title, s.sender.team]) : null,
-    })}\nReferences found by code: issues ${s.references.issueKeys.join(", ") || "none"}; tickets ${s.references.tickets.join(", ") || "none"}.`,
+    })}${
+      // Typed input can hold a paste inside its lines too (D56).
+      s.source === "typed" ? rule([s.quote]) : ""
+    }\nReferences found by code: issues ${s.references.issueKeys.join(", ") || "none"}; tickets ${s.references.tickets.join(", ") || "none"}.`,
   );
   if (s.thread?.instructions.length) {
     blocks.push(
-      `## Instructions from the user in this conversation (trusted), oldest first\n${s.thread.instructions.map((x, i) => `${i + 1}. ${x}`).join("\n")}\nFollow the newest instruction. Do not ask again about anything these cover or anything you can decide yourself.`,
+      `## Instructions from the user in this conversation (trusted), oldest first\n${s.thread.instructions.map((x, i) => `${i + 1}. ${words(x)}`).join("\n")}\nFollow the newest instruction. Do not ask again about anything these cover or anything you can decide yourself.${rule(
+        s.thread.instructions,
+      )}`,
     );
   }
   if (s.thread?.others?.length) {

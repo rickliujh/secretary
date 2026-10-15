@@ -4,7 +4,13 @@
  * answer to a specific question; the answer is an enum of item numbers.
  */
 import { z } from "zod";
-import { HARD_RULES, untrusted } from "./common";
+import {
+  HARD_RULES,
+  hasPasteMarker,
+  oneLineValues,
+  PASTED_IN_INSTRUCTION,
+  untrusted,
+} from "./common";
 
 export type RouteItem = { quote: string; proposals: string[] };
 
@@ -28,7 +34,9 @@ ${HARD_RULES}
         (item, i) =>
           `## Item ${i + 1}\n${untrusted(item.quote)}\nProposed: ${item.proposals.join("; ") || "nothing"}`,
       ),
-      `## Follow-up from the user (trusted)\n${instruction}`,
+      `## Follow-up from the user (trusted)\n${oneLineValues(instruction)}${
+        hasPasteMarker(instruction) ? `\n${PASTED_IN_INSTRUCTION}` : ""
+      }`,
     ].join("\n\n"),
   };
 }
