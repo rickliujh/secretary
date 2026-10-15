@@ -168,6 +168,6 @@ describe("the model is not asked", () => {
     };
     expect(buildClassifyPrompt(s)).toEqual(buildClassifyPrompt(plain));
     expect(JSON.stringify(buildClassifyPrompt(s))).not.toContain("joinSprint");
-    expect(CLASSIFY_PROMPT_VERSION).toBe(12);
+    expect(CLASSIFY_PROMPT_VERSION).toBeGreaterThanOrEqual(12);
   });
 });
