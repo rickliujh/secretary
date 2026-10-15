@@ -1214,3 +1214,10 @@ Review fixes
 - The issue picker scrolls inside the edit dialog and shows full summaries (PR #20),
   and the sync buttons keep their labels while a sync runs (PR #23).
 
+
+## Backlog tickets stay out of Sprint work (2026-10-15)
+
+- While your work is in an active sprint, a backlog ticket is at risk only for its
+  due date (design.md D49). An idle, blocked or on-hold backlog ticket no longer shows
+  in Today's Sprint work, the brief or the chat's at-risk lists; with no work in a
+  sprint, at risk covers every ticket in scope as before.
