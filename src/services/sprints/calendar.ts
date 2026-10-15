@@ -14,6 +14,8 @@ export type SprintInfo = {
   /** YYYY-MM-DD in the sprint's own time zone, when Jira has dates. */
   start: string | null;
   end: string | null;
+  /** Jira's end timestamp with its time of day, for the working days left (D57). */
+  endAt?: string | null;
 };
 
 export type CalendarSprint = {

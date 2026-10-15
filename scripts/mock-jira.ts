@@ -16,7 +16,8 @@
  * `/rest/agile/1.0/board/{id}/sprint` serves that history, and each issue's
  * Sprint field names the sprint it was created in, plus the active one when
  * unfinished work was carried over. `POST /rest/agile/1.0/sprint/{id}/issue`
- * moves issues into a sprint. Stories, tasks and bugs carry Story Points
+ * moves issues into a sprint; an issue the app creates starts in the backlog,
+ * as in Jira, until it is moved. Stories, tasks and bugs carry Story Points
  * (1, 2, 3, 5, 8, 13; some unestimated). Their create and edit screens have
  * the Story Points field (not Epic or Sub-task, D55); with --cloud also "Story
  * point estimate", empty until written, as on Cloud sites with both (D35).
@@ -978,6 +979,8 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
         links: [],
         points: typeof f[STORY_POINTS] === "number" ? (f[STORY_POINTS] as number) : null,
         ...(cloud && typeof f[ESTIMATE] === "number" ? { estimate: f[ESTIMATE] as number } : {}),
+        // Like Jira, a new issue is in the backlog until it is moved into a sprint (D57).
+        inBacklog: true,
       };
       issues.set(created.key, created);
       return json(

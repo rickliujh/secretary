@@ -232,6 +232,8 @@ describe("mapIssue", () => {
         boardId: 7,
         start: "2026-08-31",
         end: "2026-09-14",
+        // The end with its time of day, for the working days left (D57).
+        endAt: "2026-09-14T17:00:00.000+01:00",
       },
       {
         id: 50,
@@ -240,8 +242,17 @@ describe("mapIssue", () => {
         boardId: 12,
         start: "2026-10-12",
         end: "2026-10-26",
+        endAt: "2026-10-26T08:00:00.000Z",
       },
-      { id: 51, name: "Undated", state: "future", boardId: 12, start: null, end: null },
+      {
+        id: 51,
+        name: "Undated",
+        state: "future",
+        boardId: 12,
+        start: null,
+        end: null,
+        endAt: null,
+      },
     ]);
   });
 

@@ -69,7 +69,7 @@ describe("sprint planning logic (D30)", () => {
       "me",
       7,
     );
-    expect(v.sprints).toEqual([
+    expect(v.sprints).toMatchObject([
       { name: "Payments 14", points: 3, issues: 1, unestimated: 0 },
       { name: "Payments 13", points: 8, issues: 2, unestimated: 1 },
       { name: "Payments 12", points: 5, issues: 1, unestimated: 0 },

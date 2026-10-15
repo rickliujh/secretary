@@ -32,6 +32,7 @@ import {
   type RevokeErrorRecord,
   type RevokeResult,
   resolveRefs,
+  withoutCodeFields,
 } from ".";
 import {
   cascadeOf,
@@ -86,10 +87,12 @@ const make = Effect.gen(function* () {
    * FR-7.2: a rejection or an edit becomes an example memory for later prompts.
    * Sprint moves come from the planner, not intake, so they teach intake nothing.
    */
-  const captureCorrection = (row: Row, after: ProposalPayload | null) =>
+  const captureCorrection = (row: Row, edited: ProposalPayload | null) =>
     Effect.gen(function* () {
       if (row.kind === "needs_clarification" || row.kind === "move_to_sprint") return;
-      const before = parsePayload(row.payload);
+      // The sprint switch is code's field, not something to learn from (D57).
+      const before = withoutCodeFields(parsePayload(row.payload));
+      const after = edited ? withoutCodeFields(edited) : null;
       const input = (yield* inputFor(row)).slice(0, 1000);
       yield* q((d) =>
         d.insert(memories).values({
@@ -219,7 +222,9 @@ const make = Effect.gen(function* () {
           kind: "invalid",
           message: `${gone.join(", ")} ${gone.length > 1 ? "were" : "was"} deleted when you revoked ${gone.length > 1 ? "them" : "it"}, so this can no longer run. Reject it instead.`,
         });
-      if (!same(payload, original) && !same(payload, recorded))
+      // A change of the sprint switch alone is no correction (D57).
+      const taught = withoutCodeFields(payload);
+      if (!same(taught, withoutCodeFields(original)) && !same(taught, withoutCodeFields(recorded)))
         yield* captureCorrection(row, payload);
       yield* q((d) =>
         d

@@ -92,6 +92,7 @@ export function parseSprints(value: unknown): SprintInfo[] {
           boardId: num(legacy(item, "rapidViewId")),
           start: datePart(legacy(item, "startDate")),
           end: datePart(legacy(item, "endDate")),
+          endAt: legacy(item, "endDate") ?? null,
         });
     } else if (item && typeof item === "object" && "name" in item) {
       const o = item as Record<string, unknown>;
@@ -103,6 +104,7 @@ export function parseSprints(value: unknown): SprintInfo[] {
           boardId: num(o.boardId ?? o.originBoardId ?? o.rapidViewId),
           start: datePart(typeof o.startDate === "string" ? o.startDate : null),
           end: datePart(typeof o.endDate === "string" ? o.endDate : null),
+          endAt: typeof o.endDate === "string" ? o.endDate : null,
         });
     }
   }

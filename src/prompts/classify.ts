@@ -142,6 +142,11 @@ export type ThreadContext = {
    * points or an estimate makes the user's numbers points.
    */
   questions?: string[];
+  /**
+   * The sprint switch the user set on a pending create, by its `$new` ref in
+   * `pending` (D57), so a revision keeps it. Never shown to the model.
+   */
+  sprintChoices?: Record<string, boolean>;
 };
 
 /**
@@ -176,6 +181,12 @@ export type ItemSnapshot = {
    * points fields, so they replay as they ran.
    */
   pointScale?: number[];
+  /**
+   * The user's active sprints, most of their open work first, each with the
+   * projects its board shows (D57): code's default for a create's `joinSprint`.
+   * Never shown to the model; absent in older snapshots, where creates do not join.
+   */
+  userSprints?: { name: string; end: string | null; projects: string[] }[];
   promptVersion: number;
   today: string;
   /** The day the item's input arrived; a revision keeps it for "Asked ... on" (D44). */
@@ -515,6 +526,10 @@ function isSubtaskIn(s: ItemSnapshot, type: string): boolean {
   return isSubtaskType(type);
 }
 
+/** A sub-task type, by Jira's flag when the snapshot has it, else by name. */
+const isSubtaskOf = (s: ItemSnapshot | undefined, type: unknown) =>
+  typeof type === "string" && (s ? isSubtaskIn(s, type) : isSubtaskType(type));
+
 /** A create_issue the model marked as a small ask, with a home configured (D44). */
 const isSmallAsk = (p: Record<string, unknown>, s?: ItemSnapshot) =>
   p.kind === "create_issue" && !!s?.smallAsks && p.smallAsk === "yes";
@@ -558,8 +573,8 @@ function smallAskPayload(p: ItemOutput["proposals"][number], s: ItemSnapshot): P
     labels: [home.label],
     smallAsk: true,
     requesterPersonId: requester?.id ?? null,
-    // Sub-tasks follow their parent's sprint.
-    joinSprint: home.joinSprint && !subtask,
+    // Sub-tasks follow their parent's sprint; the user's choice survives a revision (D57).
+    ...sprintChoice(p, s, { never: subtask, byDefault: home.joinSprint }),
     // Without stated points, the default from Settings when one is set (D55).
     ...createPoints(p.storyPoints, p.pointsSource, {
       epic: false,
@@ -568,6 +583,42 @@ function smallAskPayload(p: ItemOutput["proposals"][number], s: ItemSnapshot): P
       cleared: keptFor(p, s)?.cleared,
     }),
   });
+}
+
+/**
+ * The sprint a create of `projectKey` would join (D57), from the snapshot: the
+ * user's active sprints in order, a board that shows the project first, the
+ * same pick the Executor makes at approval.
+ */
+function snapshotSprint(s: ItemSnapshot, projectKey: unknown) {
+  const list = s.userSprints ?? [];
+  return (
+    list.find((x) => typeof projectKey === "string" && x.projects.includes(projectKey)) ??
+    list[0] ??
+    null
+  );
+}
+
+/**
+ * A create's `joinSprint` (D57): never for an Epic or a sub-task; the value the
+ * user chose on the pending create this one revises; else `byDefault`.
+ */
+function sprintChoice(
+  p: Record<string, unknown>,
+  s: ItemSnapshot | undefined,
+  opts: { never: boolean; byDefault: boolean },
+): { joinSprint: boolean; joinSprintChosen: boolean } {
+  const chosen = typeof p.ref === "string" ? s?.thread?.sprintChoices?.[p.ref] : undefined;
+  if (opts.never) return { joinSprint: false, joinSprintChosen: chosen !== undefined };
+  if (chosen !== undefined) return { joinSprint: chosen, joinSprintChosen: true };
+  return { joinSprint: opts.byDefault, joinSprintChosen: false };
+}
+
+/** Joins by default when due on or before the end of the sprint it would join (D57). */
+function dueInSprint(p: Record<string, unknown>, s: ItemSnapshot | undefined): boolean {
+  const due = str(p.dueDate);
+  const end = s ? snapshotSprint(s, p.projectKey)?.end : null;
+  return !!due && !!end && due <= end.slice(0, 10);
 }
 
 /** An Epic by type name; it never gets story points (D55). */
@@ -639,6 +690,10 @@ function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): Propos
         priority: str(g("priority")),
         assignee: str(g("assignee")),
         dueDate: str(g("dueDate")),
+        ...sprintChoice(p, s, {
+          never: isEpicType(g("issueType")) || isSubtaskOf(s, g("issueType")),
+          byDefault: dueInSprint(p, s),
+        }),
         ...createPoints(g("storyPoints"), g("pointsSource"), {
           epic: isEpicType(g("issueType")),
           smallAsk: false,

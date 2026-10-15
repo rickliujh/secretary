@@ -32,6 +32,8 @@ import { describePayload, type ProposalPayload } from "@/services/proposals/sche
 import { retrievalFtsQuery, tokens } from "@/services/retrieval/ranking";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sources } from "@/services/sources";
+import { halfDaysUp, workingDaysLeft } from "@/services/sprints/fit";
+import { fitData, loadFit, rateOn } from "@/services/sprints/fit-query";
 import { getState, parseFieldIds, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
 import { searchTicketKeys, ticketDetail } from "@/services/tickets/queries";
 import { blockedFacts, pendingDecisions, smallAskFacts, weekAhead } from "./agenda";
@@ -360,7 +362,7 @@ export function chatTools(
 
     sprint_points: tool({
       description:
-        "Story points in a sprint, added up in code: total, done, remaining, and which tickets have no estimate. Defaults to the user's active sprint and the user's own tickets. Use it for any question about points, capacity or how much work is in a sprint.",
+        "Story points in a sprint, added up in code: total, done, remaining, and which tickets have no estimate; the working days left, what a point means in days and where that rate comes from, the remaining work in days, and for the user's own tickets whether the sprint fits, is tight or is over. Defaults to the user's active sprint and the user's own tickets. Use it for any question about points, capacity, room in the sprint or how much work is in a sprint.",
       inputSchema: z.object({
         sprint: z
           .string()
@@ -418,6 +420,19 @@ export function chatTools(
             if (who === "me" && !me)
               return { error: "The Jira user is not known yet; run a sync." };
             const r = sprintPoints(issues, picked.name, who === "me" ? me : null);
+            // Days and room (D57): working days left, the rate, and the user's load verdict.
+            const data = yield* fitData;
+            const today = localDate();
+            const { rate } = rateOn(data, picked.boardId);
+            // Room is a question for an active sprint only; a closed one has none left to give.
+            const mine =
+              who === "me" && me && picked.state === "active" ? loadFit(data, picked, today) : null;
+            const notes = [
+              r.tickets.length > 0 && r.estimated === 0
+                ? "None of these tickets has an estimate in Jira."
+                : "",
+              rate ? "" : "No rate for days per point: the user can set it in Settings > General.",
+            ].filter((n) => n !== "");
             return {
               sprint: {
                 name: picked.name,
@@ -428,10 +443,19 @@ export function chatTools(
               who,
               ...r,
               tickets: r.tickets.slice(0, 40),
-              note:
-                r.tickets.length > 0 && r.estimated === 0
-                  ? "None of these tickets has an estimate in Jira."
-                  : undefined,
+              workingDaysLeft: workingDaysLeft(picked, today, data.lastDay),
+              daysPerPoint: rate
+                ? {
+                    days: Math.round(rate.daysPerPoint * 100) / 100,
+                    source:
+                      rate.source === "settings"
+                        ? "Settings"
+                        : `the user's last ${rate.sprints ?? 0} closed sprints`,
+                  }
+                : null,
+              remainingDays: rate ? halfDaysUp(r.remaining * rate.daysPerPoint) : null,
+              ...(mine ? { verdict: mine.verdict, room: mine.headline } : {}),
+              note: notes.length ? notes.join(" ") : undefined,
             };
           }),
         ),

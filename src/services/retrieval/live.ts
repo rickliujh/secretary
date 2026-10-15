@@ -28,6 +28,7 @@ import { parseIssueLinks } from "@/services/jira/schemas";
 import { describeCorrection, describeStoredPayload } from "@/services/proposals/schema";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { defaultSmallAskType, smallAskTypes } from "@/services/small-asks/home";
+import { userActiveSprints } from "@/services/sprints/active";
 import { promptSprints } from "@/services/sprints/calendar";
 import { deletedKeys, stillRevoked } from "@/services/sync/deleted";
 import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
@@ -510,6 +511,26 @@ const make = Effect.gen(function* () {
         projects: [...projects.keys()],
       });
 
+      // --- the user's active sprints (D57): code's default for joinSprint, not shown to the model ---
+      const mine = me
+        ? yield* q((d) =>
+            d
+              .select({
+                assignee: jiraIssues.assignee,
+                sprint: jiraIssues.sprint,
+                statusCategory: jiraIssues.statusCategory,
+              })
+              .from(jiraIssues)
+              .where(and(eq(jiraIssues.assignee, me), eq(jiraIssues.stale, false)))
+              .all(),
+          )
+        : [];
+      const userSprints = userActiveSprints(sprintState.sprints, mine, me ?? null).map((s) => ({
+        name: s.name,
+        end: s.end,
+        projects: s.boardId === null ? [] : (sprintState.boardProjects[String(s.boardId)] ?? []),
+      }));
+
       // --- story point scale (D55): the candidates' projects and the home first ---
       const pointScaleValues = pointScale(yield* withDb(pointUses), [
         ...new Set([...candidates.map((c) => c.projectKey), ...(homeKey ? [homeKey] : [])]),
@@ -568,6 +589,7 @@ const make = Effect.gen(function* () {
         examples,
         notes,
         sprints,
+        userSprints,
         pointScale: pointScaleValues,
         smallAsks,
         blockLinkType:

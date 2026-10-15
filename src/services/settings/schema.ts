@@ -149,6 +149,14 @@ export const SmallAsksSettingsSchema = z.object({
 });
 export type SmallAsksSettings = z.infer<typeof SmallAsksSettingsSchema>;
 
+/** How a sprint's last day counts (D57); kept here so the schema has no service imports. */
+export const LAST_DAY_MODES = ["jira", "full", "none"] as const;
+export type LastDayMode = (typeof LAST_DAY_MODES)[number];
+
+/** Bounds of `sprint.daysPerPoint` (D57). */
+export const MIN_DAYS_PER_POINT = 0.05;
+export const MAX_DAYS_PER_POINT = 10;
+
 export const DEFAULT_CAPTURE_SHORTCUT = "CommandOrControl+Shift+Space";
 
 export const SettingsSchema = z.object({
@@ -181,6 +189,25 @@ export const SettingsSchema = z.object({
     .prefault({}),
   scoring: ScoringWeightsSchema.prefault({}),
   smallAsks: SmallAsksSettingsSchema.prefault({}),
+  sprint: z
+    .object({
+      /**
+       * Working days one story point takes (D57); null: the rate of the user's
+       * last closed sprints on the board, when there is one.
+       */
+      daysPerPoint: z
+        .number()
+        .min(MIN_DAYS_PER_POINT)
+        .max(MAX_DAYS_PER_POINT)
+        .nullable()
+        .default(null),
+      /**
+       * Whether a sprint's last day counts as a working day (D57): follow Jira's
+       * end time (at or after 12:00 local counts), always, or never.
+       */
+      lastDay: z.enum(LAST_DAY_MODES).default("jira"),
+    })
+    .prefault({}),
   dataSources: z.array(DataSourceSchema).default([]),
   /** Suggested questions for the chat, in order (D42). */
   suggestedPrompts: z.array(SuggestedPromptSchema).max(12).default(DEFAULT_SUGGESTED_PROMPTS),

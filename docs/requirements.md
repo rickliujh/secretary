@@ -377,6 +377,34 @@ unchanged.
   default when set); "PAY-12 is more like a 5" proposes an update that sets 5, and
   revoking it restores the previous value.
 
+### FR-16 New tickets and the sprint (D57)
+
+- FR-16.1 (Must) Every proposed ticket that can join a sprint (not an Epic, not a
+  sub-task) offers a choice on its card, its small-ask row and its edit dialog: add
+  it to the user's active sprint, or leave it in the backlog. The sprint is named
+  with its end and the working days left. The choice starts on for a small ask when
+  Settings says so (D44) and for a ticket due on or before the sprint ends, else
+  off. Changing it is saved at once and kept by revisions and re-triage. Approve
+  stays one click.
+- FR-16.2 (Must) Next to the choice the app says whether the sprint has room: the
+  user's open work in the sprint, the other new tickets of the same thread that will
+  join it, and this ticket, in points and in working days, against the working days
+  left: fits, tight or over, with the details one click away. Unestimated tickets
+  are counted and named as such; a ticket without points says it cannot be sized.
+- FR-16.3 (Must) Settings say what a story point means in working days (for
+  example 1 point = 0.5 days). Left empty, the app uses the rate of the user's last
+  three closed sprints on that board and says so; with neither, it shows points and
+  days without a verdict and links to the setting. Settings also say whether a
+  sprint's last day counts.
+- FR-16.4 (Should) Today's Sprint work shows the same sprint load in its header,
+  and the chat's sprint points answer includes the working days left and the load in
+  days.
+- AC: with the mock Jira, a sprint with three working days left, two open tickets
+  of the user's at 1 point each and 1 point = 0.5 days, a new 2-point ticket shows
+  "fits" (2 of 3 days); with a third open ticket of 3 points it shows "over" (3.5 of
+  3 days). Its switch on adds it to that sprint on approval; off leaves it in the
+  backlog.
+
 ## 5. Non-functional requirements
 
 - NFR-1 Works offline for browsing cached data, drafting from cache and editing

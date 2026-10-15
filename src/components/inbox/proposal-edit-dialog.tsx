@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import type { Lookups } from "@/app/queries";
 import { IssueCombobox } from "@/components/tickets/issue-combobox";
@@ -46,6 +46,8 @@ export function ProposalEditDialog({
   open,
   onOpenChange,
   onApprove,
+  sprint,
+  busy,
 }: {
   payload: ProposalPayload;
   lookups: Lookups;
@@ -53,14 +55,22 @@ export function ProposalEditDialog({
   onOpenChange: (o: boolean) => void;
   /** Approves with the edited payload. */
   onApprove: (edited: ProposalPayload) => void;
+  /** A create's sprint switch (D57); it saves at once, apart from the form. */
+  sprint?: ReactNode;
+  /** A save of the proposal is running; approving waits for it. */
+  busy?: boolean;
 }) {
   const form = useForm<Record<string, string>>({ defaultValues: toFormValues(payload) });
   const [errors, setErrors] = useState<string[]>([]);
+  // The form starts from the proposal each time the dialog opens. A save while
+  // it is open (the sprint switch) must not reset what the user typed.
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpen.current) {
       form.reset(toFormValues(payload));
       setErrors([]);
     }
+    wasOpen.current = open;
   }, [open, payload, form]);
   if (!isEditable(payload)) return null;
   const specs = FIELD_SPECS[payload.kind];
@@ -181,6 +191,7 @@ export function ProposalEditDialog({
                 </Field>
               );
             })}
+            {sprint}
           </FieldGroup>
           {errors.length > 0 && (
             <ul className="mt-4 list-disc pl-5 text-sm text-destructive">
@@ -193,7 +204,9 @@ export function ProposalEditDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Approve with changes</Button>
+            <Button type="submit" disabled={busy}>
+              Approve with changes
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

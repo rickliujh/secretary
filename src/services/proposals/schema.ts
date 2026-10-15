@@ -54,8 +54,13 @@ export const CreateIssue = z.object({
   smallAsk: z.boolean().default(false),
   /** The contact who asked; stored on the created issue's `issue_meta` (FR-10.4). */
   requesterPersonId: z.string().min(1).nullable().default(null),
-  /** Move the created issue into the user's active sprint (D44); sub-tasks follow their parent. */
+  /**
+   * Move the created issue into the user's active sprint (D44, D57); sub-tasks
+   * follow their parent and Epics never join. Code's field, not the model's.
+   */
   joinSprint: z.boolean().default(false),
+  /** The user set `joinSprint` (D57): revisions and re-triage keep it instead of recomputing it. */
+  joinSprintChosen: z.boolean().default(false),
   /** Story points to set on create (D55); null for none. */
   storyPoints: StoryPoints.nullable().default(null),
   /** True only while the points are the model's suggestion; any edit of them sets it false. */
@@ -391,6 +396,20 @@ export function describeWaitUpdate(p: PayloadOf<"update_dependency">): string {
   }
 }
 
+/**
+ * Fields code sets and the user switches on the card (D57): not something the
+ * model proposes, so corrections leave them out.
+ */
+export const CODE_ONLY_FIELDS = ["joinSprint", "joinSprintChosen"] as const;
+
+/** A payload without `CODE_ONLY_FIELDS`, for correction examples (FR-7.2, D57). */
+export function withoutCodeFields<T extends ProposalPayload>(p: T): T {
+  if (p.kind !== "create_issue") return p;
+  const out: Record<string, unknown> = { ...p };
+  for (const k of CODE_ONLY_FIELDS) delete out[k];
+  return out as T;
+}
+
 const flatFields = (p: ProposalPayload): Record<string, unknown> => {
   const { kind: _k, ...rest } = p as Record<string, unknown>;
   const out: Record<string, unknown> = {};
@@ -422,7 +441,12 @@ export function payloadChanges(before: ProposalPayload, after: ProposalPayload):
   const a = flatFields(before);
   const b = flatFields(after);
   return [...new Set([...Object.keys(a), ...Object.keys(b)])]
-    .filter((k) => k !== "ref" && JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null))
+    .filter(
+      (k) =>
+        k !== "ref" &&
+        !(CODE_ONLY_FIELDS as readonly string[]).includes(k) &&
+        JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null),
+    )
     .map((k) => `${k}: ${shown(a[k])} -> ${shown(b[k])}`);
 }
 
