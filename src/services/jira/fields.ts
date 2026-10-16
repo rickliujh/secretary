@@ -14,6 +14,8 @@ export type FieldIds = {
    * by hand.
    */
   storyPointsAlt?: string[];
+  /** Jira's Team field (D59): Cloud's team type, Advanced Roadmaps' on Data Center, or "Team". */
+  team?: string;
 };
 
 const FIELD_KEYS = [
@@ -21,9 +23,13 @@ const FIELD_KEYS = [
   "epicName",
   "sprint",
   "storyPoints",
+  "team",
 ] as const satisfies readonly (keyof FieldIds)[];
 
-const CUSTOM_TYPES: Record<Exclude<keyof FieldIds, "storyPoints" | "storyPointsAlt">, string> = {
+const CUSTOM_TYPES: Record<
+  Exclude<keyof FieldIds, "storyPoints" | "storyPointsAlt" | "team">,
+  string
+> = {
   epicLink: "com.pyxis.greenhopper.jira:gh-epic-link",
   epicName: "com.pyxis.greenhopper.jira:gh-epic-label",
   sprint: "com.pyxis.greenhopper.jira:gh-sprint",
@@ -49,6 +55,21 @@ function discoverStoryPoints(fields: readonly JiraField[]): string[] {
   return [...new Set(ordered.map((f) => f.id))];
 }
 
+/** Team field types, most likely first: Cloud's, then Advanced Roadmaps' on Data Center (D59). */
+const TEAM_TYPES = [
+  "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team",
+  "com.atlassian.teams:rm-teams-custom-field-team",
+];
+
+/** The Team field: by its type (Cloud's first), else a field named "Team". */
+function discoverTeam(fields: readonly JiraField[]): string | undefined {
+  for (const type of TEAM_TYPES) {
+    const match = fields.find((f) => f.schema?.custom === type);
+    if (match) return match.id;
+  }
+  return fields.find((f) => f.name.trim().toLowerCase() === "team")?.id;
+}
+
 export function discoverFieldIds(fields: readonly JiraField[]): FieldIds {
   const out: FieldIds = {};
   for (const [name, type] of Object.entries(CUSTOM_TYPES) as [
@@ -61,6 +82,8 @@ export function discoverFieldIds(fields: readonly JiraField[]): FieldIds {
   const [storyPoints, ...alt] = discoverStoryPoints(fields);
   if (storyPoints) out.storyPoints = storyPoints;
   if (alt.length) out.storyPointsAlt = alt;
+  const team = discoverTeam(fields);
+  if (team) out.team = team;
   return out;
 }
 

@@ -63,6 +63,7 @@ import {
 } from "@/services/tickets/edit";
 import { epicsInProject, type TicketDetail } from "@/services/tickets/queries";
 import { saveTicketEdit } from "@/services/tickets/save-edit";
+import { TicketTeam } from "./ticket-team";
 
 type Issue = TicketDetail["issue"];
 
@@ -216,6 +217,12 @@ export function EditDialog({
           <DialogHeader className="mb-4">
             <DialogTitle>Edit {issue.key}</DialogTitle>
             <DialogDescription>Only changed fields are sent to Jira.</DialogDescription>
+            {/* Read only: writing the team needs the Teams API (D59). */}
+            {issue.team && (
+              <p className="text-sm text-muted-foreground">
+                Team: <TicketTeam name={issue.team} />
+              </p>
+            )}
           </DialogHeader>
           <FieldGroup>
             <Field data-invalid={!!errors.summary}>

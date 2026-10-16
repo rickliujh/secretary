@@ -23,7 +23,9 @@
  * point estimate", empty until written, as on Cloud sites with both (D35).
  * Like Jira, a create or edit that sets a field its screen lacks, or points
  * that are not a number, is refused with 400. An edit's labels replace the
- * issue's (D58); a label with a space is refused.
+ * issue's (D58); a label with a space is refused. Every issue has a Team
+ * (D59): PAY's is Payments and OPS's Platform, as the team's id on Data
+ * Center (Advanced Roadmaps) and as an object with its name on Cloud.
  *
  * Change history: every other issue has a status change and some an assignee
  * change in the last few days, plus an older priority change; status,
@@ -90,6 +92,8 @@ type Issue = {
   points: number | null;
   /** Cloud's "Story point estimate" (--cloud only); empty unless written. */
   estimate?: number | null;
+  /** The team's id (`MOCK_TEAMS`); by default PAY's is Payments and OPS's Platform, null for none. */
+  team?: number | null;
   /** Set when the issue was moved into a sprint through the Agile API. */
   movedToSprint?: number;
   /** Set when the issue was moved to the backlog through the Agile API: no open sprint. */
@@ -149,6 +153,15 @@ const SPRINT = "customfield_10104";
 const STORY_POINTS = "customfield_10106";
 /** Cloud's "Story point estimate" (jsw-story-points), served with --cloud beside Story Points (D35). */
 const ESTIMATE = "customfield_10016";
+/**
+ * The Team field (D59): Cloud's team type, an object with a name; Advanced
+ * Roadmaps' on Data Center, the team's id alone.
+ */
+const TEAM = "customfield_10108";
+export const MOCK_TEAMS = [
+  { id: 12, uuid: "5f0c9e0e-9a1b-4d1e-8c55-6a7d9a3c0012", name: "Payments" },
+  { id: 13, uuid: "5f0c9e0e-9a1b-4d1e-8c55-6a7d9a3c0013", name: "Platform" },
+] as const;
 /** Cycled by issue id so points do not disturb the seeded random sequence. */
 const POINTS = [3, 1, 5, 2, 8, 3, null, 2, 5, 1, 3, 13, 2, null, 5, 1, 8] as const;
 
@@ -469,6 +482,9 @@ function issueJson(
   const userJson = userJsonFor(cloud);
   const parentKey = issue.parent ?? (cloud ? issue.epic : null);
   const parent = parentKey ? all.get(parentKey) : undefined;
+  const teamId =
+    issue.team === undefined ? (issue.project === "PAY" ? 12 : 13) : (issue.team ?? null);
+  const team = MOCK_TEAMS.find((t) => t.id === teamId);
   return {
     id: issue.id,
     key: issue.key,
@@ -513,6 +529,11 @@ function issueJson(
       subtasks: [...all.values()].filter((i) => i.parent === issue.key).map(linkedIssue),
       [STORY_POINTS]: issue.points,
       ...(cloud ? { [ESTIMATE]: issue.estimate ?? null } : {}),
+      [TEAM]: !team
+        ? null
+        : cloud
+          ? { id: team.uuid, name: team.name, title: team.name, isVisible: true }
+          : String(team.id),
       // Both sides: on `to` the other issue is inward ("is blocked by"), on `from` outward.
       issuelinks: links.flatMap((l) => {
         const type = {
@@ -853,6 +874,22 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
             custom: "com.atlassian.jira.plugin.system.customfieldtypes:float",
             customId: 10106,
           },
+        },
+        {
+          id: TEAM,
+          name: "Team",
+          custom: true,
+          schema: cloud
+            ? {
+                type: "team",
+                custom: "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team",
+                customId: 10108,
+              }
+            : {
+                type: "any",
+                custom: "com.atlassian.teams:rm-teams-custom-field-team",
+                customId: 10108,
+              },
         },
       ]);
     if (path === "priority")

@@ -4,7 +4,14 @@ import page1 from "@/test/fixtures/jira/search-page-1.json";
 import page2 from "@/test/fixtures/jira/search-page-2.json";
 import { jiraDateToIso, toJqlDate } from "./dates";
 import { discoverFieldIds, effectiveFieldIds, jqlFieldRef } from "./fields";
-import { currentSprint, issueFields, mapIssue, parseSprints, parseStoryPoints } from "./mapping";
+import {
+  currentSprint,
+  issueFields,
+  mapIssue,
+  parseSprints,
+  parseStoryPoints,
+  teamName,
+} from "./mapping";
 import { FieldSchema, SearchPageSchema } from "./schemas";
 
 const fieldIds = discoverFieldIds(fields.map((f) => FieldSchema.parse(f)));
@@ -117,6 +124,35 @@ describe("field discovery", () => {
     expect(
       discoverFieldIds([field("customfield_5", "Points", "number")]).storyPoints,
     ).toBeUndefined();
+  });
+
+  test("the Team field (D59): Cloud's type, else Data Center's, else a field named Team", () => {
+    const cloud = field(
+      "customfield_10001",
+      "Team",
+      "team",
+      "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team",
+    );
+    const dc = field(
+      "customfield_10108",
+      "Team",
+      "any",
+      "com.atlassian.teams:rm-teams-custom-field-team",
+    );
+    const named = field("customfield_3", " team ", "string");
+    const other = field("customfield_4", "Teams involved", "string");
+    expect(discoverFieldIds([named, dc, cloud]).team).toBe("customfield_10001");
+    expect(discoverFieldIds([named, dc]).team).toBe("customfield_10108");
+    expect(discoverFieldIds([other, named]).team).toBe("customfield_3");
+    expect(discoverFieldIds([other]).team).toBeUndefined();
+    // Overridable in Settings like the others.
+    expect(effectiveFieldIds({ team: "customfield_10108" }, { team: "customfield_9" }).team).toBe(
+      "customfield_9",
+    );
+    expect(effectiveFieldIds({ team: "customfield_10108" }, { team: " " }).team).toBe(
+      "customfield_10108",
+    );
+    expect(issueFields({ team: "customfield_10108" })).toContain("customfield_10108");
   });
 
   test("custom field ids become cf[] references", () => {
@@ -276,6 +312,29 @@ describe("mapIssue", () => {
     if (!raw) throw new Error("PAY-2");
     const noPoints = { ...ctx, fieldIds: { ...fieldIds, storyPoints: undefined } };
     expect(mapIssue(raw, noPoints).issue.storyPoints).toBeNull();
+  });
+
+  test("the team (D59): a name or title, a name string, or an id as Team <id>", () => {
+    expect(teamName({ id: "5f0c-12", name: "Payments", title: "Payments" })).toBe("Payments");
+    expect(teamName({ id: "5f0c-12", title: " Platform " })).toBe("Platform");
+    expect(teamName({ id: "5f0c-12" })).toBe("Team 5f0c-12");
+    expect(teamName({ id: 12, name: "" })).toBe("Team 12");
+    expect(teamName("Payments")).toBe("Payments");
+    expect(teamName("12")).toBe("Team 12");
+    expect(teamName(12)).toBe("Team 12");
+    expect(teamName([{ name: "Payments" }])).toBe("Payments");
+    for (const v of [null, undefined, "", "  ", {}, [], true, Number.NaN])
+      expect(teamName(v)).toBeNull();
+  });
+
+  test("the team is stored when the field is known, else null", () => {
+    const raw = issues.find((i) => i.key === "PAY-2");
+    if (!raw) throw new Error("PAY-2");
+    const withTeam = { ...raw, fields: { ...raw.fields, customfield_10108: "12" } };
+    const teamCtx = { ...ctx, fieldIds: { ...fieldIds, team: "customfield_10108" } };
+    expect(mapIssue(withTeam, teamCtx).issue.team).toBe("Team 12");
+    expect(mapIssue(withTeam, ctx).issue.team).toBeNull();
+    expect(byKey("PAY-2").issue.team).toBeNull();
   });
 
   test("a parent that is an Epic is treated as the epic link", () => {

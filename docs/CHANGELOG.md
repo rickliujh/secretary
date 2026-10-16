@@ -1685,6 +1685,15 @@ Built
   the select does not list that sprint. The switch row is one component shared
   with the proposal card. Tests: the switch and select mapping, and the join
   sprint in the FR-17 AC.
+- The ticket's team (FR-17.5, D59): discovery finds Jira's Team field (Cloud's
+  team type, else Advanced Roadmaps' on Data Center, else a field named Team),
+  overridable in Settings > Jira. Sync stores the team's name in the new
+  `jira_issues.team` column (migration 0015): a name or title, a name string,
+  or a bare id as "Team <id>". The Details tab has a Team row after Assignee
+  and the Edit dialog a read-only "Team: X" line, each linking to the team in
+  Context of the same name (case and end spaces ignored). The mock Jira serves
+  a Team field. Tests: discovery, the value mapping, the Context match and the
+  synced value against the mock Jira.
 
 Known limits
 - Components, fix versions, the issue type and a sub-task's parent are not
@@ -1693,3 +1702,6 @@ Known limits
   says which.
 - The cache keeps only the sprint's name, so two open sprints of the same name
   are not told apart: the dialog shows the current as ambiguous.
+- The team is read only. Data Center gives only the team's id, shown as
+  "Team <id>" until the Teams API is read. Existing tickets show their team
+  after their next sync.

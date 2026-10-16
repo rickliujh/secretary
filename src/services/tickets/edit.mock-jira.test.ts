@@ -158,6 +158,8 @@ describe("editing an existing ticket against the mock Jira (FR-17 AC)", () => {
       ),
     );
     expect(r.before.choices.value).toBe(BACKLOG);
+    // Its team (D59): Data Center's Advanced Roadmaps gives only the team's id.
+    expect(r.before.issue.team).toBe("Team 12");
     // The switch joins the proposals' sprint; turning it on picks it in the select.
     expect(r.join).toMatchObject({ id: active.id, name: active.name, daysLeft: 3 });
     expect(r.join?.when).toMatch(/^ends \w+ \d+ \w+, 3 working days left$/);

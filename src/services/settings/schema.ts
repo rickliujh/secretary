@@ -66,6 +66,7 @@ const JiraSettingsSchema = z.object({
       epicName: z.string().optional(),
       sprint: z.string().optional(),
       storyPoints: z.string().optional(),
+      team: z.string().optional(),
     })
     .prefault({}),
 });

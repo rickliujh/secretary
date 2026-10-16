@@ -33,6 +33,7 @@ import { EditDialog } from "./edit-dialog";
 import { JiraHtml } from "./jira-html";
 import { StatusBadge } from "./status-badge";
 import { AssignButton, CommentComposer, EpicSelect, TransitionSelect } from "./ticket-actions";
+import { TicketTeam } from "./ticket-team";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -119,6 +120,7 @@ function Details({ detail }: { detail: TicketDetail }) {
           />
         ) : null}
       </Row>
+      <Row label="Team">{i.team ? <TicketTeam name={i.team} /> : null}</Row>
       <Row label="Reporter">
         {i.reporter ? (
           <JiraUser

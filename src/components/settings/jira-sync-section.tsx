@@ -157,6 +157,7 @@ const FIELD_LABELS = {
   epicName: "Epic Name",
   sprint: "Sprint",
   storyPoints: "Story Points",
+  team: "Team",
 } as const;
 type FieldKey = keyof typeof FIELD_LABELS;
 
@@ -186,6 +187,7 @@ function FieldsCard({ settings }: { settings: AppSettings }) {
       epicName: settings.jira.fields.epicName ?? "",
       sprint: settings.jira.fields.sprint ?? "",
       storyPoints: settings.jira.fields.storyPoints ?? "",
+      team: settings.jira.fields.team ?? "",
     },
   });
   const onSubmit = form.handleSubmit((v) =>
@@ -199,6 +201,7 @@ function FieldsCard({ settings }: { settings: AppSettings }) {
             epicName: v.epicName.trim() || undefined,
             sprint: v.sprint.trim() || undefined,
             storyPoints: v.storyPoints.trim() || undefined,
+            team: v.team.trim() || undefined,
           },
         },
       }),
