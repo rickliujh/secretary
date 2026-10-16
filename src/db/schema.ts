@@ -46,6 +46,10 @@ export const jiraIssues = sqliteTable(
     components: text("components", { mode: "json" }).$type<string[]>().notNull().default([]),
     sprint: text("sprint"),
     storyPoints: real("story_points"),
+    /** The Team field's name (D59); "Team <id>" when Jira returns only an id. */
+    team: text("team"),
+    /** The team's id as Jira gives it (D59): Cloud's id, Data Center's number as text. */
+    teamId: text("team_id"),
     dueDate: text("due_date"),
     created: text("created").notNull(),
     updated: text("updated").notNull(),

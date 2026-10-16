@@ -1,6 +1,7 @@
 /**
  * Pure mapping from Jira issue JSON to cache rows (design.md section 4).
  */
+import { decodeHTML } from "entities";
 import { z } from "zod";
 import type { jiraComments, jiraIssues } from "@/db/schema";
 import { datePart, type SprintInfo } from "@/services/sprints/calendar";
@@ -56,7 +57,9 @@ export function issueFields(fieldIds: FieldIds): string[] {
     "issuelinks",
     "attachment",
     "comment",
-    ...[fieldIds.epicLink, fieldIds.epicName, fieldIds.sprint].filter((f): f is string => !!f),
+    ...[fieldIds.epicLink, fieldIds.epicName, fieldIds.sprint, fieldIds.team].filter(
+      (f): f is string => !!f,
+    ),
     ...storyPointFields(fieldIds),
   ];
 }
@@ -120,6 +123,88 @@ export function parseStoryPoints(value: unknown): number | null {
         ? Number(value)
         : Number.NaN;
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * The Team field's value as a name (D59): an object with `name` or `title`
+ * (Cloud), a name as a string, or a bare id (Data Center's Advanced Roadmaps
+ * returns the team's id), which reads "Team <id>" since its name needs the
+ * Teams API. A select list's option (`value`), from a field only named "Team",
+ * reads as its value. A list gives its first team. Null for anything else.
+ */
+export function teamName(value: unknown): string | null {
+  if (Array.isArray(value)) return value.map(teamName).find((t) => t !== null) ?? null;
+  if (typeof value === "number") return Number.isFinite(value) ? `Team ${value}` : null;
+  if (typeof value === "string") {
+    const t = value.trim();
+    return !t ? null : /^\d+$/.test(t) ? `Team ${t}` : t;
+  }
+  if (value && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    // A select list's option (a field named "Team" that is no team field) has `value`.
+    for (const key of ["name", "title", "value"]) {
+      const v = o[key];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    const id = typeof o.id === "number" || typeof o.id === "string" ? String(o.id).trim() : "";
+    if (id) return `Team ${id}`;
+  }
+  return null;
+}
+
+/**
+ * The Team field's id (D59), kept to write the field back: Cloud's object `id`,
+ * or Data Center's bare id (a number, or digits), as text. A list gives its
+ * first. Null for a name without an id, or anything else.
+ */
+export function teamIdOf(value: unknown): string | null {
+  if (Array.isArray(value)) return value.map(teamIdOf).find((t) => t !== null) ?? null;
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : null;
+  if (typeof value === "string") return /^\d+$/.test(value.trim()) ? value.trim() : null;
+  if (value && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    // A select list's option is no team: its id is not a team id.
+    if ("value" in o && !("name" in o) && !("title" in o)) return null;
+    const id = o.id;
+    const text = typeof id === "number" || typeof id === "string" ? String(id).trim() : "";
+    return text || null;
+  }
+  return null;
+}
+
+const SuggestionsSchema = z.object({
+  results: z
+    .array(z.object({ value: z.unknown(), displayName: z.string().optional() }))
+    .default([]),
+});
+
+/**
+ * Display text from Jira's highlighted suggestion HTML ("<b>Pay</b>ments"):
+ * the tags dropped, every entity (named, decimal, hex) decoded by `entities`,
+ * which also runs outside the webview (sync tests, the mock Jira).
+ */
+const plainText = (html: string) =>
+  decodeHTML(html.replace(/<[^>]*>/g, ""))
+    .replace(/ /g, " ")
+    .trim();
+
+/**
+ * Teams from the JQL autocomplete suggestions of the Team field (D59): each
+ * result's value is the team's id, its display name the name with the typed
+ * text highlighted. Results without an id or a name are left out, and ids
+ * repeat once.
+ */
+export function parseTeamSuggestions(value: unknown): { id: string; name: string }[] {
+  const r = SuggestionsSchema.safeParse(value);
+  if (!r.success) return [];
+  const out = new Map<string, string>();
+  for (const s of r.data.results) {
+    const id =
+      typeof s.value === "string" || typeof s.value === "number" ? String(s.value).trim() : "";
+    const name = plainText(s.displayName ?? "");
+    if (id && name && !out.has(id)) out.set(id, name);
+  }
+  return [...out].map(([id, name]) => ({ id, name }));
 }
 
 /** Active sprint first, then the next future one, then the most recent. */
@@ -231,6 +316,8 @@ export function mapIssue(raw: RawIssue, ctx: MapContext): MappedIssue {
         storyPointFields(ctx.fieldIds)
           .map((id) => parseStoryPoints(f[id]))
           .find((p) => p !== null) ?? null,
+      team: ctx.fieldIds.team ? teamName(f[ctx.fieldIds.team]) : null,
+      teamId: ctx.fieldIds.team ? teamIdOf(f[ctx.fieldIds.team]) : null,
       dueDate: typeof f.duedate === "string" ? f.duedate : null,
       created: jiraDateToIso(String(f.created)),
       updated: jiraDateToIso(String(f.updated)),

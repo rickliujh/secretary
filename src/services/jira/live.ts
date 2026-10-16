@@ -37,7 +37,9 @@ import {
   TransitionsSchema,
   UserRefSchema,
 } from ".";
+import { jqlFieldRef } from "./fields";
 import { changesSince, reachesBefore } from "./history";
+import { parseTeamSuggestions } from "./mapping";
 
 const toJiraError = (e: unknown) =>
   e instanceof HttpFailure
@@ -171,6 +173,10 @@ const make = Effect.gen(function* () {
         : call(z.array(PrioritySchema), "priority"),
     ),
     projects: call(z.array(ProjectSchema), "project"),
+    teamSuggestions: (fieldId, text) =>
+      call(z.unknown(), "jql/autocompletedata/suggestions", {
+        searchParams: { fieldName: jqlFieldRef(fieldId), fieldValue: text },
+      }).pipe(Effect.map(parseTeamSuggestions)),
     assignableUsers: (issueKey, text) =>
       Effect.flatMap(deployment, (d) =>
         call(z.array(UserRefSchema), "user/assignable/search", {

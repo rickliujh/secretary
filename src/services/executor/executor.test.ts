@@ -345,3 +345,45 @@ describe("Executor", () => {
     expect(r.log[1]?.response).toEqual({ skipped: "already in sprint" });
   });
 });
+
+describe("Executor.run: story points from the ticket view (D58)", () => {
+  const withPoints = {
+    match: (u: URL) => u.pathname.endsWith("/issue/PAY-2/editmeta"),
+    respond: () =>
+      json({
+        fields: {
+          ...editmeta.fields,
+          customfield_10106: { name: "Story Points", required: false, operations: ["set"] },
+        },
+      }),
+  };
+  const setPoints = (storyPoints: number | null) =>
+    Effect.gen(function* () {
+      yield* (yield* Sync).discoverFields;
+      return yield* (yield* Executor).run({
+        kind: "update_fields",
+        issueKey: "PAY-2",
+        fields: { storyPoints, labels: ["billing"] },
+      });
+    });
+
+  test("a user action without the field writes the one on the edit screen", async () => {
+    const { seen, layer } = setup([withPoints]);
+    await Effect.runPromise(Effect.provide(setPoints(2), layer));
+    expect(seen.find((s) => s.method === "PUT")?.body).toEqual({
+      fields: { customfield_10106: 2, labels: ["billing"] },
+    });
+  });
+
+  test("with no field on the screen it fails before writing, worded for the ticket view", async () => {
+    const { seen, layer } = setup();
+    const exit = await Effect.runPromise(Effect.provide(Effect.either(setPoints(null)), layer));
+    expect(exit._tag).toBe("Left");
+    const error = exit._tag === "Left" ? (exit.left as ExecutorError) : null;
+    expect(error?.kind).toBe("invalid");
+    expect(error?.message).toBe(
+      "The edit screen of PAY-2 has no story point field, so its story points cannot be set. Add the field to the screen in Jira, or leave the points as they were.",
+    );
+    expect(seen.some((s) => s.method === "PUT")).toBe(false);
+  });
+});

@@ -22,7 +22,13 @@
  * the Story Points field (not Epic or Sub-task, D55); with --cloud also "Story
  * point estimate", empty until written, as on Cloud sites with both (D35).
  * Like Jira, a create or edit that sets a field its screen lacks, or points
- * that are not a number, is refused with 400.
+ * that are not a number, is refused with 400. An edit's labels replace the
+ * issue's (D58); a label with a space is refused. Every issue has a Team
+ * (D59): PAY's is Payments and OPS's Platform, as the team's id on Data
+ * Center (Advanced Roadmaps) and as an object with its name on Cloud. An edit
+ * sets it (a number on Data Center, the id string on Cloud), and `GET
+ * /jql/autocompletedata/suggestions?fieldName=cf[10108]` searches the teams,
+ * one of them on no ticket.
  *
  * Change history: every other issue has a status change and some an assignee
  * change in the last few days, plus an older priority change; status,
@@ -89,6 +95,8 @@ type Issue = {
   points: number | null;
   /** Cloud's "Story point estimate" (--cloud only); empty unless written. */
   estimate?: number | null;
+  /** The team's id (`MOCK_TEAMS`); by default PAY's is Payments and OPS's Platform, null for none. */
+  team?: number | null;
   /** Set when the issue was moved into a sprint through the Agile API. */
   movedToSprint?: number;
   /** Set when the issue was moved to the backlog through the Agile API: no open sprint. */
@@ -148,6 +156,20 @@ const SPRINT = "customfield_10104";
 const STORY_POINTS = "customfield_10106";
 /** Cloud's "Story point estimate" (jsw-story-points), served with --cloud beside Story Points (D35). */
 const ESTIMATE = "customfield_10016";
+/**
+ * The Team field (D59): Cloud's team type, an object with a name; Advanced
+ * Roadmaps' on Data Center, the team's id alone.
+ */
+const TEAM = "customfield_10108";
+export const MOCK_TEAMS = [
+  { id: 12, uuid: "5f0c9e0e-9a1b-4d1e-8c55-6a7d9a3c0012", name: "Payments" },
+  { id: 13, uuid: "5f0c9e0e-9a1b-4d1e-8c55-6a7d9a3c0013", name: "Platform" },
+  // On no ticket: found only by the search.
+  { id: 14, uuid: "5f0c9e0e-9a1b-4d1e-8c55-6a7d9a3c0014", name: "Partners & Vendors" },
+] as const;
+/** A team by the id the deployment uses: Data Center's number, Cloud's uuid. */
+const teamById = (value: unknown, cloud: boolean) =>
+  MOCK_TEAMS.find((t) => (cloud ? t.uuid === value : t.id === value));
 /** Cycled by issue id so points do not disturb the seeded random sequence. */
 const POINTS = [3, 1, 5, 2, 8, 3, null, 2, 5, 1, 3, 13, 2, null, 5, 1, 8] as const;
 
@@ -468,6 +490,9 @@ function issueJson(
   const userJson = userJsonFor(cloud);
   const parentKey = issue.parent ?? (cloud ? issue.epic : null);
   const parent = parentKey ? all.get(parentKey) : undefined;
+  const teamId =
+    issue.team === undefined ? (issue.project === "PAY" ? 12 : 13) : (issue.team ?? null);
+  const team = MOCK_TEAMS.find((t) => t.id === teamId);
   return {
     id: issue.id,
     key: issue.key,
@@ -512,6 +537,11 @@ function issueJson(
       subtasks: [...all.values()].filter((i) => i.parent === issue.key).map(linkedIssue),
       [STORY_POINTS]: issue.points,
       ...(cloud ? { [ESTIMATE]: issue.estimate ?? null } : {}),
+      [TEAM]: !team
+        ? null
+        : cloud
+          ? { id: team.uuid, name: team.name, title: team.name, isVisible: true }
+          : String(team.id),
       // Both sides: on `to` the other issue is inward ("is blocked by"), on `from` outward.
       issuelinks: links.flatMap((l) => {
         const type = {
@@ -650,6 +680,7 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
       priority: meta("Priority"),
       duedate: meta("Due Date"),
       labels: meta("Labels"),
+      [TEAM]: meta("Team"),
       ...(pointed(issue.type)
         ? {
             ...(cloud ? { parent: meta("Parent") } : { [EPIC_LINK]: meta("Epic Link") }),
@@ -853,7 +884,44 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
             customId: 10106,
           },
         },
+        {
+          id: TEAM,
+          name: "Team",
+          custom: true,
+          schema: cloud
+            ? {
+                type: "team",
+                custom: "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team",
+                customId: 10108,
+              }
+            : {
+                type: "any",
+                custom: "com.atlassian.teams:rm-teams-custom-field-team",
+                customId: 10108,
+              },
+        },
       ]);
+    if (path === "jql/autocompletedata/suggestions") {
+      // The Team field's suggestions (D59): its id as the value, the name with the
+      // typed text in bold. Other fields have none here.
+      if (url.searchParams.get("fieldName") !== "cf[10108]") return json({ results: [] });
+      const typed = (url.searchParams.get("fieldValue") ?? "").trim().toLowerCase();
+      const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      return json({
+        results: MOCK_TEAMS.filter((t) => t.name.toLowerCase().includes(typed)).map((t) => {
+          const at = t.name.toLowerCase().indexOf(typed);
+          const [a, b, c] = [
+            t.name.slice(0, at),
+            t.name.slice(at, at + typed.length),
+            t.name.slice(at + typed.length),
+          ];
+          return {
+            value: cloud ? t.uuid : String(t.id),
+            displayName: `${esc(a)}<b>${esc(b)}</b>${esc(c)}`,
+          };
+        }),
+      });
+    }
     if (path === "priority")
       return json(PRIORITIES.map((name, i) => ({ id: String(i + 1), name })));
     if (path === "priority/search")
@@ -1045,6 +1113,27 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
           issue.priority = priority;
         }
         if ("duedate" in f) issue.due = (f.duedate as string | null) ?? null;
+        if ("labels" in f) {
+          // Like Jira: the whole list is replaced, and a label holds no spaces.
+          const labels = Array.isArray(f.labels) ? f.labels.map(String) : [];
+          if (labels.some((l) => !l || /\s/.test(l)))
+            return json(
+              { errorMessages: [], errors: { labels: "The label must not contain spaces." } },
+              400,
+            );
+          issue.labels = labels;
+        }
+        if (TEAM in f) {
+          // Like Jira: Cloud takes the team's id as a string, Data Center a number.
+          const v = f[TEAM];
+          const team = v === null ? null : teamById(v, cloud);
+          if (team === undefined)
+            return json(
+              { errorMessages: [], errors: { [TEAM]: `Team ${JSON.stringify(v)} not found.` } },
+              400,
+            );
+          issue.team = team?.id ?? null;
+        }
         if (cloud && "parent" in f) {
           const parentKey = (f.parent as { key?: string } | null)?.key ?? null;
           if (parentKey && issues.get(parentKey)?.type !== "Epic")

@@ -1620,3 +1620,113 @@ Known limits
   Radix Select's hidden native select reported "" before its options had
   registered, and the form took it; `lib/select-change.ts` ignores that value,
   which no item can have.
+
+## Phase 21: Edit an existing ticket (2026-10-16)
+
+Built
+- Executor (D58): `update_fields` gains `labels`, the whole list (empty clears
+  them; a label holds no spaces). `Executor.run` picks the story point field
+  from the edit screen when a user action leaves `pointsField` out, as an
+  approved update does, and without one fails before writing with a message for
+  the ticket view ("Add the field to the screen in Jira, or leave the points as
+  they were").
+- `tickets/edit.ts` (pure): the points field's parsing moved out of the
+  small-ask row (decimal comma, empty clears), labels separated by spaces or
+  commas and deduplicated, the writes of one Save in order (`update_fields` with
+  every changed field in one PUT, then `set_epic`, then the sprint move), and
+  the toast text. `tickets/save-edit.ts` runs them through the Executor and
+  stops at the first failure.
+- `sprints/options.ts` (pure): Backlog and the open sprints whose board shows
+  the ticket's project (all open sprints when none does), active first, then
+  future by start, each with its dates ("active, ends Fri 23 Oct", "starts Mon
+  26 Oct"); the current sprint matched by name; another board's current sprint
+  shown selected but not pickable; none for Epics and sub-tasks.
+- `sprints/fit-query.ts`: `ticketSprintFit`, the user's open tickets in the
+  picked active sprint plus this ticket with the dialog's points (counted when
+  its assignee is the user or empty), and `knownSprints` for the options.
+- Edit dialog (its own file, `tickets/edit-dialog.tsx`): Summary; Priority and
+  Due date; Story points and Sprint; Epic and Labels; Description. Picking the
+  active sprint for a ticket not in it shows D57's verdict line and Details. A
+  sub-task's Sprint says "Follows its parent's sprint"; Epics have neither
+  Sprint nor Epic, sub-tasks no Epic. One Save writes only the fields the user
+  changed; nothing changed closes the dialog. When a write fails the dialog
+  stays open and the toast says what was saved, what failed and why, and what
+  was not tried, with Retry. Tickets, sprint fits and Today are read again
+  either way. The form resets only when the dialog opens or shows another
+  ticket.
+- The Details tab shows Story points. The small-ask row's points field takes a
+  decimal comma too.
+- Mock Jira: an edit replaces the issue's labels and refuses one with a space.
+- Tests: points and labels parsing, the Save's steps (no change, every field,
+  clears, Backlog, a kept closed sprint, the epic), the toast text, the sprint
+  options, the Executor's points field pick for a user action (written, and
+  refused without a field on the screen), labels in the Jira mapping, and the
+  FR-17 AC against the mock Jira (fits before saving, then in the sprint with 2
+  points and the label; Backlog moves it out; a failed epic stops the Save
+  after the points and before the sprint move).
+- Review fixes: after a partial Save the fields it wrote count from what was
+  written, so typing a saved field's old value back is written
+  (`changedValues` and `baselineAfterSave`, pure, with tests). The summary is
+  compared without its end spaces, so a cached trailing space never writes an
+  old summary over a rename. Points and labels are checked only when changed,
+  so odd points already on the ticket never block a Save. A backlog ticket
+  whose last sprint is closed shows Backlog with "Last in PAY 14 (closed)",
+  and keeping Backlog writes nothing. Two open sprints of the ticket's sprint
+  name show the current as "one of 2 sprints of this name", both pickable,
+  and no room line for either (the load counts the ticket by name). Tests
+  cover each, and the closed-sprint case against the mock Jira.
+- Sprint switch (user request): the Edit dialog has the proposal card's switch,
+  "Add to <sprint>" with its end date and working days left, for the sprint a
+  new ticket would join (`joinSprintFor`). It and the Sprint select hold one
+  value: on picks that sprint, off picks Backlog, another sprint in the select
+  turns it off, and a ticket already in it starts on. The room line goes under
+  the switch when it is about that sprint. Nothing is written until Save. No
+  switch for Epics, sub-tasks, without an active sprint of the user's, or when
+  the select does not list that sprint. The switch row is one component shared
+  with the proposal card. Tests: the switch and select mapping, and the join
+  sprint in the FR-17 AC.
+- The ticket's team (FR-17.5, D59): discovery finds Jira's Team field (Cloud's
+  team type, else Advanced Roadmaps' on Data Center, else a field named Team),
+  overridable in Settings > Jira. Sync stores the team's name in the new
+  `jira_issues.team` column (migration 0015): a name or title, a name string,
+  or a bare id as "Team <id>". The Details tab has a Team row after Assignee,
+  linking to the team in Context of the same name (case and end spaces
+  ignored). The mock Jira serves a Team field. Tests: discovery, the value
+  mapping, the Context match and the synced value against the mock Jira.
+- Editing the team (user request): sync also keeps the team's id
+  (`jira_issues.team_id`, migration 0016). The Edit dialog has a Team combobox
+  next to Epic and Labels: None, the teams on synced tickets (each id once with
+  its latest name), and from two typed characters a search in Jira's JQL
+  autocomplete (`JiraClient.teamSuggestions`, highlight stripped), with "Only
+  teams on your synced tickets" when the search fails or finds nothing. A team
+  synced before ids were kept is shown, not offered. Saving writes
+  `update_fields.team` in the same PUT (Cloud the id string, Data Center a
+  number); without a Team field the Executor says so, and the dialog shows the
+  field only when one is known. The baseline, `changedValues` and the toast
+  cover it. The mock Jira takes the write and serves the search, with a team on
+  no ticket. Tests: the write mapping, the id kept by sync, the option list,
+  the search parsing, and against the mock Jira a searched team written,
+  synced back and cleared.
+- Review fixes (team and switch): on Data Center a search result's name
+  replaces a synced "Team <id>", so typing "pay" finds the synced team. Only a
+  Team field of a team type, or one set in Settings, can be edited; one found
+  only by its name (perhaps a select list, read as its option's value) stays
+  read only and is never written, so it cannot fail a Save. Search names decode
+  every HTML entity (the `entities` package). Turning the sprint switch on then
+  off gives back the sprint the select held, not Backlog. The switch shows the
+  proposal card's warning when its sprint's board does not show the project.
+  Tests cover each.
+
+Known limits
+- Components, fix versions, the issue type and a sub-task's parent are not
+  edited here.
+- A Save is not atomic: writes before a failure stay in Jira, and the dialog
+  says which.
+- The cache keeps only the sprint's name, so two open sprints of the same name
+  are not told apart: the dialog shows the current as ambiguous.
+- Data Center gives only the team's id, shown as "Team <id>" on the Details
+  row and among the synced teams until a search names it. Existing tickets
+  show their team, and can have it kept on Save, after their next sync; until
+  then their team can be replaced or cleared but not re-picked.
+- Unverified: Data Center is sent the team's id as a number; not yet tried
+  against a real instance.

@@ -53,6 +53,8 @@ const FieldIdsSchema = z.object({
   sprint: z.string().optional(),
   storyPoints: z.string().optional(),
   storyPointsAlt: z.array(z.string()).optional(),
+  team: z.string().optional(),
+  teamEditable: z.boolean().optional(),
 }) satisfies z.ZodType<FieldIds>;
 
 export const parseFieldIds = (value: string | undefined): FieldIds =>

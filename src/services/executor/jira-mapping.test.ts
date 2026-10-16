@@ -11,6 +11,7 @@ import {
   droppedFieldsWarning,
   MAX_SPRINT_MOVE_ISSUES,
   proposalTextToWiki,
+  teamFieldValue,
 } from "./jira-mapping";
 
 const fieldIds = {
@@ -362,6 +363,71 @@ describe("update_fields with story points (D55)", () => {
         { fieldIds },
       ),
     ).toThrow("No story point field");
+  });
+});
+
+describe("update_fields with the team (D59)", () => {
+  const withTeam = { ...fieldIds, team: "customfield_10108", teamEditable: true };
+  const write = (team: string | null, deployment?: "cloud" | "datacenter") =>
+    buildJiraWrite(
+      { kind: "update_fields", issueKey: "PAY-12", fields: { team, labels: ["x"] } },
+      { fieldIds: withTeam, deployment },
+    ).body;
+
+  test("Data Center takes a number, Cloud the id string; null clears it; one PUT", () => {
+    expect(write("14")).toEqual({ fields: { labels: ["x"], customfield_10108: 14 } });
+    expect(write("5f0c-14", "cloud")).toEqual({
+      fields: { labels: ["x"], customfield_10108: "5f0c-14" },
+    });
+    expect(write("14", "cloud")).toEqual({ fields: { labels: ["x"], customfield_10108: "14" } });
+    expect(write(null)).toEqual({ fields: { labels: ["x"], customfield_10108: null } });
+    expect(teamFieldValue("ab-1", "datacenter")).toBe("ab-1");
+  });
+
+  test("without a Team field it fails, saying what to do", () => {
+    expect(() =>
+      buildJiraWrite(
+        { kind: "update_fields", issueKey: "PAY-12", fields: { team: "14" } },
+        { fieldIds },
+      ),
+    ).toThrow(
+      "No Team field was found in Jira, so the team of PAY-12 cannot be set. Set the field in Settings > Jira, or leave the team as it was.",
+    );
+  });
+
+  test("a field only named Team (perhaps a select list) is never written", () => {
+    expect(() =>
+      buildJiraWrite(
+        { kind: "update_fields", issueKey: "PAY-12", fields: { team: "10200", labels: ["x"] } },
+        { fieldIds: { ...fieldIds, team: "customfield_3" } },
+      ),
+    ).toThrow("The field customfield_3 is named Team but is not a Jira team field");
+  });
+});
+
+describe("update_fields with labels (D58)", () => {
+  test("writes the whole list; an empty list clears them", () => {
+    const write = (labels: string[]) =>
+      buildJiraWrite(
+        { kind: "update_fields", issueKey: "PAY-12", fields: { labels } },
+        { fieldIds },
+      );
+    expect(write(["billing", "q4"])).toEqual({
+      method: "PUT",
+      path: "issue/PAY-12",
+      body: { fields: { labels: ["billing", "q4"] } },
+    });
+    expect(write([]).body).toEqual({ fields: { labels: [] } });
+  });
+
+  test("a label with a space is refused", () => {
+    expect(
+      JiraActionSchema.safeParse({
+        kind: "update_fields",
+        issueKey: "PAY-12",
+        fields: { labels: ["two words"] },
+      }).success,
+    ).toBe(false);
   });
 });
 

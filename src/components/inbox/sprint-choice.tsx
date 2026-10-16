@@ -100,6 +100,51 @@ export function VerdictLine({
 }
 
 /**
+ * The switch row of a sprint choice: the switch, its label ("Add to PAY 15")
+ * and the sprint's dates. Shared by a create's card and dialog (D57) and the
+ * ticket view's Edit dialog (D58); the caller owns the value.
+ */
+export function SprintSwitchControl({
+  label,
+  when,
+  checked,
+  disabled,
+  onCheckedChange,
+}: {
+  label: string;
+  when?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <Switch
+        id={id}
+        size="sm"
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onCheckedChange}
+      />
+      <Label htmlFor={id} className="font-normal">
+        {label}
+      </Label>
+      {when && <span className="text-xs text-muted-foreground">{when}</span>}
+    </div>
+  );
+}
+
+/** The warning under a sprint switch whose sprint's board does not show the project (D57, D58). */
+export function OffBoardNote({ projectKey }: { projectKey: string }) {
+  return (
+    <p className="text-xs text-amber-700 dark:text-amber-300">
+      That sprint's board does not show {projectKey}, so the ticket will not appear on it.
+    </p>
+  );
+}
+
+/**
  * Whether a create can never join from its own payload, while the fit is not
  * known: an Epic, or a sub-task (a parent, or a sub-task type by name).
  */
@@ -183,19 +228,16 @@ function SprintSwitchBody({
   proposal: ProposalView;
   sw: ReturnType<typeof useSprintSwitch>;
 }) {
-  const id = useId();
   const { choice, checked, set, busy, payload } = sw;
   const locked = busy || proposal.status !== "pending";
   const control = (label: string, disabled: boolean) => (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <Switch id={id} size="sm" checked={checked} disabled={disabled} onCheckedChange={set} />
-      <Label htmlFor={id} className="font-normal">
-        {label}
-      </Label>
-      {choice?.kind === "sprint" && (
-        <span className="text-xs text-muted-foreground">{choice.sprint.when}</span>
-      )}
-    </div>
+    <SprintSwitchControl
+      label={label}
+      when={choice?.kind === "sprint" ? choice.sprint.when : undefined}
+      checked={checked}
+      disabled={disabled}
+      onCheckedChange={set}
+    />
   );
   // While the fit is read: the stored choice, not yet changeable.
   if (!choice && sw.loading)
@@ -215,12 +257,7 @@ function SprintSwitchBody({
   return (
     <div className="flex flex-col gap-1">
       {control(`Add to ${sprint.name}`, locked)}
-      {offBoard && (
-        <p className="text-xs text-amber-700 dark:text-amber-300">
-          That sprint's board does not show {payload.projectKey}, so the ticket will not appear on
-          it.
-        </p>
-      )}
+      {offBoard && <OffBoardNote projectKey={payload.projectKey} />}
       <VerdictLine fit={fit} sprint={sprint} />
     </div>
   );

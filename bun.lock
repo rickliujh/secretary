@@ -43,6 +43,7 @@
         "dompurify": "^3.4.16",
         "drizzle-orm": "^0.45.3",
         "effect": "^3",
+        "entities": "^8.1.0",
         "jira2md": "^3.0.1",
         "ky": "^2.1.0",
         "lucide-react": "^1.47.0",

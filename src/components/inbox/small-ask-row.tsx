@@ -19,10 +19,11 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { ProposalView } from "@/services/inbox/queries";
-import { type PayloadOf, type ProposalPayload, StoryPoints } from "@/services/proposals/schema";
+import type { PayloadOf, ProposalPayload } from "@/services/proposals/schema";
 import { bundleLine, trackOrder } from "@/services/small-asks/bundle";
 import { isSubtaskType } from "@/services/small-asks/home";
 import { smallAskHome } from "@/services/small-asks/queries";
+import { parsePointsInput, pointsText } from "@/services/tickets/edit";
 import { ProposalCard } from "./proposal-card";
 import { editedPoints, issueOptions } from "./proposal-fields";
 import { RevokeControl, RevokeOutcome } from "./revoke-control";
@@ -32,16 +33,6 @@ import { useDecisions, useTurnRunning } from "./use-inbox";
 import { useThreadSprintFits } from "./use-sprint-fit";
 
 type Result = { message?: string; error?: string; issueKey?: string; warning?: string } | null;
-
-const pointsText = (n: number | null) => (n === null ? "" : String(n));
-
-/** The points field's text: null when empty, undefined when it is not a valid number of points. */
-function parsePointsInput(text: string): number | null | undefined {
-  const t = text.trim();
-  if (!t) return null;
-  const r = StoryPoints.safeParse(Number(t));
-  return r.success ? r.data : undefined;
-}
 
 /**
  * A small ask as one compact row (FR-10.3, D44): summary, type and epic (both
@@ -230,10 +221,8 @@ export function SmallAskRow({
               />
             </div>
           )}
+          {/* Text, not a number input, so a decimal comma reaches the parser. */}
           <Input
-            type="number"
-            min={0}
-            step="any"
             inputMode="decimal"
             className="h-8 w-20"
             aria-label="Story points"

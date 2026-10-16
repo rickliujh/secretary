@@ -4,7 +4,16 @@ import page1 from "@/test/fixtures/jira/search-page-1.json";
 import page2 from "@/test/fixtures/jira/search-page-2.json";
 import { jiraDateToIso, toJqlDate } from "./dates";
 import { discoverFieldIds, effectiveFieldIds, jqlFieldRef } from "./fields";
-import { currentSprint, issueFields, mapIssue, parseSprints, parseStoryPoints } from "./mapping";
+import {
+  currentSprint,
+  issueFields,
+  mapIssue,
+  parseSprints,
+  parseStoryPoints,
+  parseTeamSuggestions,
+  teamIdOf,
+  teamName,
+} from "./mapping";
 import { FieldSchema, SearchPageSchema } from "./schemas";
 
 const fieldIds = discoverFieldIds(fields.map((f) => FieldSchema.parse(f)));
@@ -117,6 +126,71 @@ describe("field discovery", () => {
     expect(
       discoverFieldIds([field("customfield_5", "Points", "number")]).storyPoints,
     ).toBeUndefined();
+  });
+
+  test("the Team field (D59): Cloud's type, else Data Center's, else a field named Team", () => {
+    const cloud = field(
+      "customfield_10001",
+      "Team",
+      "team",
+      "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team",
+    );
+    const dc = field(
+      "customfield_10108",
+      "Team",
+      "any",
+      "com.atlassian.teams:rm-teams-custom-field-team",
+    );
+    const named = field("customfield_3", " team ", "string");
+    const other = field("customfield_4", "Teams involved", "string");
+    expect(discoverFieldIds([named, dc, cloud]).team).toBe("customfield_10001");
+    expect(discoverFieldIds([named, dc]).team).toBe("customfield_10108");
+    expect(discoverFieldIds([other, named]).team).toBe("customfield_3");
+    expect(discoverFieldIds([other]).team).toBeUndefined();
+    // Overridable in Settings like the others.
+    expect(effectiveFieldIds({ team: "customfield_10108" }, { team: "customfield_9" }).team).toBe(
+      "customfield_9",
+    );
+    expect(effectiveFieldIds({ team: "customfield_10108" }, { team: " " }).team).toBe(
+      "customfield_10108",
+    );
+    expect(issueFields({ team: "customfield_10108" })).toContain("customfield_10108");
+  });
+
+  test("only a team-typed or hand-set Team field is editable (D59 review)", () => {
+    const cloud = field(
+      "customfield_10001",
+      "Team",
+      "team",
+      "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team",
+    );
+    const dc = field(
+      "customfield_10108",
+      "Team",
+      "any",
+      "com.atlassian.teams:rm-teams-custom-field-team",
+    );
+    // A select list that happens to be named Team.
+    const select = field(
+      "customfield_3",
+      "Team",
+      "option",
+      "com.atlassian.jira.plugin.system.customfieldtypes:select",
+    );
+    expect(discoverFieldIds([cloud]).teamEditable).toBe(true);
+    expect(discoverFieldIds([dc]).teamEditable).toBe(true);
+    const named = discoverFieldIds([select]);
+    expect(named).toMatchObject({ team: "customfield_3" });
+    expect(named.teamEditable).toBeUndefined();
+    expect(effectiveFieldIds(named, {}).teamEditable).toBeUndefined();
+    expect(effectiveFieldIds(named, { team: "customfield_3" }).teamEditable).toBe(true);
+    expect(effectiveFieldIds(discoverFieldIds([dc]), {}).teamEditable).toBe(true);
+  });
+
+  test("a select list's option reads as its value and has no team id", () => {
+    const option = { self: "https://jira/option/10200", value: "Alpha", id: "10200" };
+    expect(teamName(option)).toBe("Alpha");
+    expect(teamIdOf(option)).toBeNull();
   });
 
   test("custom field ids become cf[] references", () => {
@@ -276,6 +350,66 @@ describe("mapIssue", () => {
     if (!raw) throw new Error("PAY-2");
     const noPoints = { ...ctx, fieldIds: { ...fieldIds, storyPoints: undefined } };
     expect(mapIssue(raw, noPoints).issue.storyPoints).toBeNull();
+  });
+
+  test("the team (D59): a name or title, a name string, or an id as Team <id>", () => {
+    expect(teamName({ id: "5f0c-12", name: "Payments", title: "Payments" })).toBe("Payments");
+    expect(teamName({ id: "5f0c-12", title: " Platform " })).toBe("Platform");
+    expect(teamName({ id: "5f0c-12" })).toBe("Team 5f0c-12");
+    expect(teamName({ id: 12, name: "" })).toBe("Team 12");
+    expect(teamName("Payments")).toBe("Payments");
+    expect(teamName("12")).toBe("Team 12");
+    expect(teamName(12)).toBe("Team 12");
+    expect(teamName([{ name: "Payments" }])).toBe("Payments");
+    for (const v of [null, undefined, "", "  ", {}, [], true, Number.NaN])
+      expect(teamName(v)).toBeNull();
+  });
+
+  test("the team's id (D59): Cloud's object id, Data Center's bare id, as text", () => {
+    expect(teamIdOf({ id: "5f0c-12", name: "Payments" })).toBe("5f0c-12");
+    expect(teamIdOf({ id: 12 })).toBe("12");
+    expect(teamIdOf("12")).toBe("12");
+    expect(teamIdOf(12)).toBe("12");
+    expect(teamIdOf([{ id: "a" }])).toBe("a");
+    // A name alone has no id.
+    for (const v of [null, undefined, "Payments", "", { name: "Payments" }, {}, true])
+      expect(teamIdOf(v)).toBeNull();
+  });
+
+  test("team suggestions: ids and names with the highlight stripped, each once", () => {
+    expect(
+      parseTeamSuggestions({
+        results: [
+          { value: "14", displayName: "<b>Par</b>tners &amp; Vendors" },
+          { value: 12, displayName: " <b>Pa</b>yments " },
+          { value: "14", displayName: "Partners again" },
+          { value: "", displayName: "No id" },
+          { value: "15", displayName: "<b></b>" },
+        ],
+      }),
+    ).toEqual([
+      { id: "14", name: "Partners & Vendors" },
+      { id: "12", name: "Payments" },
+    ]);
+    // Decimal and hex entities too, and a no-break space read as a space.
+    expect(
+      parseTeamSuggestions({
+        results: [{ value: "16", displayName: "M&#252;nchen&nbsp;<b>Ops</b> &#x27;B&#X27;" }],
+      }),
+    ).toEqual([{ id: "16", name: "München Ops 'B'" }]);
+    expect(parseTeamSuggestions({ results: [] })).toEqual([]);
+    expect(parseTeamSuggestions({})).toEqual([]);
+    expect(parseTeamSuggestions("nope")).toEqual([]);
+  });
+
+  test("the team is stored when the field is known, else null", () => {
+    const raw = issues.find((i) => i.key === "PAY-2");
+    if (!raw) throw new Error("PAY-2");
+    const withTeam = { ...raw, fields: { ...raw.fields, customfield_10108: "12" } };
+    const teamCtx = { ...ctx, fieldIds: { ...fieldIds, team: "customfield_10108" } };
+    expect(mapIssue(withTeam, teamCtx).issue).toMatchObject({ team: "Team 12", teamId: "12" });
+    expect(mapIssue(withTeam, ctx).issue.team).toBeNull();
+    expect(byKey("PAY-2").issue.team).toBeNull();
   });
 
   test("a parent that is an Epic is treated as the epic link", () => {

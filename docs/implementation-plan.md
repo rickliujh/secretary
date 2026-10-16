@@ -495,3 +495,38 @@ Checklist
 - No change to the classify prompt or its version.
 - typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
 
+## Phase 21: Edit an existing ticket (FR-17, D58)
+
+Branch `feat/21-ticket-edit`, stacked on `fix/fiscal-year-setting` (PR #30, for
+`onSelect`).
+
+Tasks
+1. Executor: `update_fields.labels` (mapping, mock Jira); `run` picks the
+   story point field from the edit screen when a user action leaves
+   `pointsField` out, with an error worded for the ticket view.
+2. Move the points parsing out of `small-ask-row.tsx` into a shared module with
+   tests; parse labels (spaces or commas, deduplicated) in a pure helper with
+   tests.
+3. Sprint options (pure, tests): Backlog, open sprints whose board shows the
+   project (else all open), active first, the current one matched by name, a
+   closed current sprint not pickable; Epics and sub-tasks get none.
+4. Fit for an existing ticket joining the active sprint: a query in
+   `sprints/fit-query.ts` reusing `sprintFit`, and a hook; the dialog shows
+   D57's `VerdictLine` and `FitDetails`.
+5. Edit dialog: the new fields, one Save that runs the changed writes in order
+   and reports a partial failure; Details tab Story points row.
+6. Tests against the mock Jira for the FR-17 AC.
+7. The ticket's team (FR-17.5, D59): discovery, override, migration, sync
+   mapping (object, string, bare id), Details row and Edit dialog line with the
+   Context link; mock Jira gets a Team field.
+8. Editing the team (D59): `team_id` column and migration, sync keeps the id,
+   `update_fields.team` in the Executor and mapping, the JQL autocomplete search
+   in `JiraClient` and the mock Jira, the Team combobox in the Edit dialog;
+   tests for the mapping, the option list and the search parsing.
+
+Checklist
+- FR-17 AC passes against the mock Jira.
+- Unit tests cover task 2 and 3 and the Executor's points field pick for a user
+  action.
+- typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
+

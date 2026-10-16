@@ -218,6 +218,57 @@ export const threadSprintFits = (inboxItemId: string, today = localDate()) =>
     return out;
   });
 
+/** The synced sprints and the projects each board shows, for the Edit dialog's Sprint select (D58). */
+export const knownSprints = Effect.map(getState(SYNC_KEYS.sprints), parseSprintState);
+
+/**
+ * The sprint the Edit dialog's switch adds a ticket of `projectKey` to (D58):
+ * the same pick as a proposal's switch and the Executor (`joinSprintFor`), with
+ * its dates, and `offBoard` when its board does not show the project, as the
+ * proposal card warns. Null when no active sprint holds the user's work.
+ */
+export const ticketJoinSprint = (projectKey: string, today = localDate()) =>
+  Effect.gen(function* () {
+    const data = yield* fitData;
+    const sprint = joinSprintFor(
+      data.state.sprints,
+      data.mine,
+      data.me,
+      projectKey,
+      data.state.boardProjects,
+    );
+    if (!sprint) return null;
+    return {
+      ...viewOf(sprint, today, data.lastDay),
+      offBoard: !boardShowsProject(sprint, projectKey, data.state.boardProjects),
+    };
+  });
+
+/**
+ * The fit of an existing ticket moving into an active sprint from the Edit
+ * dialog (FR-17.3, D58): the user's open tickets there plus this ticket with
+ * the dialog's points, counted toward the user when its assignee is the user or
+ * empty. Null unless the sprint is known and active, and for a sprint named
+ * like the ticket's cached one (`currentSprint`): the load counts tickets by
+ * sprint name, so it may hold this one already.
+ */
+export const ticketSprintFit = (
+  sprintId: number,
+  ticket: FitTicket,
+  today = localDate(),
+  currentSprint: string | null = null,
+) =>
+  Effect.gen(function* () {
+    const data = yield* fitData;
+    const sprint = data.state.sprints.find((s) => s.id === sprintId && s.state === "active");
+    if (!sprint || sprint.name === currentSprint) return null;
+    return {
+      sprint: viewOf(sprint, today, data.lastDay),
+      fit: loadFit(data, sprint, today, { ticket }),
+    };
+  });
+export type TicketSprintFit = Effect.Effect.Success<ReturnType<typeof ticketSprintFit>>;
+
 /**
  * The user's sprint and its load without a new ticket, for Today and Settings
  * (D57). `derived` is the velocity rate on that board, shown when the setting
