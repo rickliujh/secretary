@@ -426,8 +426,9 @@ unchanged.
   room line and details as a new ticket (FR-16.2), using the points in the dialog.
 - FR-17.4 (Must) The Details tab shows the ticket's story points.
 - FR-17.5 (Must) The ticket view shows the ticket's Team (Jira's Team field) in
-  Details and in the Edit dialog, read only; when a team in Context has the same
-  name, it links there (D59).
+  Details; when a team in Context has the same name, it links there. The Edit
+  dialog can change or clear it, picking from the teams on the user's synced
+  tickets or a search in Jira (D59).
 - AC: against the mock Jira, one Save that sets a backlog ticket's points to 2,
   adds a label and picks the active sprint of the FR-16 AC shows "fits" before
   saving and afterwards shows the ticket in that sprint with 2 points and the

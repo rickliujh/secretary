@@ -519,6 +519,10 @@ Tasks
 7. The ticket's team (FR-17.5, D59): discovery, override, migration, sync
    mapping (object, string, bare id), Details row and Edit dialog line with the
    Context link; mock Jira gets a Team field.
+8. Editing the team (D59): `team_id` column and migration, sync keeps the id,
+   `update_fields.team` in the Executor and mapping, the JQL autocomplete search
+   in `JiraClient` and the mock Jira, the Team combobox in the Edit dialog;
+   tests for the mapping, the option list and the search parsing.
 
 Checklist
 - FR-17 AC passes against the mock Jira.
