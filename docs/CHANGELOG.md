@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.0 (2026-10-15)
+
+Everything after v0.0.1 below: report page and styles, data sources (Obsidian),
+small asks with quick capture, the tray and the Today page with its sweep, Jira
+links and blocker wake-up, waits from intake and away dates, revoking an
+approval, story points on proposals, new tickets and the sprint (room in days),
+pasted text inline in the message box, and fixes. Bundles are unsigned; macOS
+and Windows warn on first open.
+
 ## v0.0.1 (2026-09-26)
 
 First release: everything below, Phases 0 to 8 and the features and fixes after
