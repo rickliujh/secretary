@@ -1,10 +1,7 @@
-import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Controller, useForm } from "react-hook-form";
-import { z } from "zod";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { Button } from "@/components/ui/button";
@@ -20,12 +17,9 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -34,7 +28,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { onSelect } from "@/lib/select-change";
 import { JiraClient } from "@/services/jira";
 import { epicsInProject, type TicketDetail } from "@/services/tickets/queries";
 import { useExecute } from "./use-execute";
@@ -192,131 +185,6 @@ export function AssignButton({ issue }: { issue: Issue }) {
         </DialogContent>
       </Dialog>
     </>
-  );
-}
-
-const EditForm = z.object({
-  summary: z.string().trim().min(1, "Summary is required"),
-  priority: z.string(),
-  dueDate: z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]),
-  descriptionWiki: z.string(),
-});
-type EditValues = z.infer<typeof EditForm>;
-
-export function EditDialog({
-  issue,
-  open,
-  onOpenChange,
-}: {
-  issue: Issue;
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-}) {
-  const execute = useExecute();
-  const priorities = useQuery({
-    queryKey: queryKeys.priorities,
-    queryFn: ({ signal }) =>
-      run(
-        Effect.flatMap(JiraClient, (j) => j.priorities),
-        signal,
-      ),
-    enabled: open,
-    staleTime: 60 * 60 * 1000,
-  });
-  const initial: EditValues = {
-    summary: issue.summary,
-    priority: issue.priority ?? "",
-    dueDate: issue.dueDate ?? "",
-    descriptionWiki: (issue.description ?? "").replace(/\r\n/g, "\n"),
-  };
-  const form = useForm<EditValues>({ resolver: zodResolver(EditForm), defaultValues: initial });
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the dialog opens or the issue changes.
-  useEffect(() => {
-    if (open) form.reset(initial);
-  }, [open, issue.key, issue.updated]);
-
-  const onSubmit = form.handleSubmit((v) => {
-    const fields: Record<string, string | null> = {};
-    if (v.summary !== initial.summary) fields.summary = v.summary;
-    if (v.priority && v.priority !== initial.priority) fields.priority = v.priority;
-    if (v.dueDate !== initial.dueDate) fields.dueDate = v.dueDate || null;
-    if (v.descriptionWiki !== initial.descriptionWiki)
-      fields.descriptionWiki = v.descriptionWiki || null;
-    if (Object.keys(fields).length === 0) return onOpenChange(false);
-    execute.mutate(
-      { kind: "update_fields", issueKey: issue.key, fields },
-      { onSuccess: () => onOpenChange(false) },
-    );
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
-        <form onSubmit={onSubmit}>
-          <DialogHeader className="mb-4">
-            <DialogTitle>Edit {issue.key}</DialogTitle>
-            <DialogDescription>Only changed fields are sent to Jira.</DialogDescription>
-          </DialogHeader>
-          <FieldGroup>
-            <Field data-invalid={!!form.formState.errors.summary}>
-              <FieldLabel htmlFor="edit-summary">Summary</FieldLabel>
-              <Input id="edit-summary" {...form.register("summary")} />
-              <FieldError errors={[form.formState.errors.summary]} />
-            </Field>
-            <div className="grid grid-cols-2 gap-4">
-              <Controller
-                control={form.control}
-                name="priority"
-                render={({ field }) => (
-                  <Field>
-                    <FieldLabel htmlFor="edit-priority">Priority</FieldLabel>
-                    <Select value={field.value} onValueChange={onSelect(field.onChange)}>
-                      <SelectTrigger id="edit-priority" className="w-full">
-                        <SelectValue placeholder="None" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(
-                          priorities.data ??
-                          (initial.priority ? [{ id: "current", name: initial.priority }] : [])
-                        ).map((p) => (
-                          <SelectItem key={p.name} value={p.name}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                )}
-              />
-              <Field>
-                <FieldLabel htmlFor="edit-due">Due date</FieldLabel>
-                <Input id="edit-due" type="date" {...form.register("dueDate")} />
-              </Field>
-            </div>
-            <Field>
-              <FieldLabel htmlFor="edit-description">Description</FieldLabel>
-              <Textarea
-                id="edit-description"
-                rows={12}
-                className="font-mono text-xs"
-                {...form.register("descriptionWiki")}
-              />
-              <FieldDescription>
-                Jira wiki markup, edited as stored so panels and tables are not lost.
-              </FieldDescription>
-            </Field>
-          </FieldGroup>
-          <DialogFooter className="mt-6">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={execute.isPending}>
-              {execute.isPending ? "Saving..." : "Save to Jira"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }
 

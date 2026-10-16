@@ -28,6 +28,27 @@ export const queryKeys = {
     ["tickets", "sprint-fit", inboxItemId, ...settings, today] as const,
   sprintLoad: (settings: readonly unknown[], today: string) =>
     ["tickets", "sprint-load", ...settings, today] as const,
+  /** An existing ticket joining an active sprint from its Edit dialog (D58). */
+  ticketSprintFit: (
+    issueKey: string,
+    current: string | null,
+    sprintId: number,
+    points: number | null,
+    settings: readonly unknown[],
+    today: string,
+  ) =>
+    [
+      "tickets",
+      "ticket-sprint-fit",
+      issueKey,
+      current,
+      sprintId,
+      points,
+      ...settings,
+      today,
+    ] as const,
+  /** The synced sprints, for the Edit dialog's Sprint select (D58); sync refreshes them. */
+  knownSprints: ["tickets", "known-sprints"] as const,
   /** Sprint > Epics (D50); under "tickets" like Today. */
   epicHealth: ["tickets", "epic-health"] as const,
   /** When the sweep's weekly pass over untouched asks last ran (D49). */

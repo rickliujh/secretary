@@ -27,16 +27,12 @@ import { dateTime, relativeTime, shortDate } from "@/lib/time";
 import { contactsByUsername } from "@/services/directory/queries";
 import { normalizeUsername } from "@/services/directory/schema";
 import { AttachmentSchema, IssueLinkSchema } from "@/services/jira";
+import { pointsText } from "@/services/tickets/edit";
 import { markViewed, type TicketDetail, ticketDetail } from "@/services/tickets/queries";
+import { EditDialog } from "./edit-dialog";
 import { JiraHtml } from "./jira-html";
 import { StatusBadge } from "./status-badge";
-import {
-  AssignButton,
-  CommentComposer,
-  EditDialog,
-  EpicSelect,
-  TransitionSelect,
-} from "./ticket-actions";
+import { AssignButton, CommentComposer, EpicSelect, TransitionSelect } from "./ticket-actions";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -135,6 +131,7 @@ function Details({ detail }: { detail: TicketDetail }) {
       <Row label="Epic">{i.epicKey}</Row>
       <Row label="Parent">{i.parentKey}</Row>
       <Row label="Sprint">{i.sprint}</Row>
+      <Row label="Story points">{i.storyPoints === null ? null : pointsText(i.storyPoints)}</Row>
       <Row label="Labels">
         {i.labels.length ? (
           <span className="flex flex-wrap gap-1">
