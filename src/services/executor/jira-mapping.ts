@@ -68,6 +68,7 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
       if (f.descriptionWiki !== undefined) fields.description = f.descriptionWiki;
       if (f.priority !== undefined) fields.priority = { name: f.priority };
       if (f.dueDate !== undefined) fields.duedate = f.dueDate;
+      if (f.labels !== undefined) fields.labels = f.labels;
       if (f.storyPoints !== undefined) {
         if (!action.pointsField)
           throw new MappingError(`No story point field to write on ${action.issueKey}.`);

@@ -365,6 +365,32 @@ describe("update_fields with story points (D55)", () => {
   });
 });
 
+describe("update_fields with labels (D58)", () => {
+  test("writes the whole list; an empty list clears them", () => {
+    const write = (labels: string[]) =>
+      buildJiraWrite(
+        { kind: "update_fields", issueKey: "PAY-12", fields: { labels } },
+        { fieldIds },
+      );
+    expect(write(["billing", "q4"])).toEqual({
+      method: "PUT",
+      path: "issue/PAY-12",
+      body: { fields: { labels: ["billing", "q4"] } },
+    });
+    expect(write([]).body).toEqual({ fields: { labels: [] } });
+  });
+
+  test("a label with a space is refused", () => {
+    expect(
+      JiraActionSchema.safeParse({
+        kind: "update_fields",
+        issueKey: "PAY-12",
+        fields: { labels: ["two words"] },
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe("pasted text in a small ask's description (D44)", () => {
   const hostile = [
     "![](https://x/p.png)",

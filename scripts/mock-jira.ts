@@ -22,7 +22,8 @@
  * the Story Points field (not Epic or Sub-task, D55); with --cloud also "Story
  * point estimate", empty until written, as on Cloud sites with both (D35).
  * Like Jira, a create or edit that sets a field its screen lacks, or points
- * that are not a number, is refused with 400.
+ * that are not a number, is refused with 400. An edit's labels replace the
+ * issue's (D58); a label with a space is refused.
  *
  * Change history: every other issue has a status change and some an assignee
  * change in the last few days, plus an older priority change; status,
@@ -1045,6 +1046,16 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
           issue.priority = priority;
         }
         if ("duedate" in f) issue.due = (f.duedate as string | null) ?? null;
+        if ("labels" in f) {
+          // Like Jira: the whole list is replaced, and a label holds no spaces.
+          const labels = Array.isArray(f.labels) ? f.labels.map(String) : [];
+          if (labels.some((l) => !l || /\s/.test(l)))
+            return json(
+              { errorMessages: [], errors: { labels: "The label must not contain spaces." } },
+              400,
+            );
+          issue.labels = labels;
+        }
         if (cloud && "parent" in f) {
           const parentKey = (f.parent as { key?: string } | null)?.key ?? null;
           if (parentKey && issues.get(parentKey)?.type !== "Epic")

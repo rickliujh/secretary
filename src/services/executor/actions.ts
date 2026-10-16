@@ -5,6 +5,9 @@
 import { z } from "zod";
 import { IsoDate, IssueKey, StoryPoints } from "@/services/proposals/schema";
 
+/** One Jira label: Jira labels hold no spaces (D58). */
+export const JiraLabel = z.string().min(1).max(255).regex(/^\S+$/, "Jira labels hold no spaces");
+
 export const JiraActionSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("add_comment"),
@@ -35,9 +38,14 @@ export const JiraActionSchema = z.discriminatedUnion("kind", [
           dueDate: IsoDate.nullable().optional(),
           /** Written to `pointsField`; null clears them (D55). */
           storyPoints: StoryPoints.nullable().optional(),
+          /** The whole list of labels; an empty list clears them (D58). */
+          labels: z.array(JiraLabel).optional(),
         })
         .refine((f) => Object.keys(f).length > 0, "Nothing to update"),
-      /** The story point field on the issue's edit screen, chosen by the Executor (D55). */
+      /**
+       * The story point field on the issue's edit screen, chosen by the Executor
+       * (D55); `run` picks it when a user action leaves it out (D58).
+       */
       pointsField: z.string().min(1).optional(),
     })
     .refine((a) => a.fields.storyPoints === undefined || !!a.pointsField, {

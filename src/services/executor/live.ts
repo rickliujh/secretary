@@ -33,6 +33,7 @@ import { pointsFieldForIssue, storyPointFields } from "@/services/jira/fields";
 import { parseIssueLinks } from "@/services/jira/schemas";
 import {
   describeWaitUpdate,
+  ISSUE_KEY_RE,
   issueRefs,
   type PayloadOf,
   type ProposalPayload,
@@ -200,10 +201,58 @@ const make = Effect.gen(function* () {
   const keepUndo = (proposalId: string, undo: Undo) =>
     q((d) => d.update(proposals).set({ result: { undo } }).where(eq(proposals.id, proposalId)));
 
+  /**
+   * The story point field to write on an issue (D55): on its edit screen, the one
+   * holding its points, else the first; without one the update fails, naming why
+   * and what to change where the write came from (a proposal, or the ticket view's
+   * Edit dialog, D58).
+   */
+  const editScreenPointsField = (
+    issueKey: string,
+    issueFields: Record<string, unknown>,
+    from: "proposal" | "ticket" = "proposal",
+  ) =>
+    Effect.gen(function* () {
+      const { effective } = yield* sync.fieldInfo;
+      const meta = yield* jira.getEditMeta(issueKey);
+      const field = pointsFieldForIssue(effective, Object.keys(meta.fields), issueFields);
+      const instead =
+        from === "proposal"
+          ? "remove the points from the proposal"
+          : "leave the points as they were";
+      if (!field)
+        return yield* fail(
+          "invalid",
+          storyPointFields(effective).length
+            ? `The edit screen of ${issueKey} has no story point field, so its story points cannot be set. Add the field to the screen in Jira, or ${instead}.`
+            : `No story point field was found in Jira, so the story points of ${issueKey} cannot be set. Set the field in Settings > Jira, or ${instead}.`,
+        );
+      return field;
+    });
+
+  /**
+   * A user action from the ticket view sets points without naming the field
+   * (D58): pick it from the edit screen as an approved update does (D55).
+   */
+  const withPointsField = (input: JiraAction) =>
+    input.kind === "update_fields" &&
+    input.fields?.storyPoints !== undefined &&
+    !input.pointsField &&
+    ISSUE_KEY_RE.test(input.issueKey)
+      ? Effect.gen(function* () {
+          const ids = storyPointFields((yield* sync.fieldInfo).effective);
+          const current = ids.length
+            ? (yield* jira.getIssue(input.issueKey, { fields: ids })).fields
+            : {};
+          const pointsField = yield* editScreenPointsField(input.issueKey, current, "ticket");
+          return { ...input, pointsField } satisfies JiraAction;
+        })
+      : Effect.succeed(input);
+
   /** A single user-initiated or approved Jira write: validate, send, log, re-fetch. */
   const run = (input: JiraAction, opts: { proposalId?: string } = {}) =>
     Effect.gen(function* () {
-      const parsed = JiraActionSchema.safeParse(input);
+      const parsed = JiraActionSchema.safeParse(yield* withPointsField(input));
       if (!parsed.success) {
         return yield* new ExecutorError({
           kind: "invalid",
@@ -441,25 +490,6 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
-    });
-
-  /**
-   * The story point field to write on an issue (D55): on its edit screen, the one
-   * holding its points, else the first; without one the update fails, naming why.
-   */
-  const editScreenPointsField = (issueKey: string, issueFields: Record<string, unknown>) =>
-    Effect.gen(function* () {
-      const { effective } = yield* sync.fieldInfo;
-      const meta = yield* jira.getEditMeta(issueKey);
-      const field = pointsFieldForIssue(effective, Object.keys(meta.fields), issueFields);
-      if (!field)
-        return yield* fail(
-          "invalid",
-          storyPointFields(effective).length
-            ? `The edit screen of ${issueKey} has no story point field, so its story points cannot be set. Add the field to the screen in Jira, or remove the points from the proposal.`
-            : `No story point field was found in Jira, so the story points of ${issueKey} cannot be set. Set the field in Settings > Jira, or remove the points from the proposal.`,
-        );
-      return field;
     });
 
   /** The target's "blocks" links, read from Jira (not the cache) for the direction check. */
