@@ -222,6 +222,24 @@ export const threadSprintFits = (inboxItemId: string, today = localDate()) =>
 export const knownSprints = Effect.map(getState(SYNC_KEYS.sprints), parseSprintState);
 
 /**
+ * The sprint the Edit dialog's switch adds a ticket of `projectKey` to (D58):
+ * the same pick as a proposal's switch and the Executor (`joinSprintFor`), with
+ * its dates. Null when no active sprint holds the user's work.
+ */
+export const ticketJoinSprint = (projectKey: string, today = localDate()) =>
+  Effect.gen(function* () {
+    const data = yield* fitData;
+    const sprint = joinSprintFor(
+      data.state.sprints,
+      data.mine,
+      data.me,
+      projectKey,
+      data.state.boardProjects,
+    );
+    return sprint ? viewOf(sprint, today, data.lastDay) : null;
+  });
+
+/**
  * The fit of an existing ticket moving into an active sprint from the Edit
  * dialog (FR-17.3, D58): the user's open tickets there plus this ticket with
  * the dialog's points, counted toward the user when its assignee is the user or

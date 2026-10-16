@@ -15,10 +15,11 @@ import { describeError } from "@/app/errors";
 import { useAppMutation } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
-import { VerdictLine } from "@/components/inbox/sprint-choice";
+import { SprintSwitchControl, VerdictLine } from "@/components/inbox/sprint-choice";
 import {
   useKnownSprints,
   useLocalDate,
+  useTicketJoinSprint,
   useTicketSprintFit,
 } from "@/components/inbox/use-sprint-fit";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,14 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { onSelect } from "@/lib/select-change";
 import { JiraClient } from "@/services/jira";
-import { fitSprint, type SprintChoices, sprintChoices } from "@/services/sprints/options";
+import {
+  fitSprint,
+  joinChecked,
+  joinOption,
+  joinValue,
+  type SprintChoices,
+  sprintChoices,
+} from "@/services/sprints/options";
 import {
   baselineAfterSave,
   changedValues,
@@ -191,6 +199,14 @@ export function EditDialog({
     assigneeName: issue.assigneeDisplay,
   });
   const shownFit = fitSprintId !== null && fit.data?.sprint.id === fitSprintId ? fit.data : null;
+  // The switch of a proposal's card (D57): the sprint a new ticket would join.
+  // It and the Sprint select are two views of the form's one sprint value.
+  const join = useTicketJoinSprint(issue.projectKey, open && choices?.kind === "pick");
+  const joinSprint = join.data ?? null;
+  const joinOpt = joinOption(choices, joinSprint?.id ?? null);
+  const setSprint = (v: string) => form.setValue("sprint", v, { shouldDirty: true });
+  // The room line goes under the switch when it is about the switch's sprint.
+  const fitUnderSwitch = !!joinOpt && !!shownFit && shownFit.sprint.id === joinSprint?.id;
 
   const errors = form.formState.errors;
   return (
@@ -254,10 +270,23 @@ export function EditDialog({
                 choices={choices}
                 loading={open && !choices}
                 value={pickedSprint}
-                onChange={(v) => form.setValue("sprint", v, { shouldDirty: true })}
+                onChange={setSprint}
               />
             </div>
-            {shownFit && <VerdictLine fit={shownFit.fit} sprint={shownFit.sprint} />}
+            {joinOpt && joinSprint && (
+              <div className="flex flex-col gap-1">
+                <SprintSwitchControl
+                  label={`Add to ${joinSprint.name}`}
+                  when={joinSprint.when}
+                  checked={joinChecked(joinOpt, pickedSprint)}
+                  onCheckedChange={(on) => setSprint(joinValue(joinOpt, on))}
+                />
+                {fitUnderSwitch && <VerdictLine fit={shownFit.fit} sprint={shownFit.sprint} />}
+              </div>
+            )}
+            {shownFit && !fitUnderSwitch && (
+              <VerdictLine fit={shownFit.fit} sprint={shownFit.sprint} />
+            )}
             <div className="grid grid-cols-2 gap-4">
               {!noEpic && (
                 <Controller

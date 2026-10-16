@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { SprintInfo } from "./calendar";
-import { BACKLOG, CURRENT, fitSprint, sprintChoices, sprintDates } from "./options";
+import {
+  BACKLOG,
+  CURRENT,
+  fitSprint,
+  joinChecked,
+  joinOption,
+  joinValue,
+  sprintChoices,
+  sprintDates,
+} from "./options";
 
 const sprint = (s: Partial<SprintInfo> & Pick<SprintInfo, "id" | "name">): SprintInfo => ({
   state: "future",
@@ -154,5 +163,32 @@ describe("sprintChoices (D58)", () => {
       BACKLOG,
       "41",
     ]);
+  });
+});
+
+describe("the sprint switch and the Sprint select (D58)", () => {
+  test("the switch's sprint is offered only when the select lists it", () => {
+    const r = pick({});
+    expect(joinOption(r, 41)?.value).toBe("41");
+    // OPS 8's board does not show PAY, so the select does not list it.
+    expect(joinOption(r, 51)).toBeNull();
+    expect(joinOption(r, null)).toBeNull();
+    expect(joinOption(sprintChoices({ ...base, issueType: "Epic" }), 41)).toBeNull();
+    expect(joinOption(null, 41)).toBeNull();
+  });
+
+  test("one value: on picks the sprint, off picks Backlog, another sprint turns it off", () => {
+    const r = pick({});
+    const option = joinOption(r, 41);
+    if (!option) throw new Error("no option");
+    expect(joinChecked(option, r.value)).toBe(false);
+    expect(joinValue(option, true)).toBe("41");
+    expect(joinChecked(option, "41")).toBe(true);
+    expect(joinValue(option, false)).toBe(BACKLOG);
+    expect(joinChecked(option, "42")).toBe(false);
+    // A ticket already in the sprint starts on, with no room line.
+    const inIt = pick({ current: "PAY 15" });
+    expect(joinChecked(option, inIt.value)).toBe(true);
+    expect(fitSprint(inIt, inIt.value)).toBeNull();
   });
 });

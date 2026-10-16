@@ -15,6 +15,7 @@ import type { FitTicket } from "@/services/sprints/fit";
 import {
   knownSprints,
   threadSprintFits,
+  ticketJoinSprint,
   ticketSprintFit,
   userSprintLoad,
 } from "@/services/sprints/fit-query";
@@ -69,6 +70,18 @@ export function useKnownSprints(enabled = true) {
     queryKey: queryKeys.knownSprints,
     queryFn: ({ signal }) => run(knownSprints, signal),
     enabled,
+  });
+}
+
+/** The sprint the Edit dialog's switch joins for a ticket of `projectKey` (D58). */
+export function useTicketJoinSprint(projectKey: string, enabled: boolean) {
+  const settings = useSprintSettings();
+  const today = useLocalDate();
+  return useQuery({
+    queryKey: queryKeys.ticketJoinSprint(projectKey, settings, today),
+    queryFn: ({ signal }) => run(ticketJoinSprint(projectKey, today), signal),
+    enabled,
+    refetchOnWindowFocus: true,
   });
 }
 

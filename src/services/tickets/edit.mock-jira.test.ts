@@ -12,8 +12,14 @@ import { Effect, Layer } from "effect";
 import { describeError } from "@/app/errors";
 import { ExecutorLive } from "@/services/executor/live";
 import { lastSprintDay, workingDaysBetween } from "@/services/sprints/fit";
-import { knownSprints, ticketSprintFit } from "@/services/sprints/fit-query";
-import { BACKLOG, sprintChoices } from "@/services/sprints/options";
+import { knownSprints, ticketJoinSprint, ticketSprintFit } from "@/services/sprints/fit-query";
+import {
+  BACKLOG,
+  joinChecked,
+  joinOption,
+  joinValue,
+  sprintChoices,
+} from "@/services/sprints/options";
 import { Sync } from "@/services/sync";
 import { SyncLive } from "@/services/sync/live";
 import { jiraSettings, jiraTestLayer } from "@/test/layers";
@@ -125,6 +131,7 @@ describe("editing an existing ticket against the mock Jira (FR-17 AC)", () => {
         Effect.gen(function* () {
           yield* (yield* Sync).run();
           const before = yield* openDialog(key);
+          const join = yield* ticketJoinSprint(before.issue.projectKey, today);
           // Before saving: the room line for the picked sprint with the dialog's 2 points.
           const fit = yield* ticketSprintFit(
             active.id,
@@ -145,12 +152,20 @@ describe("editing an existing ticket against the mock Jira (FR-17 AC)", () => {
           const after = yield* openDialog(key);
           const back = yield* save(key, (v) => ({ ...v, sprint: BACKLOG }));
           const out = yield* openDialog(key);
-          return { before, fit, saved, after, back, out };
+          return { before, join, fit, saved, after, back, out };
         }),
         layer,
       ),
     );
     expect(r.before.choices.value).toBe(BACKLOG);
+    // The switch joins the proposals' sprint; turning it on picks it in the select.
+    expect(r.join).toMatchObject({ id: active.id, name: active.name, daysLeft: 3 });
+    expect(r.join?.when).toMatch(/^ends \w+ \d+ \w+, 3 working days left$/);
+    const option = joinOption(r.before.choices, r.join?.id ?? null);
+    if (!option) throw new Error("no switch");
+    expect(joinChecked(option, r.before.choices.value)).toBe(false);
+    expect(joinValue(option, true)).toBe(sprintId);
+    expect(joinChecked(option, r.after.choices.value)).toBe(true);
     expect(r.before.choices.options.find((o) => o.value === sprintId)).toMatchObject({
       name: active.name,
       pickable: true,

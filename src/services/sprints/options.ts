@@ -133,3 +133,26 @@ export function fitSprint(choices: SprintChoices | null, value: string): SprintI
   const s = picked?.pickable ? picked.sprint : null;
   return s?.state === "active" && s.name !== choices.current ? s : null;
 }
+
+/**
+ * The Edit dialog's sprint switch (D58, as a proposal's D57): the option of the
+ * sprint the switch joins (`joinSprintFor`), when the select offers it. Null
+ * without such a sprint, for an Epic or a sub-task, or when the sprint's board
+ * does not show the project and the select does not list it: then only the
+ * select is shown.
+ */
+export function joinOption(
+  choices: SprintChoices | null,
+  sprintId: number | null,
+): SprintOption | null {
+  if (choices?.kind !== "pick" || sprintId === null) return null;
+  return choices.options.find((o) => o.pickable && o.sprint?.id === sprintId) ?? null;
+}
+
+/**
+ * The switch and the Sprint select are two views of one value: the switch is
+ * on while the select holds its sprint; turning it on picks that sprint, off
+ * picks Backlog.
+ */
+export const joinChecked = (option: SprintOption, value: string) => value === option.value;
+export const joinValue = (option: SprintOption, on: boolean) => (on ? option.value : BACKLOG);

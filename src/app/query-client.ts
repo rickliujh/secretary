@@ -47,6 +47,9 @@ export const queryKeys = {
       ...settings,
       today,
     ] as const,
+  /** The sprint the Edit dialog's switch joins (D58); under "tickets" like the fits. */
+  ticketJoinSprint: (projectKey: string, settings: readonly unknown[], today: string) =>
+    ["tickets", "ticket-join-sprint", projectKey, ...settings, today] as const,
   /** The synced sprints, for the Edit dialog's Sprint select (D58); sync refreshes them. */
   knownSprints: ["tickets", "known-sprints"] as const,
   /** Sprint > Epics (D50); under "tickets" like Today. */

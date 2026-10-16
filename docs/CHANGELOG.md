@@ -1675,6 +1675,16 @@ Built
   name show the current as "one of 2 sprints of this name", both pickable,
   and no room line for either (the load counts the ticket by name). Tests
   cover each, and the closed-sprint case against the mock Jira.
+- Sprint switch (user request): the Edit dialog has the proposal card's switch,
+  "Add to <sprint>" with its end date and working days left, for the sprint a
+  new ticket would join (`joinSprintFor`). It and the Sprint select hold one
+  value: on picks that sprint, off picks Backlog, another sprint in the select
+  turns it off, and a ticket already in it starts on. The room line goes under
+  the switch when it is about that sprint. Nothing is written until Save. No
+  switch for Epics, sub-tasks, without an active sprint of the user's, or when
+  the select does not list that sprint. The switch row is one component shared
+  with the proposal card. Tests: the switch and select mapping, and the join
+  sprint in the FR-17 AC.
 
 Known limits
 - Components, fix versions, the issue type and a sub-task's parent are not
