@@ -317,6 +317,8 @@ const make = Effect.gen(function* () {
           jiraUsername: p.jiraUsername,
           // Only while away, so the model does not propose the date again (D47).
           ...(isAway(p.awayUntil, req.today) ? { awayUntil: p.awayUntil } : {}),
+          // For the duplicate check of a new contact only (D60); the prompt leaves it out.
+          ...(p.email ? { email: p.email } : {}),
         })),
         (p) => `${p.id} ${p.displayName} ${p.title ?? ""} ${p.team ?? ""}`,
         BUDGETS.people,

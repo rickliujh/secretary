@@ -7,6 +7,7 @@
  */
 import { z } from "zod";
 import { awayDateProblem } from "@/services/directory/away";
+import { existingContact, existingTeam, nameKey } from "@/services/directory/duplicates";
 import { CHANNELS, DETAIL, FORMALITY, RESPONSIVENESS } from "@/services/directory/schema";
 import { isCancelStatus } from "@/services/jira/cancel";
 import { NONE } from "@/services/llm/portable";
@@ -17,9 +18,11 @@ import {
   MEMORY_KINDS,
   MESSAGE_INTENTS,
   NEW_REF_RE,
+  PERSON_REF_RE,
   type ProposalPayload,
   ProposalPayloadSchema,
   pointsLabel,
+  TEAM_REF_RE,
   WAIT_ACTIONS,
 } from "@/services/proposals/schema";
 import type { Reason } from "@/services/retrieval/ranking";
@@ -48,11 +51,48 @@ import {
 } from "./points";
 
 /**
- * Recorded with each classified item. 13 adds pastes inside instructions as «...»
- * (D56); 11 is the revoke thread context (FR-14.6) and 12 story points (D55).
+ * Recorded with each classified item. 14 adds new contacts and teams (FR-18,
+ * D60); 13 pastes inside instructions as «...» (D56); 11 is the revoke thread
+ * context (FR-14.6) and 12 story points (D55).
  */
-export const CLASSIFY_PROMPT_VERSION = 13;
+export const CLASSIFY_PROMPT_VERSION = 14;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
+/** Placeholders for contacts and teams created in the same answer (prompt version 14, D60). */
+/** How many new contacts, and teams, one answer may create. */
+const NEW_DIRECTORY_REFS = 3;
+
+/**
+ * The first `count` refs of a kind ("$person" or "$team") that `taken` does not
+ * hold: a new contact or team of this answer never reuses the ref of one
+ * proposed earlier in the thread (D60).
+ */
+export function freeRefs(ns: string, taken: Iterable<string>, count = NEW_DIRECTORY_REFS) {
+  const used = new Set(taken);
+  const out: string[] = [];
+  for (let n = 1; out.length < count; n++) if (!used.has(`${ns}:${n}`)) out.push(`${ns}:${n}`);
+  return out;
+}
+
+/** Contacts or teams the thread proposed in its other items, not added yet (D60). */
+const threadCreated = (s: ItemSnapshot, kind: "person" | "team") =>
+  (s.threadCreates ?? []).filter((c) => c.kind === kind);
+
+/** The refs this answer may create, and the ones earlier proposals in the thread made. */
+function directoryRefChoices(s: ItemSnapshot) {
+  const people = threadCreated(s, "person").map((c) => c.ref);
+  const teams = threadCreated(s, "team").map((c) => c.ref);
+  return {
+    newPeople: freeRefs("$person", people),
+    newTeams: freeRefs("$team", teams),
+    people,
+    teams,
+  };
+}
+/** The `team` choice that takes a contact out of their team (update_person, D60). */
+export const NO_TEAM = "no_team";
+
+/** Whether the snapshot offers new contacts and teams (prompt version 14, D60). */
+const offersDirectory = (s: ItemSnapshot) => s.promptVersion >= 14;
 
 export type CandidateIssue = {
   key: string;
@@ -242,7 +282,18 @@ export type ItemSnapshot = {
     jiraUsername: string | null;
     /** Their last day away while away (prompt version 9, D47). */
     awayUntil?: string | null;
+    /**
+     * Their email, for the duplicate check of a new contact (prompt version 14,
+     * D60). Never shown to the model.
+     */
+    email?: string | null;
   }[];
+  /**
+   * New contacts and teams the thread's other items propose and that are not
+   * added yet (prompt version 14, D60), by their ref: listed so this item uses
+   * them rather than creating them again.
+   */
+  threadCreates?: { ref: string; kind: "person" | "team"; name: string }[];
   /** Open dependencies on candidate tickets; the prompt lists them only for snapshots without `waits`. */
   dependencies: { issueKey: string; label: string; status: string }[];
   /** Open dependencies update_dependency may pick from (prompt version 9, D46). */
@@ -287,6 +338,8 @@ const REQUIRED_FIELDS: Record<string, readonly string[]> = {
   link_issues: ["target", "blocker"],
   update_person: ["personId"],
   update_team: ["teamId"],
+  create_team: ["teamRef", "name"],
+  create_person: ["personRef", "displayName"],
   remember: ["memoryKind", "content"],
   draft_message: ["channel", "intent", "notes"],
 };
@@ -302,6 +355,8 @@ const OFFERED: Partial<Record<string, (s: ItemSnapshot) => boolean>> = {
   update_team: (s) => s.teams.length > 0,
   link_issues: (s) => !!s.blockLinkType,
   update_dependency: (s) => !!s.waits?.length,
+  create_team: offersDirectory,
+  create_person: offersDirectory,
 };
 
 /** The kinds the model may propose for this item. */
@@ -404,6 +459,41 @@ export function buildItemSchema(s: ItemSnapshot) {
         ),
       }
     : {};
+  // New contacts and teams (prompt version 14, D60): their refs stand in for ids
+  // wherever a person or team goes. Older snapshots replay as they ran.
+  const directory = offersDirectory(s);
+  // The thread's not-yet-added contacts and teams are listed by ref, like ids.
+  const refs = directoryRefChoices(s);
+  const personChoices = directory ? [...personIds, ...refs.people, ...refs.newPeople] : personIds;
+  const teamChoices = directory ? [...teamIds, ...refs.teams, ...refs.newTeams] : teamIds;
+  const orNewPerson = directory
+    ? "A contact id from People, or the personRef of a contact you create in this answer. "
+    : "";
+  const orNewTeam = directory
+    ? "A team id from Teams, or the teamRef of a team you create in this answer. "
+    : "";
+  const directoryFields = directory
+    ? {
+        teamRef: nullableEnum(refs.newTeams).describe(
+          `Placeholder id for a new team; other proposals of this answer use it in place of a team id. ${uses("create_team")}`,
+        ),
+        name: nullableText(`The team's name. ${uses("create_team")}`),
+        personRef: nullableEnum(refs.newPeople).describe(
+          `Placeholder id for a new contact; other proposals of this answer use it in place of a contact id. ${uses("create_person")}`,
+        ),
+        displayName: nullableText(`The contact's full name. ${uses("create_person")}`),
+        email: nullableText(`Email address, only as the input gives it. ${uses("create_person")}`),
+        jiraUsername: nullableEnum(users).describe(
+          `Jira user id from the list, only when one clearly is this person. ${uses("create_person")}`,
+        ),
+        team: nullableEnum([...teamChoices, NO_TEAM]).describe(
+          `The contact's team: a team id from Teams, or the teamRef of a team you create in this answer. For update_person, only when they move to another team; ${NO_TEAM} takes them out of their team. ${uses("create_person", "update_person")}`,
+        ),
+        subjectId: nullableEnum([...personChoices, ...teamChoices]).describe(
+          `The contact or team the memory is about, if it is about one: an id from People or Teams, or the ref of one you create in this answer. ${uses("remember")}`,
+        ),
+      }
+    : {};
 
   const proposal = z.object({
     kind: enumOf(kinds).describe(
@@ -444,8 +534,8 @@ export function buildItemSchema(s: ItemSnapshot) {
     // link_dependency
     dependencyKind: nullableEnum(DEPENDENCY_KINDS).describe(uses("link_dependency")),
     label: nullableText(`What or who the issue is waiting on. ${uses("link_dependency")}`),
-    ownerPersonId: nullableEnum(personIds).describe(uses("link_dependency")),
-    ownerTeamId: nullableEnum(teamIds).describe(uses("link_dependency")),
+    ownerPersonId: nullableEnum(personChoices).describe(`${orNewPerson}${uses("link_dependency")}`),
+    ownerTeamId: nullableEnum(teamChoices).describe(`${orNewTeam}${uses("link_dependency")}`),
     externalRef: nullableText(`For incidents: the ServiceNow number. ${uses("link_dependency")}`),
     expectedAt: nullableText(
       `YYYY-MM-DD: when it is expected. ${uses("link_dependency", "update_dependency")}`,
@@ -462,32 +552,38 @@ export function buildItemSchema(s: ItemSnapshot) {
     // draft_message
     channel: nullableEnum(["teams", "email"]).describe(uses("draft_message")),
     intent: nullableEnum(MESSAGE_INTENTS).describe(uses("draft_message")),
-    recipientPersonId: nullableEnum(personIds).describe(uses("draft_message")),
-    recipientTeamId: nullableEnum(teamIds).describe(uses("draft_message")),
+    recipientPersonId: nullableEnum(personChoices).describe(
+      `${orNewPerson}${uses("draft_message")}`,
+    ),
+    recipientTeamId: nullableEnum(teamChoices).describe(`${orNewTeam}${uses("draft_message")}`),
     issueKeys: z
       .array(enumOf(targets))
       .default([])
       .describe(`Issues the message is about; [] otherwise. ${uses("draft_message")}`),
     notes: nullableText(`What the message should say. ${uses("draft_message")}`),
-    // update_person
+    // update_person (and create_person, D60)
     personId: nullableEnum(personIds).describe(uses("update_person")),
-    title: nullableText(uses("update_person")),
-    responsibilities: nullableText(uses("update_person")),
-    formality: nullableEnum(FORMALITY).describe(uses("update_person")),
-    detail: nullableEnum(DETAIL).describe(uses("update_person")),
-    responsiveness: nullableEnum(RESPONSIVENESS).describe(uses("update_person")),
-    preferredChannel: nullableEnum(CHANNELS).describe(uses("update_person")),
-    tone: nullableText(uses("update_person")),
+    title: nullableText(uses("update_person", "create_person")),
+    responsibilities: nullableText(uses("update_person", "create_person")),
+    formality: nullableEnum(FORMALITY).describe(uses("update_person", "create_person")),
+    detail: nullableEnum(DETAIL).describe(uses("update_person", "create_person")),
+    responsiveness: nullableEnum(RESPONSIVENESS).describe(uses("update_person", "create_person")),
+    preferredChannel: nullableEnum(CHANNELS).describe(uses("update_person", "create_person")),
+    tone: nullableText(uses("update_person", "create_person")),
     awayUntil: nullableText(
       `YYYY-MM-DD: the person's last day away, from an out-of-office or leave notice: the day itself for "until" a day, the day before for "back on" a day. ${uses("update_person")}`,
     ),
-    // update_team
+    // update_team (and create_team, D60)
     teamId: nullableEnum(teamIds).describe(uses("update_team")),
-    function: nullableText(uses("update_team")),
-    contactFor: nullableText(uses("update_team")),
-    teamChannel: nullableText(`Where to reach the team. ${uses("update_team")}`),
-    escalationPath: nullableText(uses("update_team")),
-    note: nullableText(`A fact worth keeping. ${uses("update_person", "update_team")}`),
+    function: nullableText(uses("update_team", "create_team")),
+    contactFor: nullableText(uses("update_team", "create_team")),
+    teamChannel: nullableText(`Where to reach the team. ${uses("update_team", "create_team")}`),
+    escalationPath: nullableText(uses("update_team", "create_team")),
+    note: nullableText(
+      `A fact worth keeping. ${uses("update_person", "update_team", "create_person", "create_team")}`,
+    ),
+    // create_team, create_person (D60)
+    ...directoryFields,
     // every kind
     rationale: z.string().describe("One sentence: why this action, citing the input"),
     evidence: z.string().describe("The exact words from the input that support this action"),
@@ -682,6 +778,24 @@ const followupChannel = (source: string | undefined): (typeof FOLLOWUP_CHANNELS)
     ? (source as (typeof FOLLOWUP_CHANNELS)[number])
     : "other";
 
+/** A contact's communication profile from the flat fields; null when none is set. */
+function profileOf(p: Record<string, unknown>) {
+  const profile = defined({
+    formality: str(p.formality),
+    detail: str(p.detail),
+    responsiveness: str(p.responsiveness),
+    preferredChannel: str(p.preferredChannel),
+    tone: str(p.tone),
+  });
+  return Object.keys(profile).length ? profile : null;
+}
+
+/** Whether an id or ref names a team or a contact (D60). */
+const subjectTypeOf = (id: string, s: ItemSnapshot | undefined): "person" | "team" =>
+  TEAM_REF_RE.test(id) || (!PERSON_REF_RE.test(id) && !!s?.teams.some((t) => t.id === id))
+    ? "team"
+    : "person";
+
 /** Maps one model proposal to a canonical payload (throws on shapes the schema should have prevented). */
 function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): ProposalPayload {
   const g = (k: string) => p[k];
@@ -760,26 +874,47 @@ function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): Propos
         label: wait?.label ?? null,
       });
     }
-    case "update_person":
+    case "update_person": {
+      // A move to another team, or out of one (D60); absent: the team stays.
+      const team = g("team") === NO_TEAM ? null : str(g("team"));
       return ProposalPayloadSchema.parse({
         kind: "update_person",
         personId: g("personId"),
-        changes: defined({
-          title: str(g("title")),
-          responsibilities: str(g("responsibilities")),
-          awayUntil: str(g("awayUntil")),
-          profile: (() => {
-            const profile = defined({
-              formality: str(g("formality")),
-              detail: str(g("detail")),
-              responsiveness: str(g("responsiveness")),
-              preferredChannel: str(g("preferredChannel")),
-              tone: str(g("tone")),
-            });
-            return Object.keys(profile).length ? profile : null;
-          })(),
-        }),
+        changes: {
+          ...defined({
+            title: str(g("title")),
+            responsibilities: str(g("responsibilities")),
+            awayUntil: str(g("awayUntil")),
+            profile: profileOf(p),
+          }),
+          ...(team !== null || g("team") === NO_TEAM ? { team } : {}),
+        },
         noteAppend: str(g("note")),
+      });
+    }
+    case "create_team":
+      return ProposalPayloadSchema.parse({
+        kind: "create_team",
+        ref: g("teamRef"),
+        name: g("name"),
+        function: str(g("function")),
+        contactFor: str(g("contactFor")),
+        channel: str(g("teamChannel")),
+        escalationPath: str(g("escalationPath")),
+        note: str(g("note")),
+      });
+    case "create_person":
+      return ProposalPayloadSchema.parse({
+        kind: "create_person",
+        ref: g("personRef"),
+        displayName: g("displayName"),
+        title: str(g("title")),
+        email: str(g("email")),
+        jiraUsername: str(g("jiraUsername")),
+        team: g("team") === NO_TEAM ? null : str(g("team")),
+        responsibilities: str(g("responsibilities")),
+        profile: profileOf(p) ?? {},
+        note: str(g("note")),
       });
     case "update_team":
       return ProposalPayloadSchema.parse({
@@ -793,12 +928,16 @@ function toPayload(p: ItemOutput["proposals"][number], s?: ItemSnapshot): Propos
         }),
         noteAppend: str(g("note")),
       });
-    case "remember":
+    case "remember": {
+      // What it is about, when a contact or team (D60): code works out which.
+      const subjectId = str(g("subjectId"));
       return ProposalPayloadSchema.parse({
         kind: "remember",
         memoryKind: g("memoryKind"),
         content: g("content"),
+        ...(subjectId ? { subjectType: subjectTypeOf(subjectId, s), subjectId } : {}),
       });
+    }
     case "draft_message":
       return ProposalPayloadSchema.parse({
         kind: "draft_message",
@@ -931,6 +1070,155 @@ function coveringWait(p: ItemOutput["proposals"][number], s: ItemSnapshot) {
   );
 }
 
+/** The flat fields that may hold a `$person:n` or `$team:n` ref, and the kinds that read them (D60). */
+const DIRECTORY_REF_FIELDS: Record<string, readonly string[]> = {
+  ownerPersonId: ["link_dependency"],
+  ownerTeamId: ["link_dependency"],
+  recipientPersonId: ["draft_message"],
+  recipientTeamId: ["draft_message"],
+  subjectId: ["remember"],
+  team: ["create_person", "update_person"],
+};
+
+/** The fields that make a new contact or team needed by the proposal (FR-18.2). */
+const NEED_FIELDS: Record<string, readonly string[]> = {
+  ownerPersonId: ["link_dependency"],
+  ownerTeamId: ["link_dependency"],
+  recipientPersonId: ["draft_message"],
+  recipientTeamId: ["draft_message"],
+  team: ["update_person"],
+};
+
+/**
+ * Whether a word of `name` (two letters or more) appears in `text` as a word,
+ * ignoring case: "Sarah" names Sarah Lee, "platform" the team Platform.
+ */
+export function namedIn(name: string | null, text: string): boolean {
+  if (!name || !text.trim()) return false;
+  return name
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length >= 2)
+    .some((w) =>
+      new RegExp(
+        `(^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\p{L}\\p{N}])`,
+        "iu",
+      ).test(text),
+    );
+}
+
+/** The ref a create_person or create_team defines in the flat shape. */
+const createdRef = (p: ItemOutput["proposals"][number]) =>
+  p.kind === "create_person" ? str(p.personRef) : p.kind === "create_team" ? str(p.teamRef) : null;
+
+/**
+ * The checks for new contacts and teams (FR-18, D60): each ref created once and
+ * used only when created in this answer; an email that looks like one and a
+ * Jira user from the list; no contact or team the directory already has, and
+ * none twice; and from pasted input without the user's words, only one another
+ * proposal here needs.
+ */
+function validateDirectory(out: ItemOutput, s: ItemSnapshot): string[] {
+  if (!offersDirectory(s)) return [];
+  const errors: string[] = [];
+  const at = (i: number, kind: string) => `Proposal ${i + 1} (${kind})`;
+  const created = new Map<string, number>();
+  out.proposals.forEach((p, i) => {
+    const ref = createdRef(p);
+    if (!ref) return;
+    if (created.has(ref))
+      errors.push(
+        `${ref} is created twice; use a different ref for each new ${p.kind === "create_person" ? "contact" : "team"}.`,
+      );
+    else created.set(ref, i);
+  });
+  // The thread's other items' new contacts and teams, not added yet, by ref.
+  const earlier = new Map((s.threadCreates ?? []).map((c) => [c.ref, c]));
+  // Refs other proposals need: a wait's owner, a draft's recipient, a move, and
+  // the team of a needed contact. A memory about someone is no need (FR-18.2).
+  const needed = new Set<string>();
+  out.proposals.forEach((p, i) => {
+    for (const [field, kinds] of Object.entries(DIRECTORY_REF_FIELDS)) {
+      if (!kinds.includes(p.kind)) continue;
+      const v = str(p[field]);
+      if (!v || !(PERSON_REF_RE.test(v) || TEAM_REF_RE.test(v))) continue;
+      if (!created.has(v) && !earlier.has(v))
+        errors.push(
+          `${at(i, p.kind)}: ${field} ${v} is not created by any ${PERSON_REF_RE.test(v) ? "create_person" : "create_team"} in this answer.`,
+        );
+      else if (NEED_FIELDS[field]?.includes(p.kind)) needed.add(v);
+    }
+  });
+  for (const p of out.proposals) {
+    const ref = createdRef(p);
+    const team = str(p.team);
+    if (p.kind === "create_person" && ref && needed.has(ref) && team) needed.add(team);
+  }
+  // Pasted text never adds people the user did not ask about (FR-18.2): from
+  // pasted input, a new one must be needed here or named in the user's own typed
+  // words in the thread (instructions, answers). Typed input, the chat's too, is theirs.
+  const pasted = s.source !== "typed";
+  const typedWords = [...(s.thread?.instructions ?? []), s.clarification ?? ""].join("\n");
+  const knownUsers = new Set(s.jiraUsers.map((u) => u.username));
+  const names = new Map<string, number>();
+  out.proposals.forEach((p, i) => {
+    if (p.kind !== "create_person" && p.kind !== "create_team") return;
+    const where = at(i, p.kind);
+    const person = p.kind === "create_person";
+    const name = str(person ? p.displayName : p.name);
+    if (person) {
+      const email = str(p.email);
+      const user = str(p.jiraUsername);
+      // A new team's ref put in the contact's teamRef rather than its team (eval, 2026-10-16).
+      const misplaced = str(p.teamRef);
+      if (misplaced && !str(p.team) && created.has(misplaced))
+        errors.push(
+          `${where}: teamRef is only for create_team. To put ${name ?? "this contact"} in the team ${misplaced} creates, set team to ${misplaced}.`,
+        );
+      if (email && !z.email().safeParse(email).success)
+        errors.push(
+          `${where}: email ${email} is not an email address; leave it empty unless the input gives one.`,
+        );
+      if (user && !knownUsers.has(user))
+        errors.push(`${where}: jiraUsername ${user} is not a known Jira user.`);
+      const existing = existingContact(s.people, {
+        displayName: name ?? "",
+        email,
+        jiraUsername: user,
+      });
+      if (existing)
+        errors.push(
+          `${where}: ${existing.displayName} is already a contact (${existing.id}). Do not create them again: use ${existing.id} wherever this answer needs them, and propose update_person for ${existing.id} only if the input adds facts about them.`,
+        );
+    } else {
+      const existing = existingTeam(s.teams, name);
+      if (existing)
+        errors.push(
+          `${where}: team ${existing.name} already exists (${existing.id}). Do not create it again: use ${existing.id} wherever this answer needs it, and propose update_team for ${existing.id} only if the input adds facts about it.`,
+        );
+    }
+    // Proposed already in another item of this conversation: use its ref (D60).
+    const proposed = [...earlier.values()].find(
+      (c) => c.kind === (person ? "person" : "team") && !!name && nameKey(c.name) === nameKey(name),
+    );
+    if (proposed)
+      errors.push(
+        `${where}: ${proposed.name} is already proposed in this conversation as ${proposed.ref}. Do not create ${person ? "them" : "it"} again: use ${proposed.ref} wherever this answer needs ${person ? "them" : "it"}.`,
+      );
+    const key = `${p.kind}:${nameKey(name)}`;
+    if (name && names.has(key))
+      errors.push(
+        `${where}: ${name} is created twice; create each ${person ? "contact" : "team"} once and use its ref.`,
+      );
+    else if (name) names.set(key, i);
+    const ref = createdRef(p);
+    if (pasted && !(ref && needed.has(ref)) && !namedIn(name, typedWords))
+      errors.push(
+        `${where}: the user did not ask to add ${name ?? `this ${person ? "contact" : "team"}`}, and no other proposal in this answer needs ${person ? "them" : "it"}. Pasted text alone never adds contacts or teams; leave it out.`,
+      );
+  });
+  return errors;
+}
+
 /** Issue keys inside free text. */
 export const ISSUE_KEY_SCAN = /\b[A-Z][A-Z0-9_]+-\d+\b/g;
 
@@ -1040,7 +1328,14 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
     for (const field of REF_FIELDS.filter(used)) {
       const v = p[field];
       if (typeof v === "string" && NEW_REF_RE.test(v) && !created.has(v))
-        errors.push(`${at}: ${field} ${v} is not created by any create_issue in this answer.`);
+        errors.push(
+          `${at}: ${field} ${v} is not created by any create_issue in this answer.${
+            // A new contact's or team's ref mistaken for a new issue's (D60).
+            out.proposals.some((o) => o.kind === "create_person" || o.kind === "create_team")
+              ? ` ${field} is an issue: a candidate ticket, or the ref of a new issue. A new contact's personRef or a new team's teamRef goes in ownerPersonId, ownerTeamId, recipientPersonId or recipientTeamId instead.`
+              : ""
+          }`,
+        );
       if (typeof v === "string" && !NEW_REF_RE.test(v) && deleted.has(v))
         errors.push(deletedTicketError(at, field, v));
       else if (typeof v === "string" && !NEW_REF_RE.test(v) && !candidates.has(v))
@@ -1167,6 +1462,7 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
         );
       }
   });
+  errors.push(...validateDirectory(out, s));
   errors.push(...revokedMentions(out, s));
   if (out.proposals.length === 0 && !out.question?.trim())
     errors.push("Return at least one proposal, or a question if you are unsure.");
@@ -1232,8 +1528,8 @@ export function fromPayload(
         target: r(p.target),
         dependencyKind: p.dependencyKind,
         label: p.label,
-        ownerPersonId: p.ownerPersonId,
-        ownerTeamId: p.ownerTeamId,
+        ownerPersonId: r(p.ownerPersonId),
+        ownerTeamId: r(p.ownerTeamId),
         externalRef: p.externalRef,
         expectedAt: p.expectedAt,
       };
@@ -1260,7 +1556,39 @@ export function fromPayload(
         responsiveness: p.changes.profile?.responsiveness ?? null,
         preferredChannel: p.changes.profile?.preferredChannel ?? null,
         tone: p.changes.profile?.tone ?? null,
+        // Only a team move carries the field (D60), so older shapes read as before.
+        ...(p.changes.team === undefined
+          ? {}
+          : { team: p.changes.team === null ? NO_TEAM : r(p.changes.team) }),
         note: p.noteAppend,
+      };
+    case "create_team":
+      return {
+        kind: p.kind,
+        teamRef: r(p.ref),
+        name: p.name,
+        function: p.function,
+        contactFor: p.contactFor,
+        teamChannel: p.channel,
+        escalationPath: p.escalationPath,
+        note: p.note,
+      };
+    case "create_person":
+      return {
+        kind: p.kind,
+        personRef: r(p.ref),
+        displayName: p.displayName,
+        title: p.title,
+        email: p.email,
+        jiraUsername: p.jiraUsername,
+        team: r(p.team),
+        responsibilities: p.responsibilities,
+        formality: p.profile.formality ?? null,
+        detail: p.profile.detail ?? null,
+        responsiveness: p.profile.responsiveness ?? null,
+        preferredChannel: p.profile.preferredChannel ?? null,
+        tone: p.profile.tone ?? null,
+        note: p.note,
       };
     case "update_team":
       return {
@@ -1273,14 +1601,21 @@ export function fromPayload(
         note: p.noteAppend,
       };
     case "remember":
-      return { kind: p.kind, memoryKind: p.memoryKind, content: p.content };
+      return {
+        kind: p.kind,
+        memoryKind: p.memoryKind,
+        content: p.content,
+        ...(p.subjectId && (p.subjectType === "person" || p.subjectType === "team")
+          ? { subjectId: r(p.subjectId) }
+          : {}),
+      };
     case "draft_message":
       return {
         kind: p.kind,
         channel: p.channel,
         intent: p.intent,
-        recipientPersonId: p.recipientPersonId,
-        recipientTeamId: p.recipientTeamId,
+        recipientPersonId: r(p.recipientPersonId),
+        recipientTeamId: r(p.recipientTeamId),
         issueKeys: p.issueKeys.map((k) => r(k) ?? k),
         notes: p.notes,
       };
@@ -1388,7 +1723,12 @@ ${
 `
     : ""
 }- Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
-- Use remember for rules and preferences the user states about how to handle future work.
+${
+  offersDirectory(s)
+    ? `- Propose create_person or create_team only when the user's own words ask for it ("add Sarah Lee as a contact", "create a team Platform"), or when another proposal in this item needs a person or team that is not in the People or Teams lists and the input names them (the owner of a wait, the recipient of a draft). Never for everyone a pasted text mentions. Give each new one a personRef or teamRef ($person:1, $team:1) and use that ref in the other proposals of this answer that need it: a wait's ownerPersonId or ownerTeamId (its target stays the ticket that waits), a draft's recipient, and the team of a new contact, which is the teamRef when the contact is in a team you create. Never create a contact or team the People or Teams lists already have: use its id, with update_person or update_team only when the input adds facts. When a listed contact moves to another team, propose update_person with team.
+`
+    : ""
+}- Use remember for rules and preferences the user states about how to handle future work.
 - The user reviews and can edit every proposal before it runs, so a sensible proposal with a stated assumption beats a question. Decide details yourself: the priority (from urgency, deadlines, blocking and customer impact), wording, and which listed value fits. Say what you assumed in the rationale.
 - Ask a question only when you cannot tell which issue, person or kind of action the input is about. Never ask the user to pick a value you could reasonably choose, such as a priority.
 ${
@@ -1452,21 +1792,30 @@ ${
         .join("\n")}${rule(s.examples.map((e) => e.input))}`,
     );
   }
+  // New ones the thread proposed and that are not added yet, listed by ref (D60).
+  const proposedLines = (kind: "person" | "team") =>
+    offersDirectory(s)
+      ? threadCreated(s, kind).map(
+          (c) => `- ${c.ref}: ${c.name} | proposed earlier in this conversation, not added yet`,
+        )
+      : [];
   blocks.push(
     `## Directory\nMe: ${s.me?.username ?? "unknown"}\nTeams:\n${
-      s.teams
-        .map(
+      [
+        ...s.teams.map(
           (t) =>
             `- ${t.id}: ${line([t.name, t.function, t.contactFor && `contact for ${t.contactFor}`])}`,
-        )
-        .join("\n") || "- none"
+        ),
+        ...proposedLines("team"),
+      ].join("\n") || "- none"
     }\nPeople:\n${
-      s.people
-        .map(
+      [
+        ...s.people.map(
           (p) =>
             `- ${p.id}: ${line([p.displayName, p.title, p.team, p.jiraUsername && `jira ${p.jiraUsername}`, p.awayUntil && `away until ${p.awayUntil}`])}`,
-        )
-        .join("\n") || "- none"
+        ),
+        ...proposedLines("person"),
+      ].join("\n") || "- none"
     }\nJira users: ${s.jiraUsers.map((u) => `${u.username} (${u.displayName})`).join(", ") || "none"}`,
   );
   if (s.notes.length) {

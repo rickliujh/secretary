@@ -29,6 +29,8 @@ export type FieldSpec = {
   mono?: boolean;
   /** Inside `changes`: empty means "do not change" rather than "clear". */
   optionalChange?: boolean;
+  /** Empty leaves the field out rather than setting it to null (a new contact's profile, D60). */
+  omitEmpty?: boolean;
   /** Left out of the form while the other values make it meaningless. */
   hidden?: (values: Readonly<Record<string, string>>) => boolean;
 };
@@ -42,8 +44,48 @@ export const formName = (spec: Pick<FieldSpec, "path" | "type">) =>
 
 const opts = (values: readonly string[]) => () =>
   values.map((v) => ({ value: v, label: v.replace(/_/g, " ") }));
-const peopleOpts = (l: Lookups) => l.people.map((p) => ({ value: p.id, label: p.displayName }));
-const teamOpts = (l: Lookups) => l.teams.map((t) => ({ value: t.id, label: t.name }));
+/** Contacts, then the thread's new ones by ref (D60). */
+const peopleOpts = (l: Lookups) => [
+  ...l.people.map((p) => ({ value: p.id, label: p.displayName })),
+  ...(l.refs?.people ?? []).map((r) => ({ value: r.ref, label: `${r.name} (new)` })),
+];
+/** Teams, then the thread's new ones by ref (D60). */
+const teamOpts = (l: Lookups) => [
+  ...l.teams.map((t) => ({ value: t.id, label: t.name })),
+  ...(l.refs?.teams ?? []).map((r) => ({ value: r.ref, label: `${r.name} (new)` })),
+];
+/**
+ * The communication profile's fields: a change of an existing contact's
+ * (`optionalChange`), or a new contact's, whose empty ones are left out (D60).
+ */
+const profileFields = (prefix: string, change: boolean): FieldSpec[] => {
+  const empty = change ? { optionalChange: true } : { omitEmpty: true };
+  return [
+    {
+      path: `${prefix}formality`,
+      label: "Formality",
+      type: "select",
+      options: opts(FORMALITY),
+      ...empty,
+    },
+    { path: `${prefix}detail`, label: "Detail", type: "select", options: opts(DETAIL), ...empty },
+    {
+      path: `${prefix}responsiveness`,
+      label: "Responsiveness",
+      type: "select",
+      options: opts(RESPONSIVENESS),
+      ...empty,
+    },
+    {
+      path: `${prefix}preferredChannel`,
+      label: "Channel",
+      type: "select",
+      options: opts(CHANNELS),
+      ...empty,
+    },
+    { path: `${prefix}tone`, label: "Tone", type: "text", ...empty },
+  ];
+};
 const projectOpts = (l: Lookups) =>
   [...new Set(l.tickets.map((t) => t.projectKey))].sort().map((k) => ({ value: k, label: k }));
 
@@ -177,34 +219,16 @@ export const FIELD_SPECS: Record<EditableKind, FieldSpec[]> = {
       optionalChange: true,
     },
     {
-      path: "changes.profile.formality",
-      label: "Formality",
+      path: "changes.team",
+      label: "Move to team",
       type: "select",
-      options: opts(FORMALITY),
+      options: teamOpts,
       optionalChange: true,
+      hidden: (v) => v.changes__team__clear === "true",
     },
-    {
-      path: "changes.profile.detail",
-      label: "Detail",
-      type: "select",
-      options: opts(DETAIL),
-      optionalChange: true,
-    },
-    {
-      path: "changes.profile.responsiveness",
-      label: "Responsiveness",
-      type: "select",
-      options: opts(RESPONSIVENESS),
-      optionalChange: true,
-    },
-    {
-      path: "changes.profile.preferredChannel",
-      label: "Channel",
-      type: "select",
-      options: opts(CHANNELS),
-      optionalChange: true,
-    },
-    { path: "changes.profile.tone", label: "Tone", type: "text", optionalChange: true },
+    // An empty team means "no change", so taking them out of their team is explicit (D60).
+    { path: "changes.team", label: "Take them out of their team", type: "clear" },
+    ...profileFields("changes.profile.", true),
     { path: "noteAppend", label: "Add to notes", type: "textarea" },
   ],
   update_team: [
@@ -219,6 +243,24 @@ export const FIELD_SPECS: Record<EditableKind, FieldSpec[]> = {
       optionalChange: true,
     },
     { path: "noteAppend", label: "Add to notes", type: "textarea" },
+  ],
+  create_team: [
+    { path: "name", label: "Name", type: "text" },
+    { path: "function", label: "Function", type: "text" },
+    { path: "contactFor", label: "Contact for", type: "textarea" },
+    { path: "channel", label: "Channel", type: "text" },
+    { path: "escalationPath", label: "Escalation path", type: "textarea" },
+    { path: "note", label: "Note", type: "textarea" },
+  ],
+  create_person: [
+    { path: "displayName", label: "Name", type: "text" },
+    { path: "title", label: "Title", type: "text" },
+    { path: "team", label: "Team", type: "select", options: teamOpts },
+    { path: "email", label: "Email", type: "text" },
+    { path: "jiraUsername", label: "Jira user", type: "text", mono: true },
+    { path: "responsibilities", label: "Responsibilities", type: "textarea" },
+    ...profileFields("profile.", false),
+    { path: "note", label: "Note", type: "textarea" },
   ],
   remember: [
     { path: "memoryKind", label: "Kind", type: "select", options: opts(MEMORY_KINDS) },
@@ -320,7 +362,7 @@ export function fromFormValues(original: ProposalPayload, values: Record<string,
     }
     let value: unknown;
     if (spec.type === "list") value = raw ? raw.split(/[\s,]+/).filter(Boolean) : [];
-    else if (raw === "") value = spec.optionalChange ? undefined : null;
+    else if (raw === "") value = spec.optionalChange || spec.omitEmpty ? undefined : null;
     // Not a number: kept as text, so validation names the field.
     else if (spec.type === "number") value = Number.isFinite(Number(raw)) ? Number(raw) : raw;
     else value = raw;
@@ -359,6 +401,8 @@ export function viewPayload(p: ProposalPayload): ProposalPayload {
     case "update_person":
     case "update_team":
       return { ...p, changes: obj(v.changes) } as ProposalPayload;
+    case "create_person":
+      return { ...p, profile: obj(v.profile) } as ProposalPayload;
     default:
       return p;
   }

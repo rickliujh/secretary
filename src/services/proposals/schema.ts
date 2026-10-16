@@ -1,7 +1,8 @@
 /**
  * Canonical proposal payloads (FR-2.2), as stored in `proposals.payload` and
  * edited in the UI. Model output is mapped to these in code; the Executor runs
- * them. `$new:n` refers to an issue created earlier in the same inbox item.
+ * them. `$new:n` refers to an issue created earlier in the same inbox item,
+ * `$person:n` and `$team:n` to a contact or team created there (D60).
  */
 import { z } from "zod";
 import { ProfileSchema, SUBJECT_TYPES } from "@/services/directory/schema";
@@ -12,6 +13,12 @@ export const NEW_REF_RE = /^\$new:\d+$/;
 export const IssueKey = z.string().regex(ISSUE_KEY_RE, "Invalid issue key");
 export const NewRef = z.string().regex(NEW_REF_RE, "Invalid $new reference");
 export const IssueRef = z.union([IssueKey, NewRef]);
+/** A contact or team created earlier in the same inbox item (D60). */
+export const PERSON_REF_RE = /^\$person:\d+$/;
+export const TEAM_REF_RE = /^\$team:\d+$/;
+const ENTITY_REF_RE = /^\$(person|team):\d+$/;
+export const PersonRef = z.string().regex(PERSON_REF_RE, "Invalid $person reference");
+export const TeamRef = z.string().regex(TEAM_REF_RE, "Invalid $team reference");
 export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const IsoDate = z.string().regex(ISO_DATE_RE, "Use YYYY-MM-DD");
 
@@ -172,6 +179,8 @@ export const UpdatePerson = z.object({
       profile: ProfileSchema.optional(),
       /** Last day away, from an out-of-office reply (D47). */
       awayUntil: IsoDate.optional(),
+      /** The team they move to (D60): a team id, a `$team:n` ref, or null to remove them. */
+      team: z.string().min(1).nullable().optional(),
     })
     .default({}),
   noteAppend: z.string().trim().min(1).nullable().default(null),
@@ -189,6 +198,36 @@ export const UpdateTeam = z.object({
     })
     .default({}),
   noteAppend: z.string().trim().min(1).nullable().default(null),
+});
+
+const optionalText = (max: number) => z.string().trim().min(1).max(max).nullable().default(null);
+
+/** A new team (FR-18, D60); `ref` lets other proposals of the item use it before it exists. */
+export const CreateTeam = z.object({
+  kind: z.literal("create_team"),
+  ref: TeamRef,
+  name: z.string().trim().min(1).max(200),
+  function: optionalText(500),
+  contactFor: optionalText(1000),
+  channel: optionalText(200),
+  escalationPath: optionalText(1000),
+  /** Goes to the team's notes. */
+  note: optionalText(20000),
+});
+
+/** A new contact (FR-18, D60); `team` is a team id or a `$team:n` of the same item. */
+export const CreatePerson = z.object({
+  kind: z.literal("create_person"),
+  ref: PersonRef,
+  displayName: z.string().trim().min(1).max(200),
+  title: optionalText(200),
+  email: z.email().nullable().default(null),
+  jiraUsername: optionalText(200),
+  team: z.string().min(1).nullable().default(null),
+  responsibilities: optionalText(2000),
+  profile: ProfileSchema.default({}),
+  /** Goes to the contact's notes. */
+  note: optionalText(20000),
 });
 
 export const Remember = z.object({
@@ -225,6 +264,8 @@ export const ProposalPayloadSchema = z.discriminatedUnion("kind", [
   UpdateDependency,
   UpdatePerson,
   UpdateTeam,
+  CreateTeam,
+  CreatePerson,
   Remember,
   DraftMessage,
   NeedsClarification,
@@ -246,6 +287,8 @@ export const PROPOSAL_LABELS: Record<ProposalKind, string> = {
   update_dependency: "Update wait",
   update_person: "Update contact",
   update_team: "Update team",
+  create_team: "New team",
+  create_person: "New contact",
   remember: "Remember",
   draft_message: "Draft message",
   needs_clarification: "Question",
@@ -311,7 +354,93 @@ export function issueRefs(p: ProposalPayload, opts: IssueRefsOptions = {}): stri
   );
 }
 
-/** Replaces `$new:n` references with created keys. Unknown refs are left as they are. */
+/**
+ * Fields holding a contact or team (D60): ids, or `$person:n` / `$team:n` refs
+ * to creates of the same item. A memory's subject counts only when it is one.
+ */
+export function directoryRefs(p: ProposalPayload): string[] {
+  const values: (string | null | undefined)[] = [];
+  switch (p.kind) {
+    case "create_person":
+      values.push(p.team);
+      break;
+    case "update_person":
+      values.push(p.personId, p.changes.team);
+      break;
+    case "update_team":
+      values.push(p.teamId);
+      break;
+    case "link_dependency":
+      values.push(p.ownerPersonId, p.ownerTeamId);
+      break;
+    case "draft_message":
+      values.push(p.recipientPersonId, p.recipientTeamId);
+      break;
+    case "remember":
+      if (p.subjectType === "person" || p.subjectType === "team") values.push(p.subjectId);
+      break;
+    default:
+      break;
+  }
+  return values.filter((v): v is string => !!v);
+}
+
+/** The ref a create defines (`$new:n`, `$person:n`, `$team:n`), or null. */
+export const ownRef = (p: ProposalPayload): string | null =>
+  p.kind === "create_issue" || p.kind === "create_person" || p.kind === "create_team"
+    ? p.ref
+    : null;
+
+/**
+ * What a thread's executed creates made, by their ref (D22, D60): issue keys by
+ * `$new` ref, contact and team ids by `$person` and `$team` ref, from results.
+ */
+export function createdIds(
+  rows: readonly { status: string; payload: unknown; editedPayload: unknown; result: unknown }[],
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const r of rows) {
+    if (r.status !== "executed") continue;
+    const p = effectivePayload(r);
+    const res = (r.result ?? {}) as { issueKey?: unknown; personId?: unknown; teamId?: unknown };
+    const made =
+      p.kind === "create_issue"
+        ? res.issueKey
+        : p.kind === "create_person"
+          ? res.personId
+          : p.kind === "create_team"
+            ? res.teamId
+            : undefined;
+    const ref = ownRef(p);
+    if (ref && typeof made === "string" && made) map.set(ref, made);
+  }
+  return map;
+}
+
+/** `$person:n` and `$team:n` refs a payload points at (D60), not the one it defines. */
+export const directoryPlaceholders = (p: ProposalPayload): string[] =>
+  directoryRefs(p).filter((v) => ENTITY_REF_RE.test(v));
+
+/**
+ * Every placeholder ref a payload points at (D22, D60): `$new:n` issues and
+ * `$person:n` / `$team:n` contacts and teams; with `includeOwn`, the one it defines.
+ */
+export function placeholderRefs(p: ProposalPayload, opts: { includeOwn?: boolean } = {}): string[] {
+  const own = opts.includeOwn ? ownRef(p) : null;
+  return [
+    ...new Set([
+      ...(own ? [own] : []),
+      ...issueRefs(p, { only: "new" }),
+      ...directoryPlaceholders(p),
+    ]),
+  ];
+}
+
+/**
+ * Replaces placeholder refs with what their creates made: `$new:n` with issue
+ * keys, `$person:n` and `$team:n` with contact and team ids (D60). Unknown refs
+ * are left as they are; a create's own ref is never replaced.
+ */
 export function resolveRefs(
   p: ProposalPayload,
   created: ReadonlyMap<string, string>,
@@ -323,12 +452,31 @@ export function resolveRefs(
     case "update_issue":
     case "add_comment":
     case "transition_issue":
-    case "link_dependency":
       return { ...p, target: r(p.target) ?? p.target };
+    case "link_dependency":
+      return {
+        ...p,
+        target: r(p.target) ?? p.target,
+        ownerPersonId: r(p.ownerPersonId),
+        ownerTeamId: r(p.ownerTeamId),
+      };
     case "link_issues":
       return { ...p, target: r(p.target) ?? p.target, blocker: r(p.blocker) ?? p.blocker };
     case "draft_message":
-      return { ...p, issueKeys: p.issueKeys.map((k) => r(k) ?? k) };
+      return {
+        ...p,
+        issueKeys: p.issueKeys.map((k) => r(k) ?? k),
+        recipientPersonId: r(p.recipientPersonId),
+        recipientTeamId: r(p.recipientTeamId),
+      };
+    case "remember":
+      return { ...p, subjectId: r(p.subjectId) };
+    case "create_person":
+      return { ...p, team: r(p.team) };
+    case "update_person":
+      return typeof p.changes.team === "string"
+        ? { ...p, changes: { ...p.changes, team: r(p.changes.team) } }
+        : p;
     default:
       return p;
   }
@@ -366,9 +514,19 @@ export function describePayload(p: ProposalPayload): string {
     case "update_dependency":
       return describeWaitUpdate(p);
     case "update_person":
-      return p.changes.awayUntil ? `Away until ${p.changes.awayUntil}` : "Update contact profile";
+      return p.changes.awayUntil
+        ? `Away until ${p.changes.awayUntil}`
+        : p.changes.team === null
+          ? "Remove from their team"
+          : p.changes.team
+            ? "Move to another team"
+            : "Update contact profile";
     case "update_team":
       return "Update team";
+    case "create_team":
+      return `Add team ${p.name}`;
+    case "create_person":
+      return `Add contact ${p.displayName}${p.title ? `, ${p.title}` : ""}`;
     case "remember":
       return `Remember ${p.memoryKind}: ${p.content}`;
     case "draft_message":

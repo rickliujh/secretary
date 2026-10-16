@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { Check, ChevronDown, Loader2, Pencil, RotateCcw, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type { Lookups } from "@/app/queries";
@@ -18,6 +19,7 @@ import {
   pointsLabel,
   withoutCodeFields,
 } from "@/services/proposals/schema";
+import { directoryName } from "@/services/proposals/thread-refs";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
 import { isEditable, viewPayload } from "./proposal-fields";
 import { RevokeControl, RevokeOutcome } from "./revoke-control";
@@ -46,6 +48,15 @@ function IssueRef({ value, lookups }: { value: string; lookups: Lookups }) {
   );
 }
 
+const PROFILE_LABELS: Record<string, string> = {
+  formality: "Formality",
+  detail: "Detail",
+  responsiveness: "Responds",
+  preferredChannel: "Channel",
+  tone: "Tone",
+  language: "Language",
+};
+
 function Row({ label, children }: { label: string; children: ReactNode }) {
   if (children === null || children === undefined || children === "") return null;
   return (
@@ -69,8 +80,17 @@ function PayloadView({
   lookups: Lookups;
   sprint?: ReactNode;
 }) {
-  const person = (id: string | null) => (id ? (lookups.person.get(id)?.displayName ?? id) : null);
-  const team = (id: string | null) => (id ? (lookups.team.get(id)?.name ?? id) : null);
+  // By id, or by the ref of a new one in this thread (D60).
+  const person = (id: string | null | undefined) =>
+    directoryName(id, (x) => lookups.person.get(x)?.displayName, lookups.refs);
+  const team = (id: string | null | undefined) =>
+    directoryName(id, (x) => lookups.team.get(x)?.name, lookups.refs);
+  const profileRows = (profile: Record<string, unknown>) =>
+    Object.entries(profile).map(([k, v]) => (
+      <Row key={k} label={PROFILE_LABELS[k] ?? k}>
+        {String(v ?? "")}
+      </Row>
+    ));
   switch (p.kind) {
     case "create_issue":
       return (
@@ -196,9 +216,11 @@ function PayloadView({
     case "update_person":
     case "update_team": {
       const changes = Object.entries(p.changes).flatMap(([k, v]) =>
-        v && typeof v === "object"
-          ? Object.entries(v).map(([k2, v2]) => [k2, String(v2)])
-          : [[k, String(v)]],
+        k === "team"
+          ? [["team", typeof v === "string" ? (team(v) ?? v) : "no team"]]
+          : v && typeof v === "object"
+            ? Object.entries(v).map(([k2, v2]) => [k2, String(v2)])
+            : [[k, String(v)]],
       );
       return (
         <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-sm">
@@ -214,6 +236,36 @@ function PayloadView({
         </dl>
       );
     }
+    case "create_team":
+      return (
+        <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-sm">
+          <Row label="Team">
+            <span className="font-medium">{p.name}</span>
+          </Row>
+          <Row label="Function">{p.function}</Row>
+          <Row label="Contact for">{p.contactFor}</Row>
+          <Row label="Channel">{p.channel}</Row>
+          <Row label="Escalation">{p.escalationPath}</Row>
+          <Row label="Note">{p.note}</Row>
+        </dl>
+      );
+    case "create_person":
+      return (
+        <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-sm">
+          <Row label="Name">
+            <span className="font-medium">{p.displayName}</span>
+          </Row>
+          <Row label="Title">{p.title}</Row>
+          <Row label="Team">{team(p.team)}</Row>
+          <Row label="Email">{p.email}</Row>
+          <Row label="Jira user">
+            {p.jiraUsername && <span className="font-mono text-xs">{p.jiraUsername}</span>}
+          </Row>
+          <Row label="Responsible for">{p.responsibilities}</Row>
+          {profileRows(p.profile)}
+          <Row label="Note">{p.note}</Row>
+        </dl>
+      );
     case "remember":
       return (
         <p className="text-sm">
@@ -221,6 +273,12 @@ function PayloadView({
             {p.memoryKind}
           </Badge>
           {p.content}
+          {(p.subjectType === "person" || p.subjectType === "team") && p.subjectId && (
+            <span className="text-muted-foreground">
+              {" "}
+              (about {p.subjectType === "person" ? person(p.subjectId) : team(p.subjectId)})
+            </span>
+          )}
         </p>
       );
     case "draft_message":
@@ -272,6 +330,9 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
     error?: string;
     issueKey?: string;
     communicationId?: string;
+    /** The contact or team it added (D60). */
+    personId?: string;
+    teamId?: string;
     warning?: string;
     /** Why it was dropped without the user deciding it (a revoked ticket, D54). */
     reason?: string;
@@ -315,6 +376,22 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
               >
                 write it now
               </button>
+            </>
+          )}
+          {(result.personId || result.teamId) && (
+            <>
+              {" "}
+              <Link
+                to="/context"
+                search={
+                  result.personId
+                    ? { tab: "people", id: result.personId }
+                    : { tab: "teams", id: result.teamId }
+                }
+                className="underline"
+              >
+                open in Context
+              </Link>
             </>
           )}
         </p>
@@ -369,8 +446,8 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
 
   if (compact && !expanded) {
     const line = compactLine(viewPayload(payload), {
-      person: (id) => lookups.person.get(id)?.displayName ?? null,
-      team: (id) => lookups.team.get(id)?.name ?? null,
+      person: (id) => directoryName(id, (x) => lookups.person.get(x)?.displayName, lookups.refs),
+      team: (id) => directoryName(id, (x) => lookups.team.get(x)?.name, lookups.refs),
     });
     return (
       <article

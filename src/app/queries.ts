@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { listPeople, listTeams } from "@/services/directory/queries";
 import { pendingCount } from "@/services/inbox/queries";
 import { usageSince } from "@/services/llm/usage";
+import type { ThreadRefs } from "@/services/proposals/thread-refs";
 import { listTicketRows } from "@/services/tickets/queries";
 import { queryKeys } from "./query-client";
 import { run, SESSION_STARTED_AT } from "./runtime";
@@ -72,4 +73,8 @@ export function useLookups() {
     [tickets.data, people.data, teams.data],
   );
 }
-export type Lookups = ReturnType<typeof useLookups>;
+/**
+ * Names and lists for proposal cards; in a thread, also the new contacts and
+ * teams it proposes (D60), so selects offer them before they exist.
+ */
+export type Lookups = ReturnType<typeof useLookups> & { refs?: ThreadRefs };

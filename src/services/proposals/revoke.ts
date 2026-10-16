@@ -9,6 +9,8 @@
  * state Jira is in when they run. Nothing here writes; `Proposals.revoke` runs
  * the steps through `Executor.reverse`.
  */
+
+import { type DirectoryUses, describeUses } from "@/services/directory/uses";
 import type { ReverseOp } from "@/services/executor/reverse";
 import {
   type IssueField,
@@ -22,7 +24,9 @@ import {
 import { isRevokeStatus, revokeStatus } from "@/services/jira/cancel";
 import {
   describePayload,
+  directoryRefs,
   issueRefs,
+  ownRef,
   type PayloadOf,
   type ProposalKind,
   type ProposalPayload,
@@ -93,6 +97,8 @@ const NEEDS_UNDO: readonly ProposalKind[] = [
   "update_dependency",
   "update_person",
   "update_team",
+  "create_person",
+  "create_team",
 ];
 
 type Ids = {
@@ -100,6 +106,9 @@ type Ids = {
   dependencyId?: string;
   memoryId?: string;
   communicationId?: string;
+  personId?: string;
+  teamId?: string;
+  existingId?: string;
 };
 const idsOf = (result: unknown): Ids => (result && typeof result === "object" ? result : {}) as Ids;
 
@@ -115,6 +124,9 @@ export function revokeBlock(p: { kind: string; status: string; result: unknown }
   if (p.status !== "executed") return "Only an approval that ran can be revoked.";
   if (p.kind === "needs_clarification") return "An answered question has nothing to undo.";
   const ids = idsOf(p.result);
+  // A contact or team that existed by approval: nothing was added (D60).
+  if ((p.kind === "create_person" || p.kind === "create_team") && ids.existingId)
+    return "Nothing was added: it existed already, and what uses it keeps it.";
   if ((NEEDS_UNDO as readonly string[]).includes(p.kind) && !undoOf(p.result)) return BEFORE_UNDO;
   if (p.kind === "create_issue" && !ids.issueKey) return BEFORE_UNDO;
   if (p.kind === "link_dependency" && !ids.dependencyId) return BEFORE_UNDO;
@@ -169,7 +181,9 @@ const newestFirst = (a: RevokeSubject, b: RevokeSubject) =>
  * The executed proposals of the same thread that act on the issue a create made
  * (by its `$new` ref or its key), and on what those made in turn, newest first,
  * so each is undone before what it depends on (FR-14.4). Drafts only mention an
- * issue; they stay.
+ * issue; they stay. For a new contact or team (D60), the proposals that use it
+ * (by its `$person` / `$team` ref or its id): waits it owns, drafts to it,
+ * memories about it, contacts added to the team, moves into it.
  */
 export function cascadeOf(
   create: RevokeSubject,
@@ -177,12 +191,21 @@ export function cascadeOf(
 ): RevokeSubject[] {
   const found = new Map<string, RevokeSubject>();
   const visit = (c: RevokeSubject) => {
-    if (c.payload.kind !== "create_issue") return;
-    const names = new Set([c.payload.ref, idsOf(c.result).issueKey].filter((x) => !!x));
+    const ref = ownRef(c.payload);
+    if (!ref) return;
+    const issue = c.payload.kind === "create_issue";
+    const ids = idsOf(c.result);
+    const made = issue
+      ? ids.issueKey
+      : c.payload.kind === "create_person"
+        ? ids.personId
+        : ids.teamId;
+    const names = new Set([ref, made].filter((x) => !!x));
     for (const s of siblings) {
       if (s.id === create.id || found.has(s.id) || s.status !== "executed") continue;
-      if (s.kind === "draft_message" || s.kind === "needs_clarification") continue;
-      if (!issueRefs(s.payload).some((r) => names.has(r))) continue;
+      if (s.kind === "needs_clarification" || (issue && s.kind === "draft_message")) continue;
+      const refs = issue ? issueRefs(s.payload) : directoryRefs(s.payload);
+      if (!refs.some((r) => names.has(r))) continue;
       found.set(s.id, s);
       visit(s);
     }
@@ -240,8 +263,16 @@ export type RevokeFacts =
   | { kind: "link_issues"; exists: boolean }
   | { kind: "link_dependency"; exists: boolean }
   | { kind: "update_dependency"; current: WaitState | null; followupExists: boolean }
-  | { kind: "update_person"; current: Record<string, unknown> | null }
+  | {
+      kind: "update_person";
+      current: Record<string, unknown> | null;
+      /** The team it was in before the approval was deleted since (D60). */
+      teamGone?: boolean;
+    }
   | { kind: "update_team"; current: Record<string, unknown> | null }
+  /** A contact or team an approval added (D60): its row now and what uses it. */
+  | { kind: "create_person"; current: Record<string, unknown> | null; uses: DirectoryUses }
+  | { kind: "create_team"; current: Record<string, unknown> | null; uses: DirectoryUses }
   | { kind: "remember"; exists: boolean }
   | { kind: "draft_message"; status: "draft" | "copied" | "sent" | null };
 
@@ -298,6 +329,10 @@ const COLUMN_LABELS: Record<string, string> = {
   notesMd: "notes",
   contactFor: "contact for",
   escalationPath: "escalation path",
+  teamId: "team",
+  displayName: "name",
+  jiraUsername: "Jira user",
+  confluenceUrls: "Confluence links",
 };
 const columnLabel = (k: string) => COLUMN_LABELS[k] ?? k;
 
@@ -555,6 +590,8 @@ function planColumns(
   u: UndoOf<"update_person"> | UndoOf<"update_team">,
   current: Record<string, unknown> | null,
   name: string,
+  /** A contact's earlier team was deleted since (D60): they go back to no team. */
+  teamGone = false,
 ): Draft {
   const d = empty();
   if (!current) {
@@ -563,7 +600,12 @@ function planColumns(
   }
   const set: Record<string, unknown> = {};
   for (const [k, after] of Object.entries(u.after)) {
-    const before = u.before[k] ?? null;
+    let before = u.before[k] ?? null;
+    if (k === "teamId" && teamGone && before !== null) {
+      before = null;
+      if (same(current[k], after))
+        d.warnings.push(`The team ${name} was in before was deleted, so ${name} has no team.`);
+    }
     if (same(current[k], before)) continue;
     if (!same(current[k], after)) {
       d.warnings.push(`The ${columnLabel(k)} of ${name} was changed since, so it stays as it is.`);
@@ -583,6 +625,44 @@ function planColumns(
           : { kind: "restore_team", teamId: u.teamId, set },
     });
   } else if (!d.warnings.length) d.notes.push(`${name} already has its earlier values.`);
+  return d;
+}
+
+/**
+ * A contact or team an approval added (FR-18.6, D60): deleted when it is still as
+ * it was added and nothing uses it once the steps before it ran; otherwise it
+ * stays and the revoke says why, without changing anything.
+ */
+function planAdded(
+  u: UndoOf<"create_person"> | UndoOf<"create_team">,
+  f: Extract<RevokeFacts, { kind: "create_person" | "create_team" }>,
+): Draft {
+  const d = empty();
+  const person = u.kind === "create_person";
+  const name = String((person ? u.created.displayName : u.created.name) ?? "") || "it";
+  const what = person ? `the contact ${name}` : `the team ${name}`;
+  if (!f.current) {
+    d.notes.push(`${what[0]?.toUpperCase()}${what.slice(1)} is already deleted.`);
+    return d;
+  }
+  const [they, were, stay] = person ? ["they", "were", "stay"] : ["it", "was", "stays"];
+  const edited = Object.keys(u.created).filter((k) => !same(f.current?.[k], u.created[k]));
+  if (edited.length) {
+    d.impossible = `${name} was edited since ${they} ${were} added (${listed(edited.map(columnLabel))}), so ${they} ${stay}. Change it back, or delete ${person ? "them" : "it"} on the Context page.`;
+    return d;
+  }
+  const uses = describeUses(f.uses);
+  if (uses.length) {
+    d.impossible = `${name} is still used by ${listed(uses)}, so ${they} ${stay}.`;
+    return d;
+  }
+  d.steps.push({
+    text: `Delete ${what}`,
+    done: `Deleted ${what}`,
+    op: person
+      ? { kind: "delete_person", personId: u.id, created: u.created }
+      : { kind: "delete_team", teamId: u.id, created: u.created },
+  });
   return d;
 }
 
@@ -681,7 +761,12 @@ export function planEntry(
       case "update_person": {
         const u = kindOf("update_person");
         return u
-          ? planColumns(u, facts.current, names.subject?.(u.personId) ?? "the contact")
+          ? planColumns(
+              u,
+              facts.current,
+              names.subject?.(u.personId) ?? "the contact",
+              facts.kind === "update_person" && facts.teamGone === true,
+            )
           : mismatch();
       }
       case "update_team": {
@@ -689,6 +774,14 @@ export function planEntry(
         return u
           ? planColumns(u, facts.current, names.subject?.(u.teamId) ?? "the team")
           : mismatch();
+      }
+      case "create_person": {
+        const u = kindOf("create_person");
+        return u && facts.kind === "create_person" ? planAdded(u, facts) : mismatch();
+      }
+      case "create_team": {
+        const u = kindOf("create_team");
+        return u && facts.kind === "create_team" ? planAdded(u, facts) : mismatch();
       }
       case "remember": {
         const d = empty();
@@ -738,6 +831,10 @@ type Sim = {
   followupsGone: Set<string>;
   /** A contact's or team's columns put back, by id. */
   columns: Map<string, Record<string, unknown>>;
+  /** Memories, drafts, contacts and teams the planned steps delete (D60). */
+  memoriesGone: Set<string>;
+  draftsGone: Set<string>;
+  directoryGone: Set<string>;
 };
 
 const newSim = (): Sim => ({
@@ -745,6 +842,9 @@ const newSim = (): Sim => ({
   waits: new Map(),
   followupsGone: new Set(),
   columns: new Map(),
+  memoriesGone: new Set(),
+  draftsGone: new Set(),
+  directoryGone: new Set(),
 });
 
 const issueSim = (sim: Sim, key: string): IssueSim => {
@@ -783,6 +883,18 @@ function applySteps(sim: Sim, steps: readonly RevokeStep[]) {
         sim.columns.set(id, { ...sim.columns.get(id), ...op.set });
         break;
       }
+      case "delete_memory":
+        sim.memoriesGone.add(op.memoryId);
+        break;
+      case "delete_draft":
+        sim.draftsGone.add(op.communicationId);
+        break;
+      case "delete_person":
+        sim.directoryGone.add(op.personId);
+        break;
+      case "delete_team":
+        sim.directoryGone.add(op.teamId);
+        break;
       case "jira": {
         const a = op.action;
         if (a.kind === "delete_issue") issueSim(sim, a.issueKey).deleted = true;
@@ -880,6 +992,29 @@ function simulated(s: RevokeSubject, f: RevokeFacts, sim: Sim): RevokeFacts {
             : "";
       const put = sim.columns.get(id);
       return put && f.current ? { ...f, current: { ...f.current, ...put } } : f;
+    }
+    case "create_person":
+    case "create_team": {
+      if (undo?.kind !== "create_person" && undo?.kind !== "create_team") return f;
+      const id = undo.id;
+      const put = sim.columns.get(id);
+      // What the steps before it leave using it: their waits, drafts and memories
+      // deleted, contacts deleted or moved out of the team.
+      const stillMember = (m: string) => {
+        const moved = sim.columns.get(m);
+        return !sim.directoryGone.has(m) && !(moved && "teamId" in moved && moved.teamId !== id);
+      };
+      return {
+        ...f,
+        current: f.current && !sim.directoryGone.has(id) ? { ...f.current, ...put } : null,
+        uses: {
+          ...f.uses,
+          waits: f.uses.waits.filter((w) => sim.waits.get(w) !== null),
+          drafts: f.uses.drafts.filter((x) => !sim.draftsGone.has(x)),
+          memories: f.uses.memories.filter((x) => !sim.memoriesGone.has(x)),
+          members: f.uses.members.filter(stillMember),
+        },
+      };
     }
     default:
       return f;
