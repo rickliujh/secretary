@@ -2,7 +2,8 @@
  * Undo data (D54 (1)): what the Executor records in a proposal's result, read
  * just before it writes, so the approval can be revoked later. Kinds whose
  * result already holds the ids they made (create_issue, link_dependency,
- * remember, draft_message) record nothing here.
+ * remember, draft_message) record nothing here; a new contact or team records
+ * what was written (D60).
  */
 import { z } from "zod";
 import { parseSprints } from "@/services/jira/mapping";
@@ -99,6 +100,12 @@ export const UndoSchema = z.discriminatedUnion("kind", [
     after: Values,
   }),
   z.object({ kind: z.literal("update_team"), teamId: z.string(), before: Values, after: Values }),
+  /**
+   * A contact or team an approval added (D60): its id and the values written, so a
+   * revoke deletes it only while it is as it was added.
+   */
+  z.object({ kind: z.literal("create_person"), id: z.string(), created: Values }),
+  z.object({ kind: z.literal("create_team"), id: z.string(), created: Values }),
 ]);
 export type Undo = z.infer<typeof UndoSchema>;
 export type UndoOf<K extends Undo["kind"]> = Extract<Undo, { kind: K }>;

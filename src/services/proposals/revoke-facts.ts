@@ -7,6 +7,8 @@ import { eq, inArray } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { communications, dependencies, followups, memories, people, teams } from "@/db/schema";
 import { query } from "@/services/db";
+import { personUses, teamUses } from "@/services/directory/queries";
+import { noUses } from "@/services/directory/uses";
 import {
   issueFieldIds,
   issueFieldValues,
@@ -239,7 +241,18 @@ export const revokeFacts = (s: RevokeSubject) =>
         const row = yield* query((d) =>
           d.select().from(people).where(eq(people.id, undo.personId)).get(),
         );
-        return { kind: "update_person", current: row ?? null } satisfies RevokeFacts;
+        // A team move's earlier team may have been deleted since (D60).
+        const earlier = undo.before.teamId;
+        const teamGone =
+          typeof earlier === "string" &&
+          !(yield* query((d) =>
+            d.select({ id: teams.id }).from(teams).where(eq(teams.id, earlier)).get(),
+          ));
+        return {
+          kind: "update_person",
+          current: row ?? null,
+          ...(teamGone ? { teamGone } : {}),
+        } satisfies RevokeFacts;
       }
       case "update_team": {
         if (undo?.kind !== "update_team") return null;
@@ -247,6 +260,26 @@ export const revokeFacts = (s: RevokeSubject) =>
           d.select().from(teams).where(eq(teams.id, undo.teamId)).get(),
         );
         return { kind: "update_team", current: row ?? null } satisfies RevokeFacts;
+      }
+      case "create_person": {
+        if (undo?.kind !== "create_person") return null;
+        const row = yield* query((d) =>
+          d.select().from(people).where(eq(people.id, undo.id)).get(),
+        );
+        return {
+          kind: "create_person",
+          current: row ?? null,
+          uses: row ? yield* personUses(undo.id) : noUses(),
+        } satisfies RevokeFacts;
+      }
+      case "create_team": {
+        if (undo?.kind !== "create_team") return null;
+        const row = yield* query((d) => d.select().from(teams).where(eq(teams.id, undo.id)).get());
+        return {
+          kind: "create_team",
+          current: row ?? null,
+          uses: row ? yield* teamUses(undo.id) : noUses(),
+        } satisfies RevokeFacts;
       }
       case "remember": {
         const id = ids(s.result).memoryId ?? "";

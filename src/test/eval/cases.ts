@@ -524,6 +524,79 @@ export const EVAL_CASES: EvalCase[] = [
     },
     single: false,
   },
+  // New contacts and teams (FR-18, D60). The seeded directory has the teams Payments,
+  // Platform and Network and the contacts Ana Bell and Tom Kay.
+  {
+    name: "contacts: an explicit add",
+    source: "typed",
+    text: "Add Priya Shah as a contact: she is the release manager for the mobile apps, priya.shah@example.com.",
+    expect: {
+      required: [
+        {
+          kind: "create_person",
+          target: "Priya Shah",
+          fields: { email: "priya.shah@example.com" },
+        },
+      ],
+      forbiddenKinds: ["create_issue", "update_person", "needs_clarification"],
+    },
+    single: true,
+  },
+  {
+    name: "contacts: a new team and a contact in it",
+    source: "typed",
+    text: "add Sarah Lee, staff engineer on the Identity team, as a contact",
+    expect: {
+      required: [
+        { kind: "create_team" },
+        { kind: "create_person", target: "Sarah Lee", fields: { team: "$team:1" } },
+      ],
+      forbiddenKinds: ["create_issue", "needs_clarification"],
+    },
+    single: true,
+  },
+  {
+    name: "contacts: a wait on someone not in Context adds them",
+    source: "teams",
+    sender: "ana",
+    text: "PAY-2 is waiting on Omar Haddad from Treasury: he has to approve the new ledger accounts, he said by Thursday.",
+    expect: {
+      required: [
+        { kind: "create_person", target: "Omar Haddad" },
+        { kind: "link_dependency", target: "PAY-2", fields: { ownerPersonId: "$person:1" } },
+      ],
+      forbiddenKinds: ["create_issue"],
+    },
+    single: true,
+  },
+  {
+    name: "contacts: an existing contact is not added again",
+    source: "teams",
+    sender: "tom",
+    text: "For OPS-7: Ana Bell will send the signed certificate for the ledger host by Friday, we can't open the firewall before that.",
+    expect: {
+      required: [
+        {
+          kind: "link_dependency",
+          target: "OPS-7",
+          fields: { ownerPersonId: contactTarget("ana") },
+        },
+      ],
+      forbiddenKinds: ["create_person", "create_team", "create_issue"],
+    },
+    single: true,
+  },
+  {
+    name: "contacts: pasted text naming bystanders adds nobody",
+    source: "email",
+    sender: "ana",
+    text: "Hi Rick,\n\nI met Marco Rossi and Lena Fischer from the vendor yesterday; they confirmed the refund export format. Can you add a note on PAY-4 that the format is confirmed?\n\nThanks,\nAna",
+    expect: {
+      required: [{ kind: "add_comment", target: "PAY-4" }],
+      forbiddenKinds: ["create_person", "create_team", "create_issue"],
+    },
+    single: true,
+  },
   {
     // The model may not estimate PAY-4, so it asks; the user's bare answer is the
     // number (D55 answers, 2026-10-15). No comment talks to the user on the ticket.

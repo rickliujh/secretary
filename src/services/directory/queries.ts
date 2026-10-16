@@ -4,7 +4,17 @@
  */
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { contextNotes, jiraIssues, people, teams } from "@/db/schema";
+import {
+  communications,
+  contextNotes,
+  dependencies,
+  inboxItems,
+  issueMeta,
+  jiraIssues,
+  memories,
+  people,
+  teams,
+} from "@/db/schema";
 import { newId } from "@/lib/ids";
 import { query } from "@/services/db";
 import {
@@ -15,6 +25,7 @@ import {
   type TeamInput,
   TeamInputSchema,
 } from "./schema";
+import { type DirectoryUses, noUses } from "./uses";
 
 export const listTeams = query((db) => db.select().from(teams).orderBy(asc(teams.name)).all());
 export const listPeople = query((db) =>
@@ -116,6 +127,108 @@ export const deletePerson = (id: string) =>
         .where(and(eq(contextNotes.subjectType, "person"), eq(contextNotes.subjectId, id))),
     );
     yield* query((db) => db.delete(people).where(eq(people.id, id)));
+  });
+
+/** What uses a contact now (D60): a revoke deletes an added one only when nothing does. */
+export const personUses = (id: string) =>
+  Effect.gen(function* () {
+    const ids = <T extends { id: string }>(rows: T[]) => rows.map((r) => r.id);
+    const waits = yield* query((d) =>
+      d
+        .select({ id: dependencies.id })
+        .from(dependencies)
+        .where(eq(dependencies.ownerPersonId, id))
+        .all(),
+    );
+    const drafts = yield* query((d) =>
+      d
+        .select({ id: communications.id })
+        .from(communications)
+        .where(eq(communications.recipientPersonId, id))
+        .all(),
+    );
+    const mems = yield* query((d) =>
+      d
+        .select({ id: memories.id })
+        .from(memories)
+        .where(and(eq(memories.subjectType, "person"), eq(memories.subjectId, id)))
+        .all(),
+    );
+    const notes = yield* query((d) =>
+      d
+        .select({ id: contextNotes.id })
+        .from(contextNotes)
+        .where(and(eq(contextNotes.subjectType, "person"), eq(contextNotes.subjectId, id)))
+        .all(),
+    );
+    const sent = yield* query((d) =>
+      d
+        .select({ id: inboxItems.id })
+        .from(inboxItems)
+        .where(eq(inboxItems.senderPersonId, id))
+        .all(),
+    );
+    const asks = yield* query((d) =>
+      d
+        .select({ id: issueMeta.issueKey })
+        .from(issueMeta)
+        .where(eq(issueMeta.requesterPersonId, id))
+        .all(),
+    );
+    return {
+      ...noUses(),
+      waits: ids(waits),
+      drafts: ids(drafts),
+      memories: ids(mems),
+      notes: notes.length,
+      sent: sent.length,
+      asks: asks.length,
+    } satisfies DirectoryUses;
+  });
+
+/** What uses a team now (D60), its contacts included. */
+export const teamUses = (id: string) =>
+  Effect.gen(function* () {
+    const ids = <T extends { id: string }>(rows: T[]) => rows.map((r) => r.id);
+    const waits = yield* query((d) =>
+      d
+        .select({ id: dependencies.id })
+        .from(dependencies)
+        .where(eq(dependencies.ownerTeamId, id))
+        .all(),
+    );
+    const drafts = yield* query((d) =>
+      d
+        .select({ id: communications.id })
+        .from(communications)
+        .where(eq(communications.recipientTeamId, id))
+        .all(),
+    );
+    const mems = yield* query((d) =>
+      d
+        .select({ id: memories.id })
+        .from(memories)
+        .where(and(eq(memories.subjectType, "team"), eq(memories.subjectId, id)))
+        .all(),
+    );
+    const members = yield* query((d) =>
+      d.select({ id: people.id }).from(people).where(eq(people.teamId, id)).all(),
+    );
+    const notes = yield* query((d) =>
+      d
+        .select({ id: contextNotes.id })
+        .from(contextNotes)
+        .where(and(eq(contextNotes.subjectType, "team"), eq(contextNotes.subjectId, id)))
+        .all(),
+    );
+    return {
+      ...noUses(),
+      waits: ids(waits),
+      drafts: ids(drafts),
+      memories: ids(mems),
+      members: ids(members),
+      notes: notes.length,
+    } satisfies DirectoryUses;
   });
 
 /** Lower-cased Jira user id (username or account ID) -> contact, for linking assignees and reporters. */

@@ -3,7 +3,7 @@
  * input and which is instruction, and which items a revision must include.
  */
 import { z } from "zod";
-import { issueRefs, type ProposalPayload } from "@/services/proposals/schema";
+import { type ProposalPayload, placeholderRefs } from "@/services/proposals/schema";
 import { SOURCES } from ".";
 
 const MessagePartSchema = z.object({
@@ -160,9 +160,9 @@ export function partsOf(input: string, instruction: string | null, inputIsTyped:
 }
 
 /**
- * Items to revise: the chosen ones plus every item linked to them through a `$new`
- * ref in their pending proposals, since refs are renumbered when proposals are
- * replaced.
+ * Items to revise: the chosen ones plus every item linked to them through a `$new`,
+ * `$person` or `$team` ref in their pending proposals, since refs are renumbered
+ * when proposals are replaced.
  */
 export function withLinkedItems(
   chosen: Iterable<number>,
@@ -170,10 +170,7 @@ export function withLinkedItems(
 ): number[] {
   const refs = new Map<number, Set<string>>();
   for (const [item, payloads] of pendingByItem)
-    refs.set(
-      item,
-      new Set(payloads.flatMap((p) => issueRefs(p, { only: "new", includeOwn: true }))),
-    );
+    refs.set(item, new Set(payloads.flatMap((p) => placeholderRefs(p, { includeOwn: true }))));
   const out = new Set(chosen);
   let grew = true;
   while (grew) {

@@ -5,8 +5,10 @@
  * runs is one the row shows; anything else stays a card below it.
  */
 import {
+  directoryPlaceholders,
   effectivePayload,
   issueRefs,
+  ownRef,
   type ProposalKind,
   type ProposalPayload,
 } from "@/services/proposals/schema";
@@ -37,13 +39,16 @@ export type ThreadEntry<P> =
 
 const shown = (p: BundleProposal) => p.status !== "superseded";
 
-/** The `$new` refs of creates that already ran, so members may point at them too. */
+/**
+ * The refs of creates that already ran (`$new`, and `$person` / `$team` for new
+ * contacts and teams, D60), so members may point at them too.
+ */
 export function executedRefs(list: readonly BundleProposal[]): Set<string> {
   const refs = new Set<string>();
   for (const p of list) {
-    if (p.status !== "executed" || p.kind !== "create_issue") continue;
-    const payload = effectivePayload(p);
-    if (payload.kind === "create_issue") refs.add(payload.ref);
+    if (p.status !== "executed") continue;
+    const ref = ownRef(effectivePayload(p));
+    if (ref) refs.add(ref);
   }
   return refs;
 }
@@ -73,7 +78,11 @@ export function groupSmallAsks<P extends BundleProposal>(
       const payload = payloads.get(p.id);
       if (!payload || payload.kind !== p.kind) return false;
       const refs = issueRefs(payload, { only: "new" });
-      return refs.includes(c.ref) && refs.every((r) => r === c.ref || created.has(r));
+      // A wait on a new contact or team not added yet stays a card (D60).
+      return (
+        refs.includes(c.ref) &&
+        [...refs, ...directoryPlaceholders(payload)].every((r) => r === c.ref || created.has(r))
+      );
     });
     for (const m of members) taken.add(m.id);
     bundles.set(create.id, members);

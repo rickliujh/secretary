@@ -171,7 +171,8 @@ scope; "Should" is v1 if time permits; "Could" is later.
   responsibilities, personality and communication profile (tone, formality, detail
   level, responsiveness, preferred channel, language), free notes.
 - FR-4.3 (Must) The user can add or edit all of this directly. The secretary can also
-  propose profile updates from intake text (approved like any proposal).
+  propose profile updates from intake text (approved like any proposal), and new
+  contacts and teams (FR-18).
 - FR-4.4 (Must) Confluence: configure the base URL and credentials (a PAT on Data
   Center; account email and API token on Cloud, where the Jira token is reused for the
   same site); search pages with CQL or free text; open a page in the browser;
@@ -433,6 +434,35 @@ unchanged.
   adds a label and picks the active sprint of the FR-16 AC shows "fits" before
   saving and afterwards shows the ticket in that sprint with 2 points and the
   label; picking Backlog moves it out again.
+
+### FR-18 New contacts and teams from intake and chat (D60)
+
+- FR-18.1 (Must) Intake, and the chat through it, can propose adding a contact
+  (name, title, email, Jira user, team, responsibilities, communication profile,
+  a note) and a team (name, function, what to contact them for, channel,
+  escalation path, a note). They are proposals like any other: shown on a card,
+  editable, approved before anything is saved.
+- FR-18.2 (Must) A new contact or team is proposed when the user asks for it
+  ("add Sarah Lee from Payments as a contact", "create a team Platform"), or when
+  another proposal in the same thread needs someone who is not in Context (the
+  owner of a wait, the recipient of a draft) and the input names them. Pasted text
+  alone never adds people the user did not ask about otherwise.
+- FR-18.3 (Must) Other proposals of the same thread can use the new contact or
+  team before it exists: a wait owned by it, a draft to it, a new contact in the
+  new team, a memory about it. Approving them in order creates it first.
+- FR-18.4 (Must) No duplicates: a proposed contact whose name, email or Jira user
+  matches an existing one, or a team whose name matches, is refused in code and
+  the existing one is used (or updated) instead.
+- FR-18.5 (Must) Intake can also move an existing contact to a team, new or
+  existing ("Sarah moved to Platform").
+- FR-18.6 (Must) Revoking an added contact or team deletes it, after revoking the
+  thread's approved proposals that use it; when it was edited since, or something
+  outside the thread points at it, the revoke says so and leaves it.
+- AC: in the chat, "add Sarah Lee, staff engineer on the Payments team, as a
+  contact" with no Payments team in Context proposes a new team and a new contact
+  in it; approving both shows them on the Context page with Sarah in Payments.
+  "Sarah will send the cert by Friday" pasted after that proposes a wait owned by
+  the existing Sarah, not a new contact.
 
 ## 5. Non-functional requirements
 

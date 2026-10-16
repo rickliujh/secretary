@@ -396,15 +396,26 @@ const runCase = (c: EvalCase, label: string) =>
           },
         }
       : c;
-    // A contact target (`contact:tom`) is the contact's id in this run.
+    // A contact target or field value (`contact:tom`) is the contact's id in this run.
+    const contactId = <T>(v: T): T | string => {
+      const who = typeof v === "string" && v.startsWith("contact:") ? v.slice(8) : null;
+      return who === "ana" || who === "tom" ? senders[who] : v;
+    };
     const scored: EvalCase = {
       ...withRequester,
       expect: {
         ...withRequester.expect,
-        required: withRequester.expect.required.map((r) => {
-          const who = r.target?.startsWith("contact:") ? r.target.slice(8) : null;
-          return who === "ana" || who === "tom" ? { ...r, target: senders[who] } : r;
-        }),
+        required: withRequester.expect.required.map((r) => ({
+          ...r,
+          ...(r.target ? { target: contactId(r.target) } : {}),
+          ...(r.fields
+            ? {
+                fields: Object.fromEntries(
+                  Object.entries(r.fields).map(([k, v]) => [k, contactId(v)]),
+                ),
+              }
+            : {}),
+        })),
       },
     };
     // An open wait the text may answer (D46).

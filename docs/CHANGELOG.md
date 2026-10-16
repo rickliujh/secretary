@@ -1730,3 +1730,95 @@ Known limits
   then their team can be replaced or cleared but not re-picked.
 - Unverified: Data Center is sent the team's id as a number; not yet tried
   against a real instance.
+
+## Phase 22: New contacts and teams from intake and chat (2026-10-16)
+
+Built
+- Payloads (D60): `create_team` (`$team:n` ref, name, function, contact for,
+  channel, escalation path, note) and `create_person` (`$person:n` ref, name,
+  title, email, Jira user, team as an id or a `$team:n`, responsibilities, the
+  communication profile, note). `update_person.changes.team` moves a contact to a
+  team, a new one, or out of theirs (null). Refs work where a contact or team
+  goes: a wait's owner, a draft's recipient, a memory's subject, a new
+  contact's team, a move. `placeholderRefs`, `directoryRefs`, `ownRef` and
+  `createdIds` are the shared helpers; `resolveRefs` resolves the new refs too.
+- Classify, prompt version 14: the two kinds, `personRef` / `teamRef`, the
+  contact and team fields, `team` with `no_team`, and `subjectId` for remember;
+  every contact and team enum also offers `$person:1..3` / `$team:1..3`. The rule:
+  only when the user's own words ask for it, or another proposal here needs
+  someone the lists do not have and the input names them; never everyone a
+  paste mentions; never one the lists already have. Code checks each ref is
+  created in the answer, once; an email that looks like one; a Jira user from
+  the list; no contact matching by name (case and spaces ignored), email or Jira
+  user, no team matching by name, none twice, each failure naming the existing
+  id for the repair; and, for pasted input without the user's words, that
+  another proposal needs the new one. Older snapshots replay as they ran.
+- Intake: the merge renumbers `$person` and `$team` refs as it does `$new`,
+  keeps one create per name across items and orders teams, then contacts, then
+  issues before the rest; revisions rename them for the model, show what the
+  thread's approved creates made in their place, and revise items linked by
+  them together.
+- Executor: adds the contact or team through the Directory queries the Context
+  page uses (`createPerson`, `createTeam`), uses one that exists by then
+  instead (see the review fixes), keeps its id on the result and
+  `{kind, id, created}` as undo; a proposal whose new contact or team is not
+  added yet fails until it is; a move checks the team exists.
+- Revoke: first what the thread did with the contact or team (waits, drafts,
+  memories, contacts in a new team, moves into it), newest first, then the
+  delete when it is unchanged and nothing else uses it; otherwise the revoke
+  says why and changes nothing. The delete checks again when it runs. Pending
+  proposals that need it are dropped with that reason.
+- UI: cards for both kinds, new contacts and teams named "(new)" wherever a
+  proposal uses their ref, a contact's team move, a memory's subject; executed
+  cards link to the entry in Context; the edit dialog has their fields, and its
+  contact and team selects offer the thread's new ones. The chat's
+  `propose_actions` and its prompt list adding contacts and teams.
+- Corrections: the new kinds are recorded like the others when edited or
+  rejected. Eval: five cases (an explicit add, a new team and a contact in it, a
+  wait on a named person not in Context, an existing contact not added again, a
+  paste naming bystanders adding nobody); the scorer matches a new contact or
+  team by name, and a case's field may name a seeded contact.
+- Tests: schema and refs, the merge, linked items, the Track row, duplicates,
+  validation (refs, email, Jira user, duplicates, bystanders, moves, memory
+  subjects, replay of version 13), the edit form, and service tests without
+  Jira writes for the FR-18 AC: a scripted chat request adds Payments and Sarah
+  in it, approved into Context; a later paste about Sarah is repaired to use her;
+  refs wait for and resolve to the creates; a duplicate refused at approval; a
+  move into a new team revoked back; revoking a contact after its wait and draft;
+  revokes refused for an edit or a use outside the thread; corrections.
+- Live eval (GLM 5.3 Flash, DeepInfra then StreamLake): the first run put a new
+  contact's ref in a wait's target once, and a new team's ref in the contact's
+  `teamRef` instead of `team` once. The prompt now says where the refs go, a
+  `$new` target that is not created names the owner and recipient fields when the
+  answer adds contacts, and a contact's misplaced `teamRef` is a validation
+  error for the repair. Final run, four at a time: 34 of 37, the five new cases
+  all passing and 29 of the 32 earlier ones; the three misses (a Q4 sprint due
+  date, a points suggestion, a question after a points answer) are not about
+  contacts and passed in the other runs. The base commit, run the same day,
+  passed 26 of 32 (five provider timeouts). In one small-ask case the model also
+  added a team "Finance" the input named as the wait's owner, which the rule
+  allows.
+- Review fixes: a contact or team that exists by approval is used instead
+  ("Sarah Lee was already a contact; using them instead"), and what needs it gets
+  its id; classify lists the new contacts and teams the thread's other items
+  propose, by ref, and refuses making them again; a memory about a new contact
+  no longer makes it needed; duplicate check and insert run under one lock, so
+  two approvals at once add one contact; revoking a move whose earlier team was
+  deleted leaves the contact in no team with a warning; from pasted input a new
+  contact needs another proposal or the user's own typed words naming them (the
+  chat's request counts as typed); rejecting a create drops what needs it;
+  selects leave out executed creates, cards name refs by what they made, and
+  the "approve first" message names the contact. Tests cover each.
+  The classify prompt is unchanged unless the thread has such proposed contacts,
+  which no eval case has. Two live runs after the fixes, four at a time: 29 of
+  37 (the five new cases passing; three provider timeouts and five misses outside
+  contacts) and 35 of 37 (four of five new cases, the explicit add also asking a
+  question; 31 of 32 earlier ones).
+
+Known limits
+- Duplicates are matched by the whole name: "Sarah" does not match "Sarah Lee".
+  Classify sees the contacts its snapshot lists; the Executor checks them all.
+- When a contact or team must stay, the whole revoke waits: nothing the thread
+  did with it is undone either.
+- A memory's subject cannot be changed in the edit dialog; a new contact's Jira
+  user typed there is not checked against Jira.
