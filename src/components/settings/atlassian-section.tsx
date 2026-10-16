@@ -35,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { onSelect } from "@/lib/select-change";
 import { type Deployment, resolveDeployment, TOKEN_HELP } from "@/services/atlassian/deployment";
 import { ConfluenceClient, type ConfluenceError } from "@/services/confluence";
 import { JiraClient, type JiraError } from "@/services/jira";
@@ -200,7 +201,7 @@ export function AtlassianSection({ product }: { product: Product }) {
                 render={({ field }) => (
                   <Field>
                     <FieldLabel htmlFor={`${product}-deployment`}>Type</FieldLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
+                    <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                       <SelectTrigger id={`${product}-deployment`} className="w-full">
                         <SelectValue />
                       </SelectTrigger>

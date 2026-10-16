@@ -1611,3 +1611,12 @@ Known limits
 - A revision keeps the switch by the create's `$new` ref, so one that
   renumbers it loses the choice; revoking a create that was closed (not
   deleted) leaves it in the sprint.
+
+## Settings selects keep their value (2026-10-15)
+
+- The fiscal year month (and the other selects in forms: a sprint's last day,
+  models, proxy, contacts, memories, drafts, follow-ups, ticket actions) no
+  longer come back empty when a form opens with its values already loaded.
+  Radix Select's hidden native select reported "" before its options had
+  registered, and the form took it; `lib/select-change.ts` ignores that value,
+  which no item can have.

@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { onSelect } from "@/lib/select-change";
 import { JiraClient } from "@/services/jira";
 import { epicsInProject, type TicketDetail } from "@/services/tickets/queries";
 import { useExecute } from "./use-execute";
@@ -269,7 +270,7 @@ export function EditDialog({
                 render={({ field }) => (
                   <Field>
                     <FieldLabel htmlFor="edit-priority">Priority</FieldLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
+                    <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                       <SelectTrigger id="edit-priority" className="w-full">
                         <SelectValue placeholder="None" />
                       </SelectTrigger>

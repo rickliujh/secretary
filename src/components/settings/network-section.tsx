@@ -28,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { onSelect } from "@/lib/select-change";
 import { Secrets, secretNames } from "@/services/secrets";
 
 const Form = z
@@ -111,7 +112,7 @@ export function NetworkSection() {
               render={({ field }) => (
                 <Field>
                   <FieldLabel htmlFor="proxy-mode">Proxy</FieldLabel>
-                  <Select value={field.value} onValueChange={field.onChange}>
+                  <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                     <SelectTrigger id="proxy-mode" className="w-72">
                       <SelectValue />
                     </SelectTrigger>

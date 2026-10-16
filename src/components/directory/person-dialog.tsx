@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { onSelect } from "@/lib/select-change";
 import { createPerson, type Person, updatePerson } from "@/services/directory/queries";
 import {
   CHANNELS,
@@ -123,7 +124,7 @@ function EnumSelect({
       render={({ field }) => (
         <Field>
           <FieldLabel htmlFor={`person-${name}`}>{label}</FieldLabel>
-          <Select value={field.value} onValueChange={field.onChange}>
+          <Select value={field.value} onValueChange={onSelect(field.onChange)}>
             <SelectTrigger id={`person-${name}`} className="w-full">
               <SelectValue />
             </SelectTrigger>

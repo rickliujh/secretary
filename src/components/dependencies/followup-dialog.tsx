@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { onSelect } from "@/lib/select-change";
 import { addBusinessDays } from "@/services/dependencies/logic";
 import { logFollowup } from "@/services/dependencies/queries";
 import { FOLLOWUP_CHANNELS } from "@/services/dependencies/schema";
@@ -92,7 +93,7 @@ export function FollowupDialog({
               render={({ field }) => (
                 <Field>
                   <FieldLabel htmlFor="fu-channel">How</FieldLabel>
-                  <Select value={field.value} onValueChange={field.onChange}>
+                  <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                     <SelectTrigger id="fu-channel" className="w-full">
                       <SelectValue />
                     </SelectTrigger>

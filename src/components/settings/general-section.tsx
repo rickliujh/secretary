@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { onSelect } from "@/lib/select-change";
 import { LAST_DAY_MODES } from "@/services/settings/schema";
 import { jiraEndTime } from "@/services/sprints/fit";
 import { DaysPerPoint, decimal } from "./days-per-point";
@@ -118,7 +119,7 @@ export function GeneralSection() {
             render={({ field }) => (
               <Field className="mt-4">
                 <FieldLabel htmlFor="fiscalYearStartMonth">Fiscal year starts in</FieldLabel>
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                   <SelectTrigger id="fiscalYearStartMonth" className="w-44">
                     <SelectValue />
                   </SelectTrigger>
@@ -163,7 +164,7 @@ export function GeneralSection() {
             render={({ field }) => (
               <Field className="mt-4">
                 <FieldLabel htmlFor="lastDay">A sprint's last day</FieldLabel>
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select value={field.value} onValueChange={onSelect(field.onChange)}>
                   <SelectTrigger id="lastDay" className="w-80 max-w-full">
                     <SelectValue />
                   </SelectTrigger>
