@@ -43,11 +43,16 @@ export const syncedTeams = Effect.map(
   latestTeams,
 );
 
+/** A name sync made up from a bare id ("Team 12"), not the team's own. */
+export const isPlaceholder = (t: TeamOption) => t.name === `Team ${t.id}`;
+
 /**
  * What the combobox lists besides None: the synced teams whose name holds the
  * typed text (all of them with no text), then, from two characters on, the
- * search results that are not synced teams. `search` is null while no search
- * has answered. The note says when only synced teams can be offered.
+ * search results that are not synced teams. A search result's name replaces a
+ * synced team's "Team <id>" placeholder, so the team stays in the synced group
+ * and matches by its real name. `search` is null while no search has
+ * answered. The note says when only synced teams can be offered.
  */
 export function teamOptions(input: {
   synced: readonly TeamOption[];
@@ -56,7 +61,13 @@ export function teamOptions(input: {
   searchFailed: boolean;
 }): { synced: TeamOption[]; found: TeamOption[]; note: string | null } {
   const text = input.text.trim().toLowerCase();
-  const synced = input.synced.filter((t) => !text || t.name.toLowerCase().includes(text));
+  // Data Center syncs only ids ("Team 12"): a search result names the team.
+  const named = new Map((input.search ?? []).map((t) => [t.id, t.name]));
+  const synced = input.synced
+    .map((t) =>
+      isPlaceholder(t) && named.has(t.id) ? { ...t, name: named.get(t.id) ?? t.name } : t,
+    )
+    .filter((t) => !text || t.name.toLowerCase().includes(text));
   if (text.length < TEAM_SEARCH_MIN) return { synced, found: [], note: null };
   const known = new Set(input.synced.map((t) => t.id));
   const found = (input.search ?? []).filter((t) => !known.has(t.id));

@@ -134,6 +134,8 @@ describe("editing an existing ticket against the mock Jira (FR-17 AC)", () => {
           yield* (yield* Sync).run();
           const before = yield* openDialog(key);
           const join = yield* ticketJoinSprint(before.issue.projectKey, today);
+          // The user's sprint is on PAY's board: an OPS ticket would not show there.
+          const joinOps = yield* ticketJoinSprint("OPS", today);
           // Before saving: the room line for the picked sprint with the dialog's 2 points.
           const fit = yield* ticketSprintFit(
             active.id,
@@ -154,7 +156,7 @@ describe("editing an existing ticket against the mock Jira (FR-17 AC)", () => {
           const after = yield* openDialog(key);
           const back = yield* save(key, (v) => ({ ...v, sprint: BACKLOG }));
           const out = yield* openDialog(key);
-          return { before, join, fit, saved, after, back, out };
+          return { before, join, joinOps, fit, saved, after, back, out };
         }),
         layer,
       ),
@@ -163,7 +165,13 @@ describe("editing an existing ticket against the mock Jira (FR-17 AC)", () => {
     // Its team (D59): Data Center's Advanced Roadmaps gives only the team's id.
     expect(r.before.issue.team).toBe("Team 12");
     // The switch joins the proposals' sprint; turning it on picks it in the select.
-    expect(r.join).toMatchObject({ id: active.id, name: active.name, daysLeft: 3 });
+    expect(r.join).toMatchObject({
+      id: active.id,
+      name: active.name,
+      daysLeft: 3,
+      offBoard: false,
+    });
+    expect(r.joinOps).toMatchObject({ id: active.id, offBoard: true });
     expect(r.join?.when).toMatch(/^ends \w+ \d+ \w+, 3 working days left$/);
     const option = joinOption(r.before.choices, r.join?.id ?? null);
     if (!option) throw new Error("no switch");

@@ -151,8 +151,20 @@ export function joinOption(
 
 /**
  * The switch and the Sprint select are two views of one value: the switch is
- * on while the select holds its sprint; turning it on picks that sprint, off
- * picks Backlog.
+ * on while the select holds its sprint; turning it on picks that sprint. Off
+ * gives back what the select held before the switch was turned on (`before`),
+ * else the sprint the dialog opened with (`opened`), and Backlog only when the
+ * ticket was in the switch's sprint, so a ticket in a future sprint is not sent
+ * to the backlog by on and off.
  */
 export const joinChecked = (option: SprintOption, value: string) => value === option.value;
-export const joinValue = (option: SprintOption, on: boolean) => (on ? option.value : BACKLOG);
+export function joinValue(
+  option: SprintOption,
+  on: boolean,
+  restore: { before?: string | null; opened?: string } = {},
+): string {
+  if (on) return option.value;
+  if (restore.before && restore.before !== option.value) return restore.before;
+  if (restore.opened && restore.opened !== option.value) return restore.opened;
+  return BACKLOG;
+}

@@ -82,9 +82,13 @@ export function TeamCombobox({
     value === CURRENT_TEAM
       ? currentName
       : value
-        ? ([...(synced.data ?? []), ...(search.data ?? []), ...(picked ? [picked] : [])].find(
-            (t) => t.id === value,
-          )?.name ??
+        ? ([
+            // Real names before a synced "Team <id>" placeholder.
+            ...(picked ? [picked] : []),
+            ...(search.data ?? []),
+            ...lists.synced,
+            ...(synced.data ?? []),
+          ].find((t) => t.id === value)?.name ??
           currentName ??
           `Team ${value}`)
         : null;

@@ -15,7 +15,7 @@ import { describeError } from "@/app/errors";
 import { useAppMutation } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
-import { SprintSwitchControl, VerdictLine } from "@/components/inbox/sprint-choice";
+import { OffBoardNote, SprintSwitchControl, VerdictLine } from "@/components/inbox/sprint-choice";
 import {
   useKnownSprints,
   useLocalDate,
@@ -137,7 +137,8 @@ export function EditDialog({
       ),
     enabled: open,
   });
-  const teamField = fieldInfo.data?.effective.team ?? null;
+  const effective = fieldInfo.data?.effective;
+  const teamField = effective?.teamEditable ? (effective.team ?? null) : null;
   // The sprint field stays empty until the user picks one, so the synced
   // sprints may arrive after the dialog opened.
   const currentSprint = choices?.kind === "pick" ? choices.value : "";
@@ -159,6 +160,7 @@ export function EditDialog({
   useEffect(() => {
     if (!open) return;
     baseline.current = initial;
+    beforeSwitch.current = null;
     form.reset(initial);
   }, [open, issue.key]);
 
@@ -220,6 +222,8 @@ export function EditDialog({
   const joinSprint = join.data ?? null;
   const joinOpt = joinOption(choices, joinSprint?.id ?? null);
   const setSprint = (v: string) => form.setValue("sprint", v, { shouldDirty: true });
+  // What the select held when the switch was turned on, for turning it off.
+  const beforeSwitch = useRef<string | null>(null);
   // The room line goes under the switch when it is about the switch's sprint.
   const fitUnderSwitch = !!joinOpt && !!shownFit && shownFit.sprint.id === joinSprint?.id;
 
@@ -294,8 +298,14 @@ export function EditDialog({
                   label={`Add to ${joinSprint.name}`}
                   when={joinSprint.when}
                   checked={joinChecked(joinOpt, pickedSprint)}
-                  onCheckedChange={(on) => setSprint(joinValue(joinOpt, on))}
+                  onCheckedChange={(on) => {
+                    // Off gives back what the select held before on (D58 review).
+                    const before = beforeSwitch.current;
+                    beforeSwitch.current = on ? pickedSprint : null;
+                    setSprint(joinValue(joinOpt, on, { before, opened: currentSprint }));
+                  }}
                 />
+                {joinSprint.offBoard && <OffBoardNote projectKey={issue.projectKey} />}
                 {fitUnderSwitch && <VerdictLine fit={shownFit.fit} sprint={shownFit.sprint} />}
               </div>
             )}

@@ -70,4 +70,27 @@ describe("teamOptions (D59)", () => {
     // Still waiting for the search: no note yet.
     expect(teamOptions({ synced, text: "pay", search: null, searchFailed: false }).note).toBeNull();
   });
+
+  test("Data Center's 'Team <id>' names take the search's name and stay synced (review)", () => {
+    const dc = [
+      { id: "12", name: "Team 12" },
+      { id: "13", name: "Team 13" },
+    ];
+    const r = teamOptions({
+      synced: dc,
+      text: "pay",
+      search: [{ id: "12", name: "Payments" }],
+      searchFailed: false,
+    });
+    expect(r).toEqual({ synced: [{ id: "12", name: "Payments" }], found: [], note: null });
+    // A real synced name is kept even when the search names the id differently.
+    expect(
+      teamOptions({
+        synced: [{ id: "12", name: "Payments" }],
+        text: "",
+        search: [{ id: "12", name: "Payments EU" }],
+        searchFailed: false,
+      }).synced,
+    ).toEqual([{ id: "12", name: "Payments" }]);
+  });
 });

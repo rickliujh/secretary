@@ -186,6 +186,12 @@ describe("the sprint switch and the Sprint select (D58)", () => {
     expect(joinChecked(option, "41")).toBe(true);
     expect(joinValue(option, false)).toBe(BACKLOG);
     expect(joinChecked(option, "42")).toBe(false);
+    // Off gives back what the select held before on, else the opened sprint;
+    // Backlog only for a ticket that was in the switch's sprint (review).
+    expect(joinValue(option, false, { before: "43", opened: "42" })).toBe("43");
+    expect(joinValue(option, false, { before: null, opened: "42" })).toBe("42");
+    expect(joinValue(option, false, { before: "41", opened: "41" })).toBe(BACKLOG);
+    expect(joinValue(option, false, { before: null, opened: CURRENT })).toBe(CURRENT);
     // A ticket already in the sprint starts on, with no room line.
     const inIt = pick({ current: "PAY 15" });
     expect(joinChecked(option, inIt.value)).toBe(true);

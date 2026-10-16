@@ -367,7 +367,7 @@ describe("update_fields with story points (D55)", () => {
 });
 
 describe("update_fields with the team (D59)", () => {
-  const withTeam = { ...fieldIds, team: "customfield_10108" };
+  const withTeam = { ...fieldIds, team: "customfield_10108", teamEditable: true };
   const write = (team: string | null, deployment?: "cloud" | "datacenter") =>
     buildJiraWrite(
       { kind: "update_fields", issueKey: "PAY-12", fields: { team, labels: ["x"] } },
@@ -393,6 +393,15 @@ describe("update_fields with the team (D59)", () => {
     ).toThrow(
       "No Team field was found in Jira, so the team of PAY-12 cannot be set. Set the field in Settings > Jira, or leave the team as it was.",
     );
+  });
+
+  test("a field only named Team (perhaps a select list) is never written", () => {
+    expect(() =>
+      buildJiraWrite(
+        { kind: "update_fields", issueKey: "PAY-12", fields: { team: "10200", labels: ["x"] } },
+        { fieldIds: { ...fieldIds, team: "customfield_3" } },
+      ),
+    ).toThrow("The field customfield_3 is named Team but is not a Jira team field");
   });
 });
 

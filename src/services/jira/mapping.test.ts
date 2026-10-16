@@ -157,6 +157,42 @@ describe("field discovery", () => {
     expect(issueFields({ team: "customfield_10108" })).toContain("customfield_10108");
   });
 
+  test("only a team-typed or hand-set Team field is editable (D59 review)", () => {
+    const cloud = field(
+      "customfield_10001",
+      "Team",
+      "team",
+      "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team",
+    );
+    const dc = field(
+      "customfield_10108",
+      "Team",
+      "any",
+      "com.atlassian.teams:rm-teams-custom-field-team",
+    );
+    // A select list that happens to be named Team.
+    const select = field(
+      "customfield_3",
+      "Team",
+      "option",
+      "com.atlassian.jira.plugin.system.customfieldtypes:select",
+    );
+    expect(discoverFieldIds([cloud]).teamEditable).toBe(true);
+    expect(discoverFieldIds([dc]).teamEditable).toBe(true);
+    const named = discoverFieldIds([select]);
+    expect(named).toMatchObject({ team: "customfield_3" });
+    expect(named.teamEditable).toBeUndefined();
+    expect(effectiveFieldIds(named, {}).teamEditable).toBeUndefined();
+    expect(effectiveFieldIds(named, { team: "customfield_3" }).teamEditable).toBe(true);
+    expect(effectiveFieldIds(discoverFieldIds([dc]), {}).teamEditable).toBe(true);
+  });
+
+  test("a select list's option reads as its value and has no team id", () => {
+    const option = { self: "https://jira/option/10200", value: "Alpha", id: "10200" };
+    expect(teamName(option)).toBe("Alpha");
+    expect(teamIdOf(option)).toBeNull();
+  });
+
   test("custom field ids become cf[] references", () => {
     expect(jqlFieldRef("customfield_10100")).toBe("cf[10100]");
     expect(jqlFieldRef("parent")).toBe("parent");
@@ -355,6 +391,12 @@ describe("mapIssue", () => {
       { id: "14", name: "Partners & Vendors" },
       { id: "12", name: "Payments" },
     ]);
+    // Decimal and hex entities too, and a no-break space read as a space.
+    expect(
+      parseTeamSuggestions({
+        results: [{ value: "16", displayName: "M&#252;nchen&nbsp;<b>Ops</b> &#x27;B&#X27;" }],
+      }),
+    ).toEqual([{ id: "16", name: "München Ops 'B'" }]);
     expect(parseTeamSuggestions({ results: [] })).toEqual([]);
     expect(parseTeamSuggestions({})).toEqual([]);
     expect(parseTeamSuggestions("nope")).toEqual([]);

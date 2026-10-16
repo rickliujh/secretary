@@ -224,7 +224,8 @@ export const knownSprints = Effect.map(getState(SYNC_KEYS.sprints), parseSprintS
 /**
  * The sprint the Edit dialog's switch adds a ticket of `projectKey` to (D58):
  * the same pick as a proposal's switch and the Executor (`joinSprintFor`), with
- * its dates. Null when no active sprint holds the user's work.
+ * its dates, and `offBoard` when its board does not show the project, as the
+ * proposal card warns. Null when no active sprint holds the user's work.
  */
 export const ticketJoinSprint = (projectKey: string, today = localDate()) =>
   Effect.gen(function* () {
@@ -236,7 +237,11 @@ export const ticketJoinSprint = (projectKey: string, today = localDate()) =>
       projectKey,
       data.state.boardProjects,
     );
-    return sprint ? viewOf(sprint, today, data.lastDay) : null;
+    if (!sprint) return null;
+    return {
+      ...viewOf(sprint, today, data.lastDay),
+      offBoard: !boardShowsProject(sprint, projectKey, data.state.boardProjects),
+    };
   });
 
 /**

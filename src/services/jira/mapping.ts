@@ -1,6 +1,7 @@
 /**
  * Pure mapping from Jira issue JSON to cache rows (design.md section 4).
  */
+import { decodeHTML } from "entities";
 import { z } from "zod";
 import type { jiraComments, jiraIssues } from "@/db/schema";
 import { datePart, type SprintInfo } from "@/services/sprints/calendar";
@@ -128,7 +129,8 @@ export function parseStoryPoints(value: unknown): number | null {
  * The Team field's value as a name (D59): an object with `name` or `title`
  * (Cloud), a name as a string, or a bare id (Data Center's Advanced Roadmaps
  * returns the team's id), which reads "Team <id>" since its name needs the
- * Teams API. A list gives its first team. Null for anything else.
+ * Teams API. A select list's option (`value`), from a field only named "Team",
+ * reads as its value. A list gives its first team. Null for anything else.
  */
 export function teamName(value: unknown): string | null {
   if (Array.isArray(value)) return value.map(teamName).find((t) => t !== null) ?? null;
@@ -139,7 +141,8 @@ export function teamName(value: unknown): string | null {
   }
   if (value && typeof value === "object") {
     const o = value as Record<string, unknown>;
-    for (const key of ["name", "title"]) {
+    // A select list's option (a field named "Team" that is no team field) has `value`.
+    for (const key of ["name", "title", "value"]) {
       const v = o[key];
       if (typeof v === "string" && v.trim()) return v.trim();
     }
@@ -159,7 +162,10 @@ export function teamIdOf(value: unknown): string | null {
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : null;
   if (typeof value === "string") return /^\d+$/.test(value.trim()) ? value.trim() : null;
   if (value && typeof value === "object") {
-    const id = (value as Record<string, unknown>).id;
+    const o = value as Record<string, unknown>;
+    // A select list's option is no team: its id is not a team id.
+    if ("value" in o && !("name" in o) && !("title" in o)) return null;
+    const id = o.id;
     const text = typeof id === "number" || typeof id === "string" ? String(id).trim() : "";
     return text || null;
   }
@@ -172,21 +178,14 @@ const SuggestionsSchema = z.object({
     .default([]),
 });
 
-const ENTITIES: Record<string, string> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  "#39": "'",
-  apos: "'",
-  nbsp: " ",
-};
-
-/** Display text from Jira's highlighted suggestion HTML ("<b>Pay</b>ments"). */
+/**
+ * Display text from Jira's highlighted suggestion HTML ("<b>Pay</b>ments"):
+ * the tags dropped, every entity (named, decimal, hex) decoded by `entities`,
+ * which also runs outside the webview (sync tests, the mock Jira).
+ */
 const plainText = (html: string) =>
-  html
-    .replace(/<[^>]*>/g, "")
-    .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e: string) => ENTITIES[e] ?? "")
+  decodeHTML(html.replace(/<[^>]*>/g, ""))
+    .replace(/ /g, " ")
     .trim();
 
 /**

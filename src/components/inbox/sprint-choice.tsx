@@ -135,6 +135,15 @@ export function SprintSwitchControl({
   );
 }
 
+/** The warning under a sprint switch whose sprint's board does not show the project (D57, D58). */
+export function OffBoardNote({ projectKey }: { projectKey: string }) {
+  return (
+    <p className="text-xs text-amber-700 dark:text-amber-300">
+      That sprint's board does not show {projectKey}, so the ticket will not appear on it.
+    </p>
+  );
+}
+
 /**
  * Whether a create can never join from its own payload, while the fit is not
  * known: an Epic, or a sub-task (a parent, or a sub-task type by name).
@@ -248,12 +257,7 @@ function SprintSwitchBody({
   return (
     <div className="flex flex-col gap-1">
       {control(`Add to ${sprint.name}`, locked)}
-      {offBoard && (
-        <p className="text-xs text-amber-700 dark:text-amber-300">
-          That sprint's board does not show {payload.projectKey}, so the ticket will not appear on
-          it.
-        </p>
-      )}
+      {offBoard && <OffBoardNote projectKey={payload.projectKey} />}
       <VerdictLine fit={fit} sprint={sprint} />
     </div>
   );

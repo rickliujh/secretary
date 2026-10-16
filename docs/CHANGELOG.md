@@ -1707,6 +1707,15 @@ Built
   no ticket. Tests: the write mapping, the id kept by sync, the option list,
   the search parsing, and against the mock Jira a searched team written,
   synced back and cleared.
+- Review fixes (team and switch): on Data Center a search result's name
+  replaces a synced "Team <id>", so typing "pay" finds the synced team. Only a
+  Team field of a team type, or one set in Settings, can be edited; one found
+  only by its name (perhaps a select list, read as its option's value) stays
+  read only and is never written, so it cannot fail a Save. Search names decode
+  every HTML entity (the `entities` package). Turning the sprint switch on then
+  off gives back the sprint the select held, not Backlog. The switch shows the
+  proposal card's warning when its sprint's board does not show the project.
+  Tests cover each.
 
 Known limits
 - Components, fix versions, the issue type and a sub-task's parent are not
@@ -1715,8 +1724,9 @@ Known limits
   says which.
 - The cache keeps only the sprint's name, so two open sprints of the same name
   are not told apart: the dialog shows the current as ambiguous.
-- Data Center gives only the team's id, shown as "Team <id>" (on the Details
-  row and among the synced teams) until the Teams API is read; the search
-  names teams that are on no synced ticket. Existing tickets show their team,
-  and can have it kept on Save, after their next sync; until then their team
-  can be replaced or cleared but not re-picked.
+- Data Center gives only the team's id, shown as "Team <id>" on the Details
+  row and among the synced teams until a search names it. Existing tickets
+  show their team, and can have it kept on Save, after their next sync; until
+  then their team can be replaced or cleared but not re-picked.
+- Unverified: Data Center is sent the team's id as a number; not yet tried
+  against a real instance.
