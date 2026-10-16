@@ -89,6 +89,7 @@ scope; "Should" is v1 if time permits; "Could" is later.
   comments, links, attachments list, dependencies, secretary notes.
 - FR-1.7 (Must) Manual actions from the detail view: add comment, transition status,
   edit summary/description/priority/assignee/due date, set parent or epic link.
+  FR-17 adds story points, the sprint and labels to the edit dialog.
 - AC: after configuring against a real Jira instance, all issues matching scope
   appear within one sync; editing a field in the app is visible in Jira within seconds.
 
@@ -411,6 +412,23 @@ unchanged.
   "fits" (2 of 3 days); with a third open ticket of 3 points it shows "over" (3.5 of
   3 days). Its switch on adds it to that sprint on approval; off leaves it in the
   backlog.
+
+### FR-17 Edit an existing ticket (D58)
+
+- FR-17.1 (Must) The ticket view's Edit dialog edits, besides summary, priority,
+  due date and description: story points (empty clears them), the sprint (any
+  open sprint whose board shows the ticket's project, or the backlog), the epic
+  and the labels. Epics have no sprint or epic field; a sub-task has neither and
+  says it follows its parent.
+- FR-17.2 (Must) Only what changed is written, in one Save. When one write fails
+  the dialog stays open and says what was saved and what was not.
+- FR-17.3 (Must) Picking the active sprint for a ticket not in it shows the same
+  room line and details as a new ticket (FR-16.2), using the points in the dialog.
+- FR-17.4 (Must) The Details tab shows the ticket's story points.
+- AC: against the mock Jira, one Save that sets a backlog ticket's points to 2,
+  adds a label and picks the active sprint of the FR-16 AC shows "fits" before
+  saving and afterwards shows the ticket in that sprint with 2 points and the
+  label; picking Backlog moves it out again.
 
 ## 5. Non-functional requirements
 
