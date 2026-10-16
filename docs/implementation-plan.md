@@ -516,6 +516,9 @@ Tasks
 5. Edit dialog: the new fields, one Save that runs the changed writes in order
    and reports a partial failure; Details tab Story points row.
 6. Tests against the mock Jira for the FR-17 AC.
+7. The ticket's team (FR-17.5, D59): discovery, override, migration, sync
+   mapping (object, string, bare id), Details row and Edit dialog line with the
+   Context link; mock Jira gets a Team field.
 
 Checklist
 - FR-17 AC passes against the mock Jira.
