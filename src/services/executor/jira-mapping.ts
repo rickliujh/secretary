@@ -46,6 +46,15 @@ export function buildMoveToSprint(sprintId: number, issueKeys: readonly string[]
   };
 }
 
+/**
+ * The Team field's value to write (D59): Cloud takes the team's id as a
+ * string; Data Center (Advanced Roadmaps) a number when the id is numeric.
+ */
+export function teamFieldValue(id: string | null, deployment: Deployment = "datacenter") {
+  if (id === null) return null;
+  return deployment === "datacenter" && /^\d+$/.test(id) ? Number(id) : id;
+}
+
 export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWrite {
   switch (action.kind) {
     case "add_comment":
@@ -69,6 +78,13 @@ export function buildJiraWrite(action: JiraAction, ctx: MappingContext): JiraWri
       if (f.priority !== undefined) fields.priority = { name: f.priority };
       if (f.dueDate !== undefined) fields.duedate = f.dueDate;
       if (f.labels !== undefined) fields.labels = f.labels;
+      if (f.team !== undefined) {
+        if (!ctx.fieldIds.team)
+          throw new MappingError(
+            `No Team field was found in Jira, so the team of ${action.issueKey} cannot be set. Set the field in Settings > Jira, or leave the team as it was.`,
+          );
+        fields[ctx.fieldIds.team] = teamFieldValue(f.team, ctx.deployment);
+      }
       if (f.storyPoints !== undefined) {
         if (!action.pointsField)
           throw new MappingError(`No story point field to write on ${action.issueKey}.`);

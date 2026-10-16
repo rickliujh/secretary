@@ -106,6 +106,15 @@ export interface JiraClientShape {
   readonly getEditMeta: (key: string) => Effect.Effect<EditMeta, JiraError>;
   readonly priorities: Effect.Effect<readonly Priority[], JiraError>;
   readonly projects: Effect.Effect<readonly Project[], JiraError>;
+  /**
+   * Teams whose name holds `text`, from the JQL autocomplete suggestions of the
+   * Team field `fieldId` (D59): ids and plain names. Best effort; callers fall
+   * back to the synced teams.
+   */
+  readonly teamSuggestions: (
+    fieldId: string,
+    text: string,
+  ) => Effect.Effect<readonly { id: string; name: string }[], JiraError>;
   readonly assignableUsers: (
     issueKey: string,
     query: string,

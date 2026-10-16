@@ -149,6 +149,65 @@ export function teamName(value: unknown): string | null {
   return null;
 }
 
+/**
+ * The Team field's id (D59), kept to write the field back: Cloud's object `id`,
+ * or Data Center's bare id (a number, or digits), as text. A list gives its
+ * first. Null for a name without an id, or anything else.
+ */
+export function teamIdOf(value: unknown): string | null {
+  if (Array.isArray(value)) return value.map(teamIdOf).find((t) => t !== null) ?? null;
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : null;
+  if (typeof value === "string") return /^\d+$/.test(value.trim()) ? value.trim() : null;
+  if (value && typeof value === "object") {
+    const id = (value as Record<string, unknown>).id;
+    const text = typeof id === "number" || typeof id === "string" ? String(id).trim() : "";
+    return text || null;
+  }
+  return null;
+}
+
+const SuggestionsSchema = z.object({
+  results: z
+    .array(z.object({ value: z.unknown(), displayName: z.string().optional() }))
+    .default([]),
+});
+
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+  apos: "'",
+  nbsp: " ",
+};
+
+/** Display text from Jira's highlighted suggestion HTML ("<b>Pay</b>ments"). */
+const plainText = (html: string) =>
+  html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e: string) => ENTITIES[e] ?? "")
+    .trim();
+
+/**
+ * Teams from the JQL autocomplete suggestions of the Team field (D59): each
+ * result's value is the team's id, its display name the name with the typed
+ * text highlighted. Results without an id or a name are left out, and ids
+ * repeat once.
+ */
+export function parseTeamSuggestions(value: unknown): { id: string; name: string }[] {
+  const r = SuggestionsSchema.safeParse(value);
+  if (!r.success) return [];
+  const out = new Map<string, string>();
+  for (const s of r.data.results) {
+    const id =
+      typeof s.value === "string" || typeof s.value === "number" ? String(s.value).trim() : "";
+    const name = plainText(s.displayName ?? "");
+    if (id && name && !out.has(id)) out.set(id, name);
+  }
+  return [...out].map(([id, name]) => ({ id, name }));
+}
+
 /** Active sprint first, then the next future one, then the most recent. */
 export function currentSprint(value: unknown): string | null {
   const sprints = parseSprints(value);
@@ -259,6 +318,7 @@ export function mapIssue(raw: RawIssue, ctx: MapContext): MappedIssue {
           .map((id) => parseStoryPoints(f[id]))
           .find((p) => p !== null) ?? null,
       team: ctx.fieldIds.team ? teamName(f[ctx.fieldIds.team]) : null,
+      teamId: ctx.fieldIds.team ? teamIdOf(f[ctx.fieldIds.team]) : null,
       dueDate: typeof f.duedate === "string" ? f.duedate : null,
       created: jiraDateToIso(String(f.created)),
       updated: jiraDateToIso(String(f.updated)),

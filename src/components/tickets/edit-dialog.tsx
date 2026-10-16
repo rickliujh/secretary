@@ -51,6 +51,7 @@ import {
   type SprintChoices,
   sprintChoices,
 } from "@/services/sprints/options";
+import { Sync } from "@/services/sync";
 import {
   baselineAfterSave,
   changedValues,
@@ -63,7 +64,7 @@ import {
 } from "@/services/tickets/edit";
 import { epicsInProject, type TicketDetail } from "@/services/tickets/queries";
 import { saveTicketEdit } from "@/services/tickets/save-edit";
-import { TicketTeam } from "./ticket-team";
+import { TeamCombobox } from "./team-combobox";
 
 type Issue = TicketDetail["issue"];
 
@@ -80,6 +81,8 @@ const EditForm = z.object({
   epic: z.string(),
   /** Empty until the user picks one: the current sprint stays. */
   sprint: z.string(),
+  /** The team's id; empty for none (D59). */
+  team: z.string(),
 }) satisfies z.ZodType<TicketEditValues>;
 
 /** The Sprint select's options for the ticket, from the synced sprints; none while they load. */
@@ -124,6 +127,17 @@ export function EditDialog({
     enabled: open && !noEpic,
   });
   const choices = useSprintChoices(issue, open);
+  // The Team field to write, discovered or set in Settings (D59).
+  const fieldInfo = useQuery({
+    queryKey: queryKeys.fieldInfo,
+    queryFn: ({ signal }) =>
+      run(
+        Effect.flatMap(Sync, (s) => s.fieldInfo),
+        signal,
+      ),
+    enabled: open,
+  });
+  const teamField = fieldInfo.data?.effective.team ?? null;
   // The sprint field stays empty until the user picks one, so the synced
   // sprints may arrive after the dialog opened.
   const currentSprint = choices?.kind === "pick" ? choices.value : "";
@@ -217,12 +231,6 @@ export function EditDialog({
           <DialogHeader className="mb-4">
             <DialogTitle>Edit {issue.key}</DialogTitle>
             <DialogDescription>Only changed fields are sent to Jira.</DialogDescription>
-            {/* Read only: writing the team needs the Teams API (D59). */}
-            {issue.team && (
-              <p className="text-sm text-muted-foreground">
-                Team: <TicketTeam name={issue.team} />
-              </p>
-            )}
           </DialogHeader>
           <FieldGroup>
             <Field data-invalid={!!errors.summary}>
@@ -325,12 +333,35 @@ export function EditDialog({
                   )}
                 />
               )}
-              <Field data-invalid={!!errors.labels} className={noEpic ? "col-span-2" : undefined}>
+              <Field
+                data-invalid={!!errors.labels}
+                className={noEpic && !teamField ? "col-span-2" : undefined}
+              >
                 <FieldLabel htmlFor="edit-labels">Labels</FieldLabel>
                 <Input id="edit-labels" placeholder="None" {...form.register("labels")} />
                 <FieldDescription>Separated by spaces or commas.</FieldDescription>
                 <FieldError errors={[errors.labels]} />
               </Field>
+              {/* Only with a Team field to write (D59). */}
+              {teamField && (
+                <Controller
+                  control={form.control}
+                  name="team"
+                  render={({ field }) => (
+                    <Field>
+                      <FieldLabel htmlFor="edit-team">Team</FieldLabel>
+                      <TeamCombobox
+                        id="edit-team"
+                        fieldId={teamField}
+                        value={field.value}
+                        currentName={issue.team}
+                        onChange={field.onChange}
+                        open={open}
+                      />
+                    </Field>
+                  )}
+                />
+              )}
             </div>
             <Field>
               <FieldLabel htmlFor="edit-description">Description</FieldLabel>

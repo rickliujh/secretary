@@ -53,9 +53,16 @@ export type EditableIssue = {
   storyPoints: number | null;
   labels: string[];
   epicKey: string | null;
+  /** The team's name and id (D59); a team synced before ids were kept has no id. */
+  team?: string | null;
+  teamId?: string | null;
 };
 
-/** The dialog's values, as text. `epic` is empty for none; `sprint` is a sprint option's value. */
+/**
+ * The dialog's values, as text. `epic` and `team` are empty for none (`team`
+ * holds the team's id, or CURRENT_TEAM for a team without one); `sprint` is a
+ * sprint option's value.
+ */
 export type TicketEditValues = {
   summary: string;
   priority: string;
@@ -65,7 +72,11 @@ export type TicketEditValues = {
   labels: string;
   epic: string;
   sprint: string;
+  team: string;
 };
+
+/** The team value of a ticket whose team has no id yet: shown, never written (D59). */
+export const CURRENT_TEAM = "__current_team__";
 
 /** The dialog's starting values; `sprint` is the selected sprint option (`sprintChoices`). */
 export function editValues(issue: EditableIssue, sprint: string): TicketEditValues {
@@ -78,6 +89,7 @@ export function editValues(issue: EditableIssue, sprint: string): TicketEditValu
     labels: labelsText(issue.labels),
     epic: issue.epicKey ?? "",
     sprint,
+    team: issue.teamId ?? (issue.team ? CURRENT_TEAM : ""),
   };
 }
 
@@ -93,6 +105,7 @@ const FIELD_NAMES = {
   descriptionWiki: "description",
   storyPoints: "story points",
   labels: "labels",
+  team: "team",
 } as const;
 
 /** "a", "a and b", "a, b and c". */
@@ -126,6 +139,8 @@ export function ticketEditSteps(
   if (points !== undefined && points !== issue.storyPoints) fields.storyPoints = points;
   const labels = parseLabelsInput(values.labels);
   if (!sameLabels(labels, issue.labels)) fields.labels = labels;
+  if (values.team !== initial.team && values.team !== CURRENT_TEAM)
+    fields.team = values.team || null;
 
   const steps: EditStep[] = [];
   const changed = Object.keys(fields) as (keyof typeof FIELD_NAMES)[];
@@ -205,6 +220,7 @@ const FORM_KEYS: Record<keyof typeof FIELD_NAMES, EditKey> = {
   descriptionWiki: "descriptionWiki",
   storyPoints: "points",
   labels: "labels",
+  team: "team",
 };
 
 /** The dialog's fields a written step changed. */

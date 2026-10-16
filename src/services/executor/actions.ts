@@ -40,6 +40,8 @@ export const JiraActionSchema = z.discriminatedUnion("kind", [
           storyPoints: StoryPoints.nullable().optional(),
           /** The whole list of labels; an empty list clears them (D58). */
           labels: z.array(JiraLabel).optional(),
+          /** The team's id in the Team field; null clears it (D59). */
+          team: z.string().trim().min(1).nullable().optional(),
         })
         .refine((f) => Object.keys(f).length > 0, "Nothing to update"),
       /**

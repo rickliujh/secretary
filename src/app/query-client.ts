@@ -50,6 +50,10 @@ export const queryKeys = {
   /** The sprint the Edit dialog's switch joins (D58); under "tickets" like the fits. */
   ticketJoinSprint: (projectKey: string, settings: readonly unknown[], today: string) =>
     ["tickets", "ticket-join-sprint", projectKey, ...settings, today] as const,
+  /** Teams on synced tickets, for the Edit dialog's Team field (D59); sync refreshes them. */
+  syncedTeams: ["tickets", "synced-teams"] as const,
+  /** Jira's team suggestions for typed text (D59). */
+  teamSearch: (fieldId: string, text: string) => ["jira", "team-search", fieldId, text] as const,
   /** The synced sprints, for the Edit dialog's Sprint select (D58); sync refreshes them. */
   knownSprints: ["tickets", "known-sprints"] as const,
   /** Sprint > Epics (D50); under "tickets" like Today. */

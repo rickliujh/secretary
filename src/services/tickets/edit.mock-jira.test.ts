@@ -11,6 +11,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { describeError } from "@/app/errors";
 import { ExecutorLive } from "@/services/executor/live";
+import { JiraClient } from "@/services/jira";
 import { lastSprintDay, workingDaysBetween } from "@/services/sprints/fit";
 import { knownSprints, ticketJoinSprint, ticketSprintFit } from "@/services/sprints/fit-query";
 import {
@@ -27,6 +28,7 @@ import { boardSprints, createHandler, generate } from "../../../scripts/mock-jir
 import { editOutcomeText, editValues, type TicketEditValues, ticketEditSteps } from "./edit";
 import { ticketDetail } from "./queries";
 import { saveTicketEdit } from "./save-edit";
+import { syncedTeams, teamOptions } from "./teams";
 
 const servers: { stop: (force?: boolean) => void }[] = [];
 afterAll(() => {
@@ -240,5 +242,42 @@ describe("editing an existing ticket against the mock Jira (FR-17 AC)", () => {
     expect(r.d.choices.value).toBe(BACKLOG);
     expect(r.d.choices.hint).toBe(`Last in ${r.d.issue.sprint} (closed)`);
     expect(r.steps).toEqual([]);
+  });
+
+  test("the team (D59): a team found by the search is written and synced back; None clears it", async () => {
+    const { issues, layer, key } = setup();
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sync = yield* Sync;
+          yield* sync.run();
+          const field = (yield* sync.fieldInfo).effective.team ?? "";
+          const synced = yield* syncedTeams;
+          const found = yield* (yield* JiraClient).teamSuggestions(field, "part");
+          const options = teamOptions({ synced, text: "part", search: found, searchFailed: false });
+          const before = yield* openDialog(key);
+          const saved = yield* save(key, (v) => ({ ...v, team: options.found[0]?.id ?? "" }));
+          const after = yield* openDialog(key);
+          const cleared = yield* save(key, (v) => ({ ...v, team: "" }));
+          const none = yield* openDialog(key);
+          return { field, synced, options, before, saved, after, cleared, none };
+        }),
+        layer,
+      ),
+    );
+    expect(r.field).toBe("customfield_10108");
+    expect(r.synced).toEqual([
+      { id: "12", name: "Team 12" },
+      { id: "13", name: "Team 13" },
+    ]);
+    // The team on no ticket is offered from the search, its highlight and entity read.
+    expect(r.options.found).toEqual([{ id: "14", name: "Partners & Vendors" }]);
+    expect(r.before.initial.team).toBe("12");
+    expect(r.saved.failed).toBeNull();
+    expect(editOutcomeText(key, r.saved).title).toBe(`Saved team on ${key}`);
+    expect(r.after.issue).toMatchObject({ teamId: "14", team: "Team 14" });
+    expect(r.cleared.failed).toBeNull();
+    expect(r.none.issue).toMatchObject({ teamId: null, team: null });
+    expect(issues.get(key)?.team).toBeNull();
   });
 });

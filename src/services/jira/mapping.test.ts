@@ -10,6 +10,8 @@ import {
   mapIssue,
   parseSprints,
   parseStoryPoints,
+  parseTeamSuggestions,
+  teamIdOf,
   teamName,
 } from "./mapping";
 import { FieldSchema, SearchPageSchema } from "./schemas";
@@ -327,12 +329,43 @@ describe("mapIssue", () => {
       expect(teamName(v)).toBeNull();
   });
 
+  test("the team's id (D59): Cloud's object id, Data Center's bare id, as text", () => {
+    expect(teamIdOf({ id: "5f0c-12", name: "Payments" })).toBe("5f0c-12");
+    expect(teamIdOf({ id: 12 })).toBe("12");
+    expect(teamIdOf("12")).toBe("12");
+    expect(teamIdOf(12)).toBe("12");
+    expect(teamIdOf([{ id: "a" }])).toBe("a");
+    // A name alone has no id.
+    for (const v of [null, undefined, "Payments", "", { name: "Payments" }, {}, true])
+      expect(teamIdOf(v)).toBeNull();
+  });
+
+  test("team suggestions: ids and names with the highlight stripped, each once", () => {
+    expect(
+      parseTeamSuggestions({
+        results: [
+          { value: "14", displayName: "<b>Par</b>tners &amp; Vendors" },
+          { value: 12, displayName: " <b>Pa</b>yments " },
+          { value: "14", displayName: "Partners again" },
+          { value: "", displayName: "No id" },
+          { value: "15", displayName: "<b></b>" },
+        ],
+      }),
+    ).toEqual([
+      { id: "14", name: "Partners & Vendors" },
+      { id: "12", name: "Payments" },
+    ]);
+    expect(parseTeamSuggestions({ results: [] })).toEqual([]);
+    expect(parseTeamSuggestions({})).toEqual([]);
+    expect(parseTeamSuggestions("nope")).toEqual([]);
+  });
+
   test("the team is stored when the field is known, else null", () => {
     const raw = issues.find((i) => i.key === "PAY-2");
     if (!raw) throw new Error("PAY-2");
     const withTeam = { ...raw, fields: { ...raw.fields, customfield_10108: "12" } };
     const teamCtx = { ...ctx, fieldIds: { ...fieldIds, team: "customfield_10108" } };
-    expect(mapIssue(withTeam, teamCtx).issue.team).toBe("Team 12");
+    expect(mapIssue(withTeam, teamCtx).issue).toMatchObject({ team: "Team 12", teamId: "12" });
     expect(mapIssue(withTeam, ctx).issue.team).toBeNull();
     expect(byKey("PAY-2").issue.team).toBeNull();
   });

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { BACKLOG, CURRENT } from "@/services/sprints/options";
 import {
   baselineAfterSave,
+  CURRENT_TEAM,
   changedValues,
   type EditableIssue,
   editOutcomeText,
@@ -87,6 +88,7 @@ describe("ticketEditSteps (D58)", () => {
       labels: "billing",
       epic: "PAY-1",
       sprint: BACKLOG,
+      team: "",
     });
   });
 
@@ -269,6 +271,42 @@ describe("what a Save writes from (D58 review fixes)", () => {
       fields: { summary: "Fix login", storyPoints: 3, labels: ["billing"] },
     });
     expect(again[1]?.action.kind).toBe("set_epic");
+  });
+
+  test("the team (D59): its id in the fields' PUT, cleared with None, named in the toast", () => {
+    const withTeam = { ...issue, team: "Payments", teamId: "12" };
+    const start = editValues(withTeam, "");
+    expect(start.team).toBe("12");
+    const submitted = { ...start, team: "14", labels: "billing q4" };
+    const steps = ticketEditSteps(withTeam, start, changedValues(start, submitted, start));
+    expect(steps).toEqual([
+      {
+        parts: ["labels", "team"],
+        action: {
+          kind: "update_fields",
+          issueKey: "PAY-12",
+          fields: { labels: ["billing", "q4"], team: "14" },
+        },
+      },
+    ]);
+    expect(baselineAfterSave(start, submitted, steps).team).toBe("14");
+    expect(ticketEditSteps(withTeam, start, { ...start, team: "" })[0]?.action).toMatchObject({
+      fields: { team: null },
+    });
+    // Another team picked in Jira meanwhile is not written back when untouched.
+    const now = editValues({ ...withTeam, teamId: "13" }, "");
+    expect(changedValues(start, start, now).team).toBe("13");
+  });
+
+  test("a team without an id is shown, never written, and None still clears it", () => {
+    const old = { ...issue, team: "Team 12", teamId: null };
+    const start = editValues(old, "");
+    expect(start.team).toBe(CURRENT_TEAM);
+    expect(ticketEditSteps(old, start, start)).toEqual([]);
+    expect(ticketEditSteps(old, start, { ...start, team: "" })[0]?.action).toMatchObject({
+      fields: { team: null },
+    });
+    expect(editValues({ ...issue, team: null, teamId: null }, "").team).toBe("");
   });
 
   test("a sprint move moves the sprint's baseline", () => {

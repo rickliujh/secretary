@@ -1689,11 +1689,24 @@ Built
   team type, else Advanced Roadmaps' on Data Center, else a field named Team),
   overridable in Settings > Jira. Sync stores the team's name in the new
   `jira_issues.team` column (migration 0015): a name or title, a name string,
-  or a bare id as "Team <id>". The Details tab has a Team row after Assignee
-  and the Edit dialog a read-only "Team: X" line, each linking to the team in
-  Context of the same name (case and end spaces ignored). The mock Jira serves
-  a Team field. Tests: discovery, the value mapping, the Context match and the
-  synced value against the mock Jira.
+  or a bare id as "Team <id>". The Details tab has a Team row after Assignee,
+  linking to the team in Context of the same name (case and end spaces
+  ignored). The mock Jira serves a Team field. Tests: discovery, the value
+  mapping, the Context match and the synced value against the mock Jira.
+- Editing the team (user request): sync also keeps the team's id
+  (`jira_issues.team_id`, migration 0016). The Edit dialog has a Team combobox
+  next to Epic and Labels: None, the teams on synced tickets (each id once with
+  its latest name), and from two typed characters a search in Jira's JQL
+  autocomplete (`JiraClient.teamSuggestions`, highlight stripped), with "Only
+  teams on your synced tickets" when the search fails or finds nothing. A team
+  synced before ids were kept is shown, not offered. Saving writes
+  `update_fields.team` in the same PUT (Cloud the id string, Data Center a
+  number); without a Team field the Executor says so, and the dialog shows the
+  field only when one is known. The baseline, `changedValues` and the toast
+  cover it. The mock Jira takes the write and serves the search, with a team on
+  no ticket. Tests: the write mapping, the id kept by sync, the option list,
+  the search parsing, and against the mock Jira a searched team written,
+  synced back and cleared.
 
 Known limits
 - Components, fix versions, the issue type and a sub-task's parent are not
@@ -1702,6 +1715,8 @@ Known limits
   says which.
 - The cache keeps only the sprint's name, so two open sprints of the same name
   are not told apart: the dialog shows the current as ambiguous.
-- The team is read only. Data Center gives only the team's id, shown as
-  "Team <id>" until the Teams API is read. Existing tickets show their team
-  after their next sync.
+- Data Center gives only the team's id, shown as "Team <id>" (on the Details
+  row and among the synced teams) until the Teams API is read; the search
+  names teams that are on no synced ticket. Existing tickets show their team,
+  and can have it kept on Save, after their next sync; until then their team
+  can be replaced or cleared but not re-picked.
