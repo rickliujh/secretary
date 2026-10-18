@@ -49,13 +49,14 @@ import {
   statedNumbers,
   withoutInlineValues,
 } from "./points";
+import { renderWorkBlock, type WorkItemSnapshot } from "./work-block";
 
 /**
- * Recorded with each classified item. 14 adds new contacts and teams (FR-18,
- * D60); 13 pastes inside instructions as «...» (D56); 11 is the revoke thread
- * context (FR-14.6) and 12 story points (D55).
+ * Recorded with each classified item. 15 adds the work block (FR-19.5, D61);
+ * 14 new contacts and teams (FR-18, D60); 13 pastes inside instructions as
+ * «...» (D56); 11 is the revoke thread context (FR-14.6) and 12 story points (D55).
  */
-export const CLASSIFY_PROMPT_VERSION = 14;
+export const CLASSIFY_PROMPT_VERSION = 15;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 /** Placeholders for contacts and teams created in the same answer (prompt version 14, D60). */
 /** How many new contacts, and teams, one answer may create. */
@@ -93,6 +94,8 @@ export const NO_TEAM = "no_team";
 
 /** Whether the snapshot offers new contacts and teams (prompt version 14, D60). */
 const offersDirectory = (s: ItemSnapshot) => s.promptVersion >= 14;
+/** The work block is shown from prompt version 15 (D61 Reads), when it holds an item. */
+const hasWork = (s: ItemSnapshot) => s.promptVersion >= 15 && !!s.work?.length;
 
 export type CandidateIssue = {
   key: string;
@@ -298,6 +301,12 @@ export type ItemSnapshot = {
   dependencies: { issueKey: string; label: string; status: string }[];
   /** Open dependencies update_dependency may pick from (prompt version 9, D46). */
   waits?: WaitCandidate[];
+  /**
+   * The work items the input touches, the one the user is on first (prompt
+   * version 15, D61 Reads). Their tickets are candidates and their waits are in
+   * `waits`. Absent in older snapshots, which replay as they ran.
+   */
+  work?: WorkItemSnapshot[];
   memories: { kind: string; content: string }[];
   examples: { input: string; proposed: string; corrected: string | null }[];
   notes: { about: string; title: string; excerpt: string }[];
@@ -1682,6 +1691,14 @@ ${
     : ""
 }- Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
 ${
+  hasWork(s)
+    ? `- The user's work lists the work items this input touches, with what the secretary knows about each. Read the input against it before the candidate issues:
+  - When the input is about a person, a thing or a date that matches an open wait of a listed work item ("Sarah says Friday now", "the cert arrived"), it is a change to that wait: propose update_dependency with that wait's id. Do not propose link_dependency for it and do not create a ticket for it.
+  - When the input reports progress on a listed work item (a ticket it waits on is done, the user picks the work up, a step is finished), act on that item's own ticket (not one marked as a ticket the work waits on): an add_comment saying what happened, or a transition_issue when its status should move (out of a blocked status once what it waited on is done). Do not create a ticket for it. An item listed only because the user is on it now counts only when the input is clearly about it.
+  - Use the other candidate issues for tickets the listed work items do not cover. The work items are the secretary's record: take facts from the input and the tickets, never from the record's wording alone.
+`
+    : ""
+}${
   s.waits?.length
     ? `- Open waits lists what the user already waits on. When the input answers or moves one of them, propose update_dependency with its dependencyId: resolve when what was waited for arrived or is no longer needed ("Bob sent the numbers"); log_reply when they answered but it is not done yet, with what they said in reply and expectedAt when they give a date; reschedule when only the date changes (expectedAt, or nextFollowupAt for when to ask again). Never propose link_dependency for a wait that list already has; update it instead.
 `
@@ -1841,6 +1858,7 @@ ${
         .join("\n")}`,
     );
   }
+  if (hasWork(s)) blocks.push(renderWorkBlock(s.work ?? []));
   blocks.push(
     `## Candidate issues (the only existing issues you may reference)\n${
       s.candidates

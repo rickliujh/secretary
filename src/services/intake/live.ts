@@ -455,6 +455,10 @@ const make = Effect.gen(function* () {
           thread,
           exclude,
           revokedHere: ctx.thread.revokedKeys,
+          // The work block (D61 Reads): what the item itself names, and whose words it is.
+          ownKeys: own.issueKeys.filter((k) => !deleted.has(k)),
+          ownInput: job.ownInput,
+          inboxItemId,
         })),
         ownInput: job.ownInput,
         ...(threadCreates.length ? { threadCreates } : {}),

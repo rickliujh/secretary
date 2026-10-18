@@ -117,6 +117,8 @@ export type RecapInputs = {
   dependencies: readonly RecapDependency[];
   /** People waiting on the user (new comments and mentions, as on Today). */
   asks: readonly { key: string; who: string; what: string; at: string }[];
+  /** Each ticket's work item (D61 Reads); absent or empty while the work model is off. */
+  workOf?: ReadonlyMap<string, { id: string; name: string; goal: string | null }>;
 };
 
 /** A ticket's facts before the model adds `happened` and `next`. */
@@ -391,6 +393,7 @@ export function buildRecapFacts(input: RecapInputs): RecapFacts {
       points: i.storyPoints,
       group,
       epic: i.epicKey ? { key: i.epicKey, name: epic?.summary ?? i.epicKey } : null,
+      work: input.workOf?.get(i.key) ?? null,
       dueDate: i.dueDate,
       notes,
       events: eventsOf(i),
