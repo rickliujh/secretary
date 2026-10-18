@@ -1,0 +1,1326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>html{color-scheme:light}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Secretary Work Model</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one column (max 1120px) of stacked sections; prose capped near 65ch; every diagram sits in its own sideways-scrolling box. */
+:root {
+  --bg: #f2f5f6;
+  --surface: #ffffff;
+  --surface-2: #e7edef;
+  --fg: #132027;
+  --fg-2: #31434b;
+  --muted: #5a6a72;
+  --line: #d0d9dd;
+  --line-strong: #98aab2;
+  --accent: #0a6a70;
+  --accent-fg: #ffffff;
+  --accent-soft: #dbeeee;
+  --accent-line: #6aaeb1;
+  --warn: #b02a20;
+  --warn-soft: #fbe8e5;
+  --warn-line: #e2a49c;
+  --focus: #1c5ed0;
+  --shadow: rgba(19, 32, 39, 0.07);
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1316;
+    --surface: #141d21;
+    --surface-2: #1b272c;
+    --fg: #e1e9ec;
+    --fg-2: #c0ccd1;
+    --muted: #8e9fa6;
+    --line: #29373d;
+    --line-strong: #4a5d65;
+    --accent: #4fc2c5;
+    --accent-fg: #062628;
+    --accent-soft: #113538;
+    --accent-line: #2e8084;
+    --warn: #f28c80;
+    --warn-soft: #351b19;
+    --warn-line: #79392f;
+    --focus: #82b2ff;
+    --shadow: rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1316;
+  --surface: #141d21;
+  --surface-2: #1b272c;
+  --fg: #e1e9ec;
+  --fg-2: #c0ccd1;
+  --muted: #8e9fa6;
+  --line: #29373d;
+  --line-strong: #4a5d65;
+  --accent: #4fc2c5;
+  --accent-fg: #062628;
+  --accent-soft: #113538;
+  --accent-line: #2e8084;
+  --warn: #f28c80;
+  --warn-soft: #351b19;
+  --warn-line: #79392f;
+  --focus: #82b2ff;
+  --shadow: rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+}
+h1, h2, h3, h4, p, ul, ol, dl, dd, figure, blockquote { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+
+.page {
+  max-width: 1120px;
+  margin-inline: auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.page > * { min-width: 0; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.eyebrow.accent { color: var(--accent); }
+.eyebrow.warn { color: var(--warn); }
+.prose { max-width: 65ch; color: var(--fg-2); }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Header */
+.head { display: flex; flex-direction: column; gap: 18px; padding-block: 8px 32px; }
+.head h1 {
+  font-size: clamp(1.9rem, 4.2vw, 2.75rem);
+  line-height: 1.12;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  max-width: 22ch;
+}
+.quote {
+  max-width: 68ch;
+  border-left: 3px solid var(--line-strong);
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--fg-2);
+}
+.quote p { font-size: 1.02rem; }
+.quote cite { font-style: normal; font-family: var(--mono); font-size: 0.78rem; color: var(--muted); }
+.nav { display: flex; flex-wrap: wrap; gap: 8px; }
+.nav a {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  text-decoration: none;
+  color: var(--fg-2);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 5px 10px;
+  border-radius: 999px;
+}
+.nav a:hover { border-color: var(--accent-line); color: var(--accent); }
+
+.glance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.glance > div { background: var(--surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.glance p { color: var(--fg-2); font-size: 0.95rem; }
+
+/* Sections */
+.part {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding-block: 44px;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 16px;
+}
+.part > * { min-width: 0; }
+.part-head { display: flex; flex-direction: column; gap: 8px; }
+.part-head h2 { font-size: clamp(1.4rem, 2.6vw, 1.8rem); line-height: 1.2; font-weight: 600; letter-spacing: -0.01em; max-width: 34ch; }
+h3 { font-size: 1.05rem; line-height: 1.3; font-weight: 600; }
+
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.diagram {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 2px var(--shadow);
+}
+.diagram-cap { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+.hint { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+
+/* Part 1 flow */
+.flow-wrap { display: flex; flex-direction: column; gap: 16px; }
+.flow { display: flex; flex-direction: column; }
+.frow {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 16rem) 2.5rem minmax(0, 1fr);
+  align-items: center;
+  padding-block: 10px;
+}
+.frow::before {
+  content: "";
+  position: absolute;
+  left: calc(8rem - 1px);
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--line-strong);
+}
+.frow:first-child::before { top: 50%; }
+.frow:last-child::before { bottom: 50%; }
+.fstep {
+  grid-column: 1;
+  position: relative;
+  z-index: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-weight: 500;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  min-width: 0;
+}
+.frow:not(:first-child) .fstep::before {
+  content: "";
+  position: absolute;
+  left: calc(50% - 6px);
+  top: -9px;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid var(--line-strong);
+}
+.ftick { grid-column: 2; height: 0; border-top: 2px dashed var(--warn-line); }
+.fgap {
+  grid-column: 3;
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  border-left: 4px solid var(--warn);
+  border-radius: 8px;
+  padding: 11px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.fgap strong { font-weight: 600; }
+.fgap p { font-size: 0.92rem; color: var(--fg-2); max-width: 62ch; }
+
+@media (max-width: 680px) {
+  .frow { grid-template-columns: minmax(0, 1fr); gap: 8px; padding-left: 26px; }
+  .frow::before { left: 9px; }
+  .frow:first-child::before { top: 30px; }
+  .frow:last-child::before { bottom: auto; height: 30px; }
+  .ftick { display: none; }
+  .fstep, .fgap { grid-column: 1; }
+  .frow .fstep::before { display: none; }
+  .fstep::after {
+    content: "";
+    position: absolute;
+    left: -22px;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background: var(--line-strong);
+  }
+}
+
+/* Root cause */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--warn);
+  border-radius: 12px;
+  padding: 24px;
+}
+.root .headline { font-size: clamp(1.45rem, 3vw, 2rem); font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
+.lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
+.lane { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lane span {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 0.88rem;
+  background: var(--surface-2);
+}
+.lane span.in { background: var(--surface); border-color: var(--line-strong); font-weight: 500; }
+.lane span.lost { background: transparent; border-style: dashed; color: var(--muted); }
+.lane i { font-style: normal; color: var(--line-strong); padding-left: 12px; line-height: 1; font-size: 0.9rem; }
+.stores { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.store { border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.store.jira { background: var(--surface-2); border: 1px solid var(--line-strong); }
+.store.empty { border: 2px dashed var(--warn-line); background: transparent; }
+.store.empty strong { color: var(--warn); }
+.store p { font-size: 0.9rem; color: var(--fg-2); }
+.stays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: baseline;
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+.stays p { color: var(--fg); font-size: 0.95rem; flex: 1 1 30ch; min-width: 0; }
+
+/* Panels */
+.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  box-shadow: 0 1px 2px var(--shadow);
+}
+.panel > p { color: var(--fg-2); font-size: 0.95rem; }
+.panel .vis { flex: 1 1 auto; display: flex; flex-direction: column; gap: 0; }
+.now {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  color: var(--fg-2);
+}
+.now .tag { flex: 0 0 auto; }
+.tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tag.warn { color: var(--warn); border-color: var(--warn-line); background: var(--surface); }
+.tag.accent { color: var(--accent); border-color: var(--accent-line); background: var(--surface); }
+.tag.solid { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+.state {
+  border: 1px solid var(--accent-line);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.86rem;
+}
+.state-top {
+  background: var(--accent-soft);
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+.state dl { display: grid; grid-template-columns: minmax(0, 7.5rem) minmax(0, 1fr); }
+.state dt, .state dd { padding: 6px 12px; border-top: 1px solid var(--line); min-width: 0; }
+.state dt { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); padding-top: 8px; }
+.state dd { color: var(--fg); }
+
+.chain { display: flex; flex-direction: column; gap: 0; }
+.chain li {
+  position: relative;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  background: var(--surface);
+}
+.chain li.src { background: var(--accent-soft); border-color: var(--accent-line); font-weight: 500; }
+.chain li + li { margin-top: 22px; }
+.chain li + li::before {
+  content: "";
+  position: absolute;
+  left: 22px;
+  top: -23px;
+  width: 2px;
+  height: 14px;
+  background: var(--accent-line);
+}
+.chain li + li::after {
+  content: "";
+  position: absolute;
+  left: 17px;
+  top: -10px;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid var(--accent-line);
+}
+
+.fan { display: flex; flex-direction: column; gap: 0; }
+.fan .src {
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 500;
+  font-size: 0.9rem;
+  align-self: flex-start;
+}
+.fan ul {
+  margin-left: 18px;
+  border-left: 2px solid var(--accent-line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-block: 12px 0;
+}
+.fan li {
+  position: relative;
+  margin-left: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.88rem;
+  background: var(--surface);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fan li::before {
+  content: "";
+  position: absolute;
+  left: -23px;
+  top: 50%;
+  width: 21px;
+  height: 2px;
+  background: var(--accent-line);
+}
+.fan li:last-child::after {
+  content: "";
+  position: absolute;
+  left: -25px;
+  top: calc(50% + 1px);
+  bottom: -2px;
+  width: 4px;
+  background: var(--surface);
+}
+
+/* Part 3 architecture */
+.arch svg { display: block; width: 100%; min-width: 900px; height: auto; }
+.s-box { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.25; }
+.s-new { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+.s-chg { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.s-line { fill: none; stroke: var(--line-strong); stroke-width: 1.75; }
+.s-line-a { fill: none; stroke: var(--accent); stroke-width: 1.75; }
+.s-loop { fill: none; stroke: var(--accent-line); stroke-width: 1.5; stroke-dasharray: 6 5; }
+.s-div { fill: none; stroke: var(--accent-line); stroke-width: 1; }
+.s-head { fill: var(--line-strong); }
+.s-head-a { fill: var(--accent); }
+.s-head-l { fill: var(--accent-line); }
+.s-dot { fill: var(--accent); }
+.s-t { fill: var(--fg); font-family: var(--sans); font-size: 14px; }
+.s-b { font-weight: 600; font-size: 15px; }
+.s-m { fill: var(--muted); font-family: var(--sans); font-size: 12.5px; }
+.s-k { fill: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; }
+.s-ka { fill: var(--accent); font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.84rem; color: var(--fg-2); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 22px; height: 14px; border-radius: 3px; display: inline-block; flex: 0 0 auto; }
+.sw.new { background: var(--accent-soft); border: 1.5px solid var(--accent); }
+.sw.chg { background: var(--surface); border: 1.5px dashed var(--accent); }
+.sw.same { background: var(--surface); border: 1.5px solid var(--line-strong); }
+
+.blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; }
+.block {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.block-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; }
+.block ul.pts { display: flex; flex-direction: column; gap: 7px; }
+.block ul.pts li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 0.93rem;
+  color: var(--fg-2);
+}
+.block ul.pts li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.62em;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--accent-line);
+}
+.ex { display: flex; flex-direction: column; gap: 6px; }
+.ex li {
+  font-size: 0.86rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--fg-2);
+}
+.cmp { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.cmp div { border-radius: 6px; padding: 8px 10px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cmp .before { background: var(--surface-2); color: var(--muted); }
+.cmp .after { background: var(--accent-soft); color: var(--fg); font-family: var(--mono); font-size: 0.78rem; line-height: 1.5; }
+.cmp .after .tag, .cmp .before .tag { align-self: flex-start; font-family: var(--mono); }
+.say { font-family: var(--mono); font-size: 0.84rem; color: var(--accent); }
+
+/* Part 4 playbooks */
+.pb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 20px; align-items: start; }
+.ocard {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 0 6px 20px var(--shadow);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.ocard header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px 0;
+}
+.ocard h3 { padding: 10px 18px 14px; font-size: 1.12rem; border-bottom: 1px solid var(--line); }
+.steps { display: flex; flex-direction: column; }
+.steps li { border-bottom: 1px solid var(--line); }
+.steps label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 11px 18px;
+  cursor: pointer;
+}
+.steps input {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.steps .txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.steps .txt strong { font-weight: 600; font-size: 0.95rem; }
+.steps .txt span { font-size: 0.86rem; color: var(--muted); }
+.steps label:hover { background: var(--surface-2); }
+.ocard footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  padding: 14px 18px;
+  background: var(--surface-2);
+}
+.btn {
+  display: inline-block;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  font-size: 0.92rem;
+  padding: 8px 18px;
+  border-radius: 7px;
+}
+.ocard footer p { font-size: 0.85rem; color: var(--muted); flex: 1 1 20ch; min-width: 0; }
+
+.side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.later { display: flex; flex-direction: column; gap: 12px; }
+.later li { display: flex; flex-direction: column; gap: 6px; }
+.later .name { font-weight: 600; font-size: 0.93rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chips span {
+  font-size: 0.8rem;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--fg-2);
+}
+.chips.seq { gap: 6px 20px; }
+.chips.seq span { position: relative; }
+.chips.seq span + span::before { content: "\2192"; position: absolute; left: -16px; top: 50%; transform: translateY(-52%); color: var(--muted); font-size: 0.8rem; }
+.chips.acc span { border-color: var(--accent-line); background: var(--accent-soft); color: var(--fg); }
+
+.settings { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.settings .bar { background: var(--surface-2); padding: 8px 14px; font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+.settings ul { display: flex; flex-direction: column; }
+.settings li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+.settings li > span:first-child { min-width: 0; }
+.tog {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  position: relative;
+}
+.tog::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.tog.on { background: var(--accent); }
+.tog.on::after { left: 19px; }
+.val { font-family: var(--mono); font-size: 0.78rem; color: var(--fg-2); text-align: right; }
+.settings .foot { padding: 10px 14px; border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--fg-2); background: var(--accent-soft); }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 20px; align-items: start; }
+
+/* Part 5 timeline */
+.timeline { display: flex; flex-direction: column; }
+.timeline li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  gap: 16px;
+  padding-bottom: 22px;
+}
+.timeline li:last-child { padding-bottom: 0; }
+.timeline li::before {
+  content: "";
+  position: absolute;
+  left: calc(1.25rem - 1px);
+  top: 2.5rem;
+  bottom: 0;
+  width: 2px;
+  background: var(--line-strong);
+}
+.timeline li:last-child::before { display: none; }
+.timeline .n {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  color: var(--accent);
+}
+.timeline li:first-child .n { background: var(--accent); color: var(--accent-fg); }
+.timeline .body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  min-width: 0;
+}
+.timeline .body p { font-size: 0.93rem; color: var(--fg-2); max-width: 62ch; }
+.note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-left: 3px solid var(--accent);
+  padding: 4px 0 4px 14px;
+  max-width: 68ch;
+  color: var(--fg-2);
+}
+
+/* Part 6 decide */
+.decide {
+  background: var(--fg);
+  color: var(--bg);
+  border-radius: 14px;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.decide h2 { font-size: clamp(1.4rem, 2.6vw, 1.8rem); font-weight: 600; line-height: 1.2; }
+.decide .eyebrow { color: var(--accent-line); }
+.qs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 14px; }
+.q {
+  border: 1px solid var(--muted);
+  border-radius: 10px;
+  padding: 18px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.q .lbl {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.9rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-line);
+  color: var(--fg);
+}
+.q p { font-size: 1.05rem; line-height: 1.45; }
+.q p + p { font-size: 0.88rem; opacity: 0.8; }
+.q > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.assume { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--muted); padding-top: 18px; }
+.assume ul { display: flex; flex-direction: column; gap: 8px; }
+.assume li { display: flex; gap: 10px; align-items: baseline; font-size: 0.94rem; }
+.assume .tag { background: transparent; color: var(--bg); border-color: var(--muted); }
+
+.foot-note { padding-top: 28px; font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+  .nav a, .steps label { transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
+}
+@media (max-width: 520px) {
+  .root, .decide { padding: 20px 16px; }
+  .diagram { padding: 14px; }
+  .state dl { grid-template-columns: minmax(0, 1fr); }
+  .state dt { border-top: 1px solid var(--line); padding-bottom: 0; }
+  .state dd { border-top: 0; padding-top: 2px; }
+}
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="head">
+    <p class="eyebrow accent">Secretary plan, for your decision</p>
+    <h1>Give Secretary a model of your work</h1>
+    <blockquote class="quote">
+      <p>"I build this app to be my secretary. It should understand my work and help me organize the work on my plate, doing the chores so I can focus on real work. Instead it feels like a control panel with buttons I can click."</p>
+      <p>"The app doesn't understand my work, can't give me the right suggestion, didn't track what should be changed or updated when I'm in the middle of something."</p>
+      <cite>Rick, on the current build</cite>
+    </blockquote>
+    <div class="glance">
+      <div>
+        <span class="eyebrow warn">What is wrong</span>
+        <p>Each input is handled on its own. Nothing holds your working state, so nothing can follow through.</p>
+      </div>
+      <div>
+        <span class="eyebrow accent">The plan</span>
+        <p>Keep a state for each piece of work in flight. Intake, chat, Today and the ticket view read it. Rules propose the follow-on chores.</p>
+      </div>
+      <div>
+        <span class="eyebrow">What stays</span>
+        <p>Every Jira write still needs your approval. Code decides what gets done.</p>
+      </div>
+    </div>
+    <nav class="nav" aria-label="Sections">
+      <a href="#diagnosis">Diagnosis</a>
+      <a href="#understand">Understanding</a>
+      <a href="#proposal">Work model</a>
+      <a href="#playbooks">Playbooks</a>
+      <a href="#order">Build order</a>
+      <a href="#decide">Your call</a>
+    </nav>
+  </header>
+
+  <!-- Part 1 -->
+  <section class="part" id="diagnosis" aria-labelledby="diagnosis-h">
+    <div class="part-head">
+      <p class="eyebrow warn">Diagnosis</p>
+      <h2 id="diagnosis-h">Why it feels like a control panel</h2>
+      <p class="prose">This is what happens to a paste or a chat message today. Each step works. The gaps sit between them.</p>
+    </div>
+
+    <figure class="diagram flow-wrap">
+      <div class="diagram-cap">
+        <span class="eyebrow">How it works now</span>
+        <span class="legend"><span><span class="tag warn">Gap</span> where the secretary falls short</span></span>
+      </div>
+      <div class="scroll" tabindex="0" role="group" aria-label="Current flow from input to one local row, with five gaps">
+        <div class="flow">
+          <div class="frow">
+            <div class="fstep">Paste or chat message</div>
+          </div>
+          <div class="frow">
+            <div class="fstep">Text search over cached ticket summaries</div>
+            <div class="ftick" aria-hidden="true"></div>
+            <div class="fgap">
+              <span class="tag warn">Gap</span>
+              <strong>The secretary never looks anything up.</strong>
+              <p>Intake only sees tickets already in the local cache that match your words. It reads Jira live only for a key you typed. If Platform's cert ticket is outside the sync scope, nothing can find it.</p>
+            </div>
+          </div>
+          <div class="frow">
+            <div class="fstep">One model call picks the one action that literally matches the words</div>
+            <div class="ftick" aria-hidden="true"></div>
+            <div class="fgap">
+              <span class="tag warn">Gap</span>
+              <strong>The model is told to do the minimum.</strong>
+              <p>The prompt says "prefer the fewest actions".</p>
+            </div>
+          </div>
+          <div class="frow">
+            <div class="fstep">One card per write</div>
+            <div class="ftick" aria-hidden="true"></div>
+            <div class="fgap">
+              <span class="tag warn">Gap</span>
+              <strong>Every write is its own card.</strong>
+              <p>You approve per keystroke. Nothing groups the writes into one outcome.</p>
+            </div>
+          </div>
+          <div class="frow">
+            <div class="fstep">You approve</div>
+            <div class="ftick" aria-hidden="true"></div>
+            <div class="fgap">
+              <span class="tag warn">Gap</span>
+              <strong>Nothing is prepared ahead of you.</strong>
+              <p>Today lists overdue waits and woken tickets with buttons. Every chore waits for a click.</p>
+            </div>
+          </div>
+          <div class="frow">
+            <div class="fstep">One local row</div>
+            <div class="ftick" aria-hidden="true"></div>
+            <div class="fgap">
+              <span class="tag warn">Gap</span>
+              <strong>A wait is one local row.</strong>
+              <p>Approving a dependency inserts a row in the local database. The ticket gets no comment, no blocked link and no status change. Mirroring to Jira exists, as an opt-in switch hidden in a sheet.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="root">
+      <p class="eyebrow warn">Root cause</p>
+      <p class="headline">The app has no model of your work.</p>
+      <p class="prose">Each paste, chat message and page is handled on its own. Jira holds the shared facts. Nothing holds your working state.</p>
+      <div class="lanes" role="group" aria-label="Three inputs, each handled alone">
+        <div class="lane">
+          <span class="in">Paste</span><i aria-hidden="true">&#8595;</i>
+          <span>One proposal</span><i aria-hidden="true">&#8595;</i>
+          <span class="lost">Context dropped</span>
+        </div>
+        <div class="lane">
+          <span class="in">Chat message</span><i aria-hidden="true">&#8595;</i>
+          <span>One answer</span><i aria-hidden="true">&#8595;</i>
+          <span class="lost">Context dropped</span>
+        </div>
+        <div class="lane">
+          <span class="in">Ticket page or Today</span><i aria-hidden="true">&#8595;</i>
+          <span>Buttons</span><i aria-hidden="true">&#8595;</i>
+          <span class="lost">Context dropped</span>
+        </div>
+      </div>
+      <div class="stores">
+        <div class="store jira">
+          <strong>Jira</strong>
+          <p>Shared facts. Tickets, fields, status, links.</p>
+        </div>
+        <div class="store empty">
+          <strong>Your working state</strong>
+          <p>Where you are, what you wait on, what you promised. Nothing holds it.</p>
+        </div>
+      </div>
+      <div class="stays">
+        <span class="tag accent">Stays</span>
+        <p>Every Jira write still needs your approval. Code decides what gets done. The model only answers narrow questions.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Part 2 -->
+  <section class="part" id="understand" aria-labelledby="understand-h">
+    <div class="part-head">
+      <p class="eyebrow accent">Understanding</p>
+      <h2 id="understand-h">What "understand my work" means in code</h2>
+      <p class="prose">Three things are missing. Each one is something code can hold and check.</p>
+    </div>
+
+    <div class="panels">
+      <article class="panel">
+        <span class="eyebrow accent">Where you are</span>
+        <p>For each piece of work in flight, a small record of its state.</p>
+        <div class="vis">
+          <div class="state" role="group" aria-label="Example work item state for PAY-12">
+            <div class="state-top"><span>PAY-12</span><span>cert renewal</span></div>
+            <dl>
+              <dt>Goal</dt><dd>Renew the payments cert</dd>
+              <dt>Current step</dt><dd>Waiting on Platform</dd>
+              <dt>Involved</dt><dd>Sarah (Platform), Dana</dd>
+              <dt>Waits on</dt><dd>Platform issues the cert</dd>
+              <dt>Commitments</dt><dd>"I'll send Dana an ETA Thursday"</dd>
+              <dt>Open questions</dt><dd>Who deploys the new cert?</dd>
+              <dt>Next expected</dt><dd class="num">Cert from Platform, 17 Oct</dd>
+            </dl>
+          </div>
+        </div>
+        <div class="now"><span class="tag">Now</span><span>The only state is Jira fields plus isolated wait rows.</span></div>
+      </article>
+
+      <article class="panel">
+        <span class="eyebrow accent">Continuity</span>
+        <p>A new input lands on the work it belongs to and updates its state.</p>
+        <div class="vis">
+          <ol class="chain" aria-label="Example chain of effects">
+            <li class="src">"Sarah says Friday now"</li>
+            <li>Cert wait on PAY-12, expected date moves</li>
+            <li>What you told Dana is stale</li>
+            <li>Sprint fit changes</li>
+          </ol>
+        </div>
+        <div class="now"><span class="tag">Now</span><span>Retrieval matches words. It has no idea which work is ongoing.</span></div>
+      </article>
+
+      <article class="panel">
+        <span class="eyebrow accent">Consequences</span>
+        <p>When one fact changes, code works out what else is now stale and proposes updates.</p>
+        <div class="vis">
+          <div class="fan" role="group" aria-label="One changed fact fans out to five updates">
+            <span class="src">One fact changes</span>
+            <ul>
+              <li><span>Downstream dates</span></li>
+              <li><span>A comment on the ticket</span></li>
+              <li><span>People owed an ETA</span></li>
+              <li><span>Sprint fit</span></li>
+              <li><span>Ticket status</span></li>
+            </ul>
+          </div>
+        </div>
+        <div class="now"><span class="tag">Now</span><span>A change yields one proposal. The rest silently goes out of date.</span></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- Part 3 -->
+  <section class="part" id="proposal" aria-labelledby="proposal-h">
+    <div class="part-head">
+      <p class="eyebrow accent">The proposal</p>
+      <h2 id="proposal-h">A work model, and everything reads from it</h2>
+      <p class="prose">Inputs become events. Events update a state per work item. Rules read the state and produce outcome cards. Intake, chat, the ticket view and Today read the same state.</p>
+    </div>
+
+    <figure class="diagram">
+      <div class="diagram-cap">
+        <div class="legend">
+          <span><span class="sw new" aria-hidden="true"></span>New</span>
+          <span><span class="sw chg" aria-hidden="true"></span>Exists, changes to read the model</span>
+          <span><span class="sw same" aria-hidden="true"></span>Stays as is</span>
+        </div>
+        <span class="hint">Scroll sideways on a narrow screen</span>
+      </div>
+      <div class="scroll arch" tabindex="0" role="group" aria-label="Work model architecture diagram">
+        <svg viewBox="0 0 1100 600" role="img" aria-labelledby="arch-title">
+          <title id="arch-title">Inputs feed an event log, which updates work item state. Consequence rules read the state and produce outcome cards that you approve, leading to Jira and local writes. Intake, chat, the ticket view and Today read the state.</title>
+          <defs>
+            <marker id="wm-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="s-head"></path></marker>
+            <marker id="wm-ha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="s-head-a"></path></marker>
+            <marker id="wm-hl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="s-head-l"></path></marker>
+          </defs>
+
+          <!-- Inputs -->
+          <text x="16" y="96" class="s-k">INPUTS</text>
+          <rect x="16" y="108" width="196" height="36" rx="6" class="s-box"></rect>
+          <text x="30" y="131" class="s-t">Paste</text>
+          <rect x="16" y="154" width="196" height="36" rx="6" class="s-box"></rect>
+          <text x="30" y="177" class="s-t">Chat message</text>
+          <rect x="16" y="200" width="196" height="36" rx="6" class="s-box"></rect>
+          <text x="30" y="223" class="s-t">Approval</text>
+          <rect x="16" y="246" width="196" height="36" rx="6" class="s-box"></rect>
+          <text x="30" y="269" class="s-t">Jira change at sync</text>
+          <rect x="16" y="292" width="196" height="36" rx="6" class="s-box"></rect>
+          <text x="30" y="315" class="s-t">Draft marked sent</text>
+          <rect x="16" y="338" width="196" height="36" rx="6" class="s-box"></rect>
+          <text x="30" y="361" class="s-t">Wait change</text>
+          <rect x="16" y="384" width="196" height="36" rx="6" class="s-box"></rect>
+          <text x="30" y="407" class="s-t">Ticket viewed or edited</text>
+
+          <!-- Bus to event log -->
+          <path d="M212 126 H236 M212 172 H236 M212 218 H236 M212 264 H236 M212 310 H236 M212 356 H236 M212 402 H236 M236 126 V402" class="s-line"></path>
+          <path d="M236 264 H258" class="s-line" marker-end="url(#wm-h)"></path>
+
+          <!-- Event log -->
+          <rect x="262" y="219" width="140" height="90" rx="8" class="s-new"></rect>
+          <text x="276" y="244" class="s-t s-b">Event log</text>
+          <text x="276" y="266" class="s-m">every input and</text>
+          <text x="276" y="283" class="s-m">change, attached</text>
+          <text x="276" y="300" class="s-m">to a work item</text>
+
+          <path d="M402 264 H448" class="s-line-a" marker-end="url(#wm-ha)"></path>
+
+          <!-- Work item state -->
+          <rect x="452" y="150" width="236" height="228" rx="10" class="s-new"></rect>
+          <text x="468" y="177" class="s-t s-b">Work item state</text>
+          <text x="468" y="196" class="s-ka">FIXED SCHEMA</text>
+          <path d="M468 208 H672" class="s-div"></path>
+          <circle cx="474" cy="226" r="3" class="s-dot"></circle>
+          <text x="486" y="231" class="s-t">Current step</text>
+          <circle cx="474" cy="250" r="3" class="s-dot"></circle>
+          <text x="486" y="255" class="s-t">Blockers and waits</text>
+          <circle cx="474" cy="274" r="3" class="s-dot"></circle>
+          <text x="486" y="279" class="s-t">Commitments with dates</text>
+          <circle cx="474" cy="298" r="3" class="s-dot"></circle>
+          <text x="486" y="303" class="s-t">Open questions</text>
+          <circle cx="474" cy="322" r="3" class="s-dot"></circle>
+          <text x="486" y="327" class="s-t">Next expected event</text>
+          <text x="468" y="360" class="s-m">model folds in, code validates</text>
+
+          <!-- Intake and chat -->
+          <rect x="452" y="20" width="236" height="64" rx="8" class="s-chg"></rect>
+          <text x="468" y="46" class="s-t s-b">Intake and chat</text>
+          <text x="468" y="68" class="s-m">read the state first</text>
+          <path d="M570 150 V88" class="s-line-a" marker-end="url(#wm-ha)"></path>
+          <text x="580" y="124" class="s-ka">READS</text>
+
+          <!-- Ticket view and Today -->
+          <rect x="452" y="446" width="236" height="64" rx="8" class="s-chg"></rect>
+          <text x="468" y="472" class="s-t s-b">Ticket view and Today</text>
+          <text x="468" y="494" class="s-m">suggestions where you are</text>
+          <path d="M570 378 V442" class="s-line-a" marker-end="url(#wm-ha)"></path>
+          <text x="580" y="415" class="s-ka">SHOWS</text>
+
+          <path d="M688 264 H734" class="s-line-a" marker-end="url(#wm-ha)"></path>
+
+          <!-- Consequence rules -->
+          <rect x="738" y="219" width="140" height="90" rx="8" class="s-new"></rect>
+          <text x="752" y="244" class="s-t s-b">Consequence</text>
+          <text x="752" y="263" class="s-t s-b">rules</text>
+          <text x="752" y="290" class="s-m">one switch each</text>
+
+          <path d="M878 264 H924" class="s-line-a" marker-end="url(#wm-ha)"></path>
+
+          <!-- Outcome cards -->
+          <rect x="928" y="196" width="156" height="136" rx="8" class="s-new"></rect>
+          <text x="942" y="222" class="s-t s-b">Outcome cards</text>
+          <text x="942" y="246" class="s-m">one per situation</text>
+          <text x="942" y="266" class="s-m">steps listed,</text>
+          <text x="942" y="284" class="s-m">each untickable,</text>
+          <text x="942" y="302" class="s-m">one Approve</text>
+
+          <path d="M1006 332 V368" class="s-line" marker-end="url(#wm-h)"></path>
+
+          <!-- Approve -->
+          <rect x="928" y="372" width="156" height="48" rx="8" class="s-box"></rect>
+          <text x="942" y="401" class="s-t s-b">You approve</text>
+
+          <path d="M1006 420 V456" class="s-line" marker-end="url(#wm-h)"></path>
+
+          <!-- Writes -->
+          <rect x="928" y="460" width="156" height="58" rx="8" class="s-box"></rect>
+          <text x="942" y="485" class="s-t s-b">Jira writes</text>
+          <text x="942" y="505" class="s-m">and local writes</text>
+
+          <!-- Loop back -->
+          <path d="M1006 518 V560 H114 V424" class="s-loop" marker-end="url(#wm-hl)"></path>
+          <text x="560" y="586" text-anchor="middle" class="s-m">Approvals and writes come back as events</text>
+        </svg>
+      </div>
+    </figure>
+
+    <div class="blocks">
+      <article class="block">
+        <div class="block-head"><h3>Work items with an event log</h3><span class="tag accent">Event log</span></div>
+        <ul class="pts">
+          <li>A local table for pieces of work in flight. Each one is a group of the tickets that serve one goal, built by code from links, epics, shared waits and what arrives together; often a single ticket, by default not limited to one.</li>
+          <li>Every input and change becomes an event.</li>
+          <li>Code attaches events by ticket key, thread, owner and names. It asks only when it cannot tell.</li>
+        </ul>
+      </article>
+
+      <article class="block">
+        <div class="block-head"><h3>A state kept current</h3><span class="tag accent">Work item state</span></div>
+        <ul class="pts">
+          <li>After each event the state updates in a fixed schema.</li>
+          <li>One narrow model call folds the new event into the previous state. That is its only job.</li>
+          <li>Code checks the result against the facts it holds and rejects invented dates or people.</li>
+          <li>The state shows on the ticket and on Today as a short status note you can edit. Your corrections are learning.</li>
+        </ul>
+      </article>
+
+      <article class="block">
+        <div class="block-head"><h3>Consequence rules</h3><span class="tag accent">Rules</span></div>
+        <ul class="pts">
+          <li>Deterministic rules over the work model. Each one produces proposals or an outcome card.</li>
+        </ul>
+        <ul class="ex" aria-label="Example rules">
+          <li>Expected date moved. Update the wait, dependent due dates and anyone owed an ETA.</li>
+          <li>Blocker closed. Resume, and say so on the ticket.</li>
+          <li>A commitment is due today.</li>
+          <li>A teammate changed your ticket. Read it. Is a reply owed?</li>
+          <li>A wait went unanswered past the chase interval.</li>
+        </ul>
+        <ul class="pts">
+          <li>Each rule has a switch. Reject a rule twice on the same work item and it goes quiet there.</li>
+        </ul>
+      </article>
+
+      <article class="block">
+        <div class="block-head"><h3>Intake and chat read the state first</h3><span class="tag accent">Intake and chat</span></div>
+        <ul class="pts">
+          <li>The classify step gets the work item's state block before any candidate tickets.</li>
+        </ul>
+        <div class="cmp">
+          <div class="before"><span class="tag">Now</span>Fifteen summaries sharing a word.</div>
+          <div class="after"><span class="tag accent">With the model</span>PAY-12: cert renewal, waiting on Platform since 13 Oct, expected 17 Oct, Dana was promised an ETA on 15 Oct.</div>
+        </div>
+        <ul class="pts">
+          <li>Chat answers <span class="say">"Where am I on the cert?"</span> and <span class="say">"What changed since this morning?"</span></li>
+          <li>Playbooks become the actions the rules produce.</li>
+        </ul>
+      </article>
+
+      <article class="block">
+        <div class="block-head"><h3>Suggestions where you are</h3><span class="tag accent">Ticket view and Today</span></div>
+        <ul class="pts">
+          <li>Open a ticket, start a draft, or say <span class="say">"I'm on PAY-12 now"</span>. You see that work item's state and next moves, ranked against sprint and dates.</li>
+          <li>New input that arrives mid-task is triaged against your current work. Either it changes what you are doing, or it is parked with a reason and comes back when you finish.</li>
+        </ul>
+      </article>
+
+      <article class="block">
+        <div class="block-head"><h3>Feed it more with less effort</h3><span class="tag accent">Inputs</span></div>
+        <ul class="pts">
+          <li>Teams and Outlook stay out by design. Pasting remains the channel.</li>
+          <li>Each paste counts. It attaches to ongoing work, updates the state and triggers consequences.</li>
+          <li>A short end-of-day pass asks only what the rules could not settle.</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- Part 4 -->
+  <section class="part" id="playbooks" aria-labelledby="playbooks-h">
+    <div class="part-head">
+      <p class="eyebrow accent">Playbooks</p>
+      <h2 id="playbooks-h">The chores, done as one outcome</h2>
+      <p class="prose">A playbook turns one situation into one card. Every step is listed, each one can be unticked, and one Approve runs them all.</p>
+    </div>
+
+    <div class="pb-grid">
+      <article class="ocard" aria-label="Outcome card mockup for the waiting on someone playbook">
+        <header>
+          <span class="tag solid">Waiting on someone</span>
+          <span class="mono muted">PAY-12</span>
+        </header>
+        <h3>Track wait on Platform for the cert on PAY-12</h3>
+        <ul class="steps">
+          <li><label><input type="checkbox" checked><span class="txt"><strong>Look up their ticket</strong><span>Live Jira search in the owner's projects. If found, add a "blocked by" link. If not, track a person or team wait.</span></span></label></li>
+          <li><label><input type="checkbox" checked><span class="txt"><strong>Comment on your ticket</strong><span>Who, what, expected when, and the link.</span></span></label></li>
+          <li><label><input type="checkbox" checked><span class="txt"><strong>Move to Blocked or On hold</strong><span>Only when the project has that status and your policy says so.</span></span></label></li>
+          <li><label><input type="checkbox" checked><span class="txt"><strong>Mirror the wait into Jira</strong><span>On by default.</span></span></label></li>
+          <li><label><input type="checkbox" checked><span class="txt"><strong>Set the next follow-up</strong><span>From the expected date, or from how fast the owner usually answers.</span></span></label></li>
+          <li><label><input type="checkbox" checked><span class="txt"><strong>Prepare the request message</strong><span>Only when the ask has not gone out yet.</span></span></label></li>
+        </ul>
+        <footer>
+          <span class="btn" aria-hidden="true">Approve</span>
+          <p>One Approve runs every ticked step. A failed step is reported.</p>
+        </footer>
+      </article>
+
+      <div class="side">
+        <div class="block">
+          <div class="block-head"><h3>Later playbooks</h3><span class="tag">Same card shape</span></div>
+          <ul class="later">
+            <li>
+              <span class="name">Wait resolved</span>
+              <div class="chips seq"><span>Resolve</span><span>Comment</span><span>Unblock</span><span>Wake</span></div>
+            </li>
+            <li>
+              <span class="name">Chase due</span>
+              <div class="chips seq"><span>Draft</span><span>Log the send</span><span>Optional comment</span></div>
+            </li>
+            <li>
+              <span class="name">Ticket done</span>
+              <div class="chips seq"><span>Transition</span><span>Comment</span><span>Resolve its waits</span><span>Wake dependents</span></div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="two">
+      <div class="block">
+        <div class="block-head"><h3>Standing instructions</h3><span class="tag">Settings page</span></div>
+        <p class="prose">A Secretary settings page with switches the playbooks read.</p>
+        <div class="settings" role="group" aria-label="Standing instructions settings mockup">
+          <div class="bar">Settings / Secretary / Standing instructions</div>
+          <ul>
+            <li><span>Comment when I start waiting</span><span class="tog on" role="img" aria-label="On"></span></li>
+            <li><span>Set Blocked when I start waiting</span><span class="tog" role="img" aria-label="Off"></span></li>
+            <li><span>Mirror waits to Jira</span><span class="tog on" role="img" aria-label="On"></span></li>
+            <li><span>Chase interval per owner kind</span><span class="val num">person, team, vendor</span></li>
+          </ul>
+          <p class="foot">Untick the same step twice and the app offers to make it policy.</p>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="block-head"><h3>Look things up</h3><span class="tag">Live Jira</span></div>
+        <ul class="pts">
+          <li>Teams and contacts gain the Jira projects and boards they work in.</li>
+          <li>Each wait gets one bounded live Jira search.</li>
+          <li>Open waits with no linked ticket get a "find their ticket" action.</li>
+          <li>Chat gets the same live search. Its hand-off to intake carries what it found.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Part 5 -->
+  <section class="part" id="order" aria-labelledby="order-h">
+    <div class="part-head">
+      <p class="eyebrow accent">Build order</p>
+      <h2 id="order-h">Six phases, each one usable on its own</h2>
+    </div>
+
+    <ol class="timeline">
+      <li>
+        <span class="n">1</span>
+        <div class="body">
+          <h3>Work model and state</h3>
+          <p>Work items, the event log and the state kept current.</p>
+          <div class="chips acc"><span>Work items with an event log</span><span>A state kept current</span></div>
+        </div>
+      </li>
+      <li>
+        <span class="n">2</span>
+        <div class="body">
+          <h3>Intake and chat read the state</h3>
+          <p>The classify step and chat get the state block first.</p>
+          <div class="chips acc"><span>Intake and chat read the state first</span></div>
+        </div>
+      </li>
+      <li>
+        <span class="n">3</span>
+        <div class="body">
+          <h3>Consequence rules, in small sets</h3>
+          <p>Start with waits, dates and commitments. Ship the first playbook, waiting on someone.</p>
+          <div class="chips acc"><span>Consequence rules</span><span>Waiting on someone</span></div>
+        </div>
+      </li>
+      <li>
+        <span class="n">4</span>
+        <div class="body">
+          <h3>Suggestions on the ticket and Today</h3>
+          <p>State and ranked next moves where you are.</p>
+          <div class="chips acc"><span>Suggestions where you are</span></div>
+        </div>
+      </li>
+      <li>
+        <span class="n">5</span>
+        <div class="body">
+          <h3>End-of-day capture pass</h3>
+          <p>A short pass that asks only what the rules could not settle.</p>
+          <div class="chips acc"><span>Feed it more with less effort</span></div>
+        </div>
+      </li>
+      <li>
+        <span class="n">6</span>
+        <div class="body">
+          <h3>Standing instructions, live lookup in chat</h3>
+          <p>Policy switches for the playbooks, and chat searches Jira live.</p>
+          <div class="chips acc"><span>Standing instructions</span><span>Look things up</span></div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="note">
+      <p>Each step is a phase with your manual test.</p>
+      <p>The current classify and proposal flow stay. They become consumers of the model. Nothing built is thrown away.</p>
+    </div>
+  </section>
+
+  <!-- Part 6 -->
+  <section class="decide" id="decide" aria-labelledby="decide-h">
+    <div class="part-head">
+      <p class="eyebrow">Your call</p>
+      <h2 id="decide-h">Two questions only you can answer</h2>
+    </div>
+    <div class="qs">
+      <div class="q">
+        <span class="lbl" aria-hidden="true">A</span>
+        <div>
+          <p>Should a work item default to one per active ticket?</p>
+          <p>Decided 18 Oct: no. A work item is a group from day one. Code builds the group from epic and parent, blocks and relates links, shared waits and requesters, and tickets named together in one paste or thread. The user splits or merges, and each correction is learning. State lives at the group level and shows on every ticket in it.</p>
+        </div>
+      </div>
+      <div class="q">
+        <span class="lbl" aria-hidden="true">B</span>
+        <div>
+          <p>How much will you tell the app by hand?</p>
+          <p>"I'm on this now" and end-of-day answers, versus letting it infer from Jira activity and your views alone. Decided 18 Oct: both. Rick will give the app as much as he can, and the app must still infer from Jira activity, pastes, approvals and opened tickets on its own. When it is uncertain it asks a question instead of guessing.</p>
+        </div>
+      </div>
+    </div>
+    <div class="assume">
+      <p class="eyebrow">Assumptions not yet checked</p>
+      <ul>
+        <li><span class="tag">Unverified</span><span>Your Jira projects have a Blocked-like status, and you want it used.</span></li>
+        <li><span class="tag">Unverified</span><span>Other teams' tickets are searchable with your token.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <p class="foot-note">Secretary work model plan. Draft for review, 16 Oct 2026.</p>
+</div>
+
+</body>
+</html>
