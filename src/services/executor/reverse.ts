@@ -35,7 +35,13 @@ export type ReverseOp =
    */
   | { kind: "forget_issue"; issueKey: string }
   /** Deletes a draft that was neither sent nor copied. */
-  | { kind: "delete_draft"; communicationId: string };
+  | { kind: "delete_draft"; communicationId: string }
+  /**
+   * Deletes a contact or team an approval added (D60), checked again when it runs:
+   * only while its columns still equal `created` and nothing uses it.
+   */
+  | { kind: "delete_person"; personId: string; created: Record<string, unknown> }
+  | { kind: "delete_team"; teamId: string; created: Record<string, unknown> };
 
 /** Columns of `people` and `teams` an approval may change, so a revoke restores only those. */
 export const PERSON_COLUMNS = [
@@ -44,7 +50,43 @@ export const PERSON_COLUMNS = [
   "profile",
   "awayUntil",
   "notesMd",
+  "teamId",
 ] as const;
+
+/** Columns a new contact or team is written with (D60), compared before a revoke deletes it. */
+export const CREATED_PERSON_COLUMNS = [
+  "displayName",
+  "jiraUsername",
+  "email",
+  "title",
+  "teamId",
+  "responsibilities",
+  "profile",
+  "notesMd",
+  "awayUntil",
+] as const;
+export const CREATED_TEAM_COLUMNS = [
+  "name",
+  "function",
+  "contactFor",
+  "channel",
+  "escalationPath",
+  "confluenceUrls",
+  "notesMd",
+] as const;
+
+/**
+ * The columns of `row` that differ from what was written when it was added;
+ * empty when it is unchanged. Values compare as JSON, a missing one as null.
+ */
+export function changedSince(
+  row: Record<string, unknown>,
+  created: Record<string, unknown>,
+): string[] {
+  return Object.keys(created).filter(
+    (k) => JSON.stringify(row[k] ?? null) !== JSON.stringify(created[k] ?? null),
+  );
+}
 export const TEAM_COLUMNS = [
   "function",
   "contactFor",

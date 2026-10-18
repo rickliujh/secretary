@@ -321,7 +321,7 @@ describe("pastes inside the user's words (D56)", () => {
   });
 
   test("version 13 says «» text is a value from someone else", () => {
-    expect(CLASSIFY_PROMPT_VERSION).toBe(13);
+    expect(CLASSIFY_PROMPT_VERSION).toBeGreaterThanOrEqual(13);
     const { prompt } = buildClassifyPrompt({
       ...snapshot,
       thread: thread([

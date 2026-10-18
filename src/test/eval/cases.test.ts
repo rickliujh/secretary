@@ -63,6 +63,27 @@ describe("eval cases", () => {
     expect(answered?.expect.forbiddenKinds).toContain("add_comment");
   });
 
+  test("contact cases: an explicit add, a team plus contact, an unknown owner, no duplicate, no bystanders (D60)", () => {
+    const cases = EVAL_CASES.filter((c) => c.name.startsWith("contacts:"));
+    expect(cases).toHaveLength(5);
+    const requires = (kind: string) =>
+      cases.filter((c) => c.expect.required.some((r) => r.kind === kind));
+    const forbids = (kind: "create_person") =>
+      cases.filter((c) => c.expect.forbiddenKinds?.includes(kind));
+    expect(requires("create_team")).toHaveLength(1);
+    expect(requires("create_person")).toHaveLength(3);
+    // The wait on a new contact names the contact's ref; the existing one's id.
+    const owners = cases.flatMap((c) =>
+      c.expect.required.flatMap((r) =>
+        r.kind === "link_dependency" ? [r.fields?.ownerPersonId] : [],
+      ),
+    );
+    expect(owners).toEqual(["$person:1", contactTarget("ana")]);
+    expect(forbids("create_person")).toHaveLength(2);
+    // Pasted text, not the user's own words, in the cases that may add nobody.
+    for (const c of forbids("create_person")) expect(c.source).not.toBe("typed");
+  });
+
   test("wait cases: an answer resolves a wait, a partial one logs a reply, an out-of-office sets the date (D46, D47)", () => {
     const actionOf = (action: string) =>
       EVAL_CASES.filter(

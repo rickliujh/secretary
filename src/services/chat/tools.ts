@@ -684,7 +684,7 @@ export function chatTools(
 
     propose_actions: tool({
       description:
-        "Ask for changes (comment, update fields, move status, create a ticket, track a dependency, draft a message, remember something). The request goes through the Inbox, where the user reviews and approves each proposal.",
+        "Ask for changes (comment, update fields, move status, create a ticket, track a dependency, draft a message, remember something, add a contact or a team, move a contact to another team). The request goes through the Inbox, where the user reviews and approves each proposal.",
       inputSchema: z.object({
         request: z
           .string()

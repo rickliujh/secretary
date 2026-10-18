@@ -1,5 +1,6 @@
 import { and, eq, gte, isNotNull, isNull } from "drizzle-orm";
 import { Cause, Effect, Layer } from "effect";
+import type { z } from "zod";
 import {
   actionsLog,
   communications,
@@ -28,11 +29,23 @@ import {
   setDates,
   setStatus,
 } from "@/services/dependencies/queries";
+import { existingContact, existingTeam } from "@/services/directory/duplicates";
+import {
+  createPerson,
+  createTeam,
+  deletePerson,
+  deleteTeam,
+  personUses,
+  teamUses,
+} from "@/services/directory/queries";
+import { PersonInputSchema, TeamInputSchema } from "@/services/directory/schema";
+import { describeUses } from "@/services/directory/uses";
 import { CreatedIssueSchema, JiraClient, JiraError } from "@/services/jira";
 import { pointsFieldForIssue, storyPointFields } from "@/services/jira/fields";
 import { parseIssueLinks } from "@/services/jira/schemas";
 import {
   describeWaitUpdate,
+  directoryPlaceholders,
   ISSUE_KEY_RE,
   issueRefs,
   type PayloadOf,
@@ -59,7 +72,15 @@ import {
   MappingError,
   proposalTextToWiki,
 } from "./jira-mapping";
-import { PERSON_COLUMNS, pickColumns, type ReverseOp, TEAM_COLUMNS } from "./reverse";
+import {
+  CREATED_PERSON_COLUMNS,
+  CREATED_TEAM_COLUMNS,
+  changedSince,
+  PERSON_COLUMNS,
+  pickColumns,
+  type ReverseOp,
+  TEAM_COLUMNS,
+} from "./reverse";
 import {
   type IssueField,
   type IssueFieldValues,
@@ -828,6 +849,138 @@ const make = Effect.gen(function* () {
       } satisfies ProposalResult;
     });
 
+  /** Input for a Directory write, checked first so a bad value fails the proposal, not the app. */
+  const valid = <S extends z.ZodType>(schema: S, value: z.input<S>) => {
+    const r = schema.safeParse(value);
+    return r.success
+      ? Effect.succeed(value)
+      : Effect.fail(
+          fail(
+            "invalid",
+            r.error.issues.map((i) => `${i.path.join(".") || "value"}: ${i.message}`).join("; "),
+          ),
+        );
+  };
+
+  /** A team a contact is put in must exist (D60); null for none. */
+  const teamFor = (teamId: string | null | undefined) =>
+    Effect.gen(function* () {
+      if (!teamId) return null;
+      const team = yield* q((d) => d.select().from(teams).where(eq(teams.id, teamId)).get());
+      if (!team) return yield* fail("invalid", "That team no longer exists.");
+      return team;
+    });
+
+  /**
+   * Directory creates check for a duplicate and insert as one step, so two
+   * approvals at once cannot both add the same contact or team (D60).
+   */
+  const directoryLock = yield* Effect.makeSemaphore(1);
+
+  /**
+   * A new contact (FR-18, D60), through the Directory query the Context page uses.
+   * When one with the same name, email or Jira user exists by now, nothing is
+   * added and the result names it (`existingId`), so what the thread does with
+   * the new contact uses the existing one instead (FR-18.4).
+   */
+  const addPerson = (p: PayloadOf<"create_person">, proposalId: string) =>
+    Effect.gen(function* () {
+      const all = yield* q((d) => d.select().from(people).all());
+      const existing = existingContact(all, p);
+      if (existing) {
+        yield* audit(proposalId, "create_person", existing.id, p, { skipped: "already a contact" });
+        return {
+          message: `${existing.displayName} was already a contact; using them instead`,
+          personId: existing.id,
+          existingId: existing.id,
+        } satisfies ProposalResult;
+      }
+      yield* teamFor(p.team);
+      const input = yield* valid(PersonInputSchema, {
+        displayName: p.displayName,
+        jiraUsername: p.jiraUsername,
+        email: p.email,
+        title: p.title,
+        teamId: p.team,
+        responsibilities: p.responsibilities,
+        profile: p.profile,
+        notesMd: appendNote(null, p.note),
+      });
+      const id = yield* withDb(createPerson(input));
+      const row = yield* q((d) => d.select().from(people).where(eq(people.id, id)).get());
+      const created = row ? pickColumns(row, CREATED_PERSON_COLUMNS) : {};
+      yield* audit(proposalId, "create_person", id, created, null);
+      return {
+        message: `Added ${p.displayName} to your contacts`,
+        personId: id,
+        undo: { kind: "create_person", id, created },
+      } satisfies ProposalResult;
+    }).pipe(directoryLock.withPermits(1));
+
+  /**
+   * A new team (FR-18, D60), through the Directory query; one with its name that
+   * exists by now is used instead, as for a contact.
+   */
+  const addTeam = (p: PayloadOf<"create_team">, proposalId: string) =>
+    Effect.gen(function* () {
+      const all = yield* q((d) => d.select().from(teams).all());
+      const existing = existingTeam(all, p.name);
+      if (existing) {
+        yield* audit(proposalId, "create_team", existing.id, p, { skipped: "already a team" });
+        return {
+          message: `${existing.name} was already a team; using it instead`,
+          teamId: existing.id,
+          existingId: existing.id,
+        } satisfies ProposalResult;
+      }
+      const input = yield* valid(TeamInputSchema, {
+        name: p.name,
+        function: p.function,
+        contactFor: p.contactFor,
+        channel: p.channel,
+        escalationPath: p.escalationPath,
+        notesMd: appendNote(null, p.note),
+      });
+      const id = yield* withDb(createTeam(input));
+      const row = yield* q((d) => d.select().from(teams).where(eq(teams.id, id)).get());
+      const created = row ? pickColumns(row, CREATED_TEAM_COLUMNS) : {};
+      yield* audit(proposalId, "create_team", id, created, null);
+      return {
+        message: `Added the team ${p.name}`,
+        teamId: id,
+        undo: { kind: "create_team", id, created },
+      } satisfies ProposalResult;
+    }).pipe(directoryLock.withPermits(1));
+
+  /**
+   * Deletes a contact or team a revoke undoes (D60), when it is still as it was
+   * added and nothing uses it; otherwise fails saying why, so it stays.
+   */
+  const deleteAdded = (op: Extract<ReverseOp, { kind: "delete_person" | "delete_team" }>) =>
+    Effect.gen(function* () {
+      const person = op.kind === "delete_person";
+      const id = person ? op.personId : op.teamId;
+      const row = person
+        ? yield* q((d) => d.select().from(people).where(eq(people.id, id)).get())
+        : yield* q((d) => d.select().from(teams).where(eq(teams.id, id)).get());
+      if (!row) return false;
+      const name = "displayName" in row ? row.displayName : row.name;
+      const [they, were, stay] = person ? ["they", "were", "stay"] : ["it", "was", "stays"];
+      if (changedSince(row, op.created).length)
+        return yield* fail(
+          "invalid",
+          `${name} was edited since ${they} ${were} added, so ${they} ${stay}.`,
+        );
+      const uses = describeUses(yield* withDb(person ? personUses(id) : teamUses(id)));
+      if (uses.length)
+        return yield* fail(
+          "invalid",
+          `${name} is still used by ${uses.join(", ")}, so ${they} ${stay}.`,
+        );
+      yield* withDb(person ? deletePerson(id) : deleteTeam(id));
+      return true;
+    });
+
   const runProposal = (
     payload: ProposalPayload,
     opts: { proposalId: string; inboxItemId: string | null },
@@ -838,6 +991,15 @@ const make = Effect.gen(function* () {
         return yield* fail(
           "invalid",
           `Approve the new issue ${unresolved.join(", ")} first; this proposal depends on it.`,
+        );
+      }
+      // A contact or team this needs that is not added yet (D60).
+      const waiting = directoryPlaceholders(payload);
+      if (waiting.length) {
+        const what = waiting.some((r) => r.startsWith("$person:")) ? "contact" : "team";
+        return yield* fail(
+          "invalid",
+          `Approve the new ${what} it needs first (${waiting.join(", ")}); this proposal depends on it.`,
         );
       }
       const { proposalId } = opts;
@@ -972,9 +1134,12 @@ const make = Effect.gen(function* () {
             d.select().from(people).where(eq(people.id, payload.personId)).get(),
           );
           if (!person) return yield* fail("invalid", "That contact no longer exists.");
-          const { profile, ...rest } = payload.changes;
+          const { profile, team, ...rest } = payload.changes;
+          // A move to another team, or out of one (D60).
+          if (team) yield* teamFor(team);
           const set = {
             ...rest,
+            ...(team === undefined ? {} : { teamId: team }),
             profile: { ...(person.profile ?? {}), ...(profile ?? {}) },
             notesMd: appendNote(person.notesMd, payload.noteAppend),
           };
@@ -998,6 +1163,10 @@ const make = Effect.gen(function* () {
             undo: { kind: "update_team", teamId: team.id, ...changedColumns(team, set) },
           } satisfies ProposalResult;
         }
+        case "create_person":
+          return yield* addPerson(payload, proposalId);
+        case "create_team":
+          return yield* addTeam(payload, proposalId);
         case "remember": {
           const id = newId();
           const row = {
@@ -1110,6 +1279,15 @@ const make = Effect.gen(function* () {
         }
         case "restore_person": {
           const set = pickColumns(op.set, PERSON_COLUMNS);
+          // A team deleted since the plan was read: no team rather than a broken link (D60).
+          const team = set.teamId;
+          if (
+            typeof team === "string" &&
+            !(yield* q((d) =>
+              d.select({ id: teams.id }).from(teams).where(eq(teams.id, team)).get(),
+            ))
+          )
+            set.teamId = null;
           if (Object.keys(set).length)
             yield* q((d) => d.update(people).set(set).where(eq(people.id, op.personId)));
           yield* audit(proposalId, "revoke_person", op.personId, set, null);
@@ -1151,6 +1329,18 @@ const make = Effect.gen(function* () {
             if (still) return yield* fail("invalid", `The draft was ${still.status}, so it stays.`);
           }
           yield* audit(proposalId, "revoke_draft", op.communicationId, op, null);
+          return {};
+        }
+        case "delete_person":
+        case "delete_team": {
+          const deleted = yield* deleteAdded(op);
+          yield* audit(
+            proposalId,
+            op.kind === "delete_person" ? "revoke_person_create" : "revoke_team_create",
+            op.kind === "delete_person" ? op.personId : op.teamId,
+            op,
+            deleted ? null : { skipped: "already deleted" },
+          );
           return {};
         }
       }

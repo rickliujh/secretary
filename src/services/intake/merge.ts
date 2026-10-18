@@ -1,10 +1,11 @@
 /**
  * Merges per-item proposals into one ordered list (design.md 7.3 step 5):
- * `$new:n` refs are renumbered into one namespace, a create_issue repeated
- * across items collapses to the first, and exact duplicates are dropped.
+ * `$new:n`, `$person:n` and `$team:n` refs are renumbered into one namespace
+ * each, a create repeated across items collapses to the first, and exact
+ * duplicates are dropped.
  */
 import type { MappedProposal } from "@/prompts/classify";
-import { type ProposalPayload, resolveRefs } from "@/services/proposals/schema";
+import { ownRef, type ProposalPayload, resolveRefs } from "@/services/proposals/schema";
 
 export type MergedProposal = MappedProposal & { itemIndex: number };
 
@@ -17,6 +18,9 @@ const norm = (s: string) =>
 /** Stable identity for duplicate detection, ignoring free-text rationale. */
 function identity(p: ProposalPayload): string {
   if (p.kind === "create_issue") return `create:${p.projectKey}:${norm(p.summary)}`;
+  // One new contact or team per name across items (D60).
+  if (p.kind === "create_person") return `person:${norm(p.displayName)}`;
+  if (p.kind === "create_team") return `team:${norm(p.name)}`;
   if (p.kind === "add_comment") return `comment:${p.target}:${norm(p.bodyMd)}`;
   if (p.kind === "link_dependency") return `dep:${p.target}:${p.externalRef ?? norm(p.label)}`;
   if (p.kind === "link_issues") return `blocks:${p.blocker}:${p.target}`;
@@ -38,27 +42,28 @@ export function mergeItemProposals(
 ): MergedProposal[] {
   const out: MergedProposal[] = [];
   const seen = new Map<string, MergedProposal>();
-  let n = 1;
-  const nextRef = () => {
-    while (reserved.has(`$new:${n}`)) n++;
-    return `$new:${n++}`;
+  const next = new Map<string, number>();
+  // A ref's namespace: "$new", "$person" or "$team".
+  const space = (ref: string) => ref.slice(0, ref.indexOf(":"));
+  const nextRef = (ns: string) => {
+    let n = next.get(ns) ?? 1;
+    while (reserved.has(`${ns}:${n}`)) n++;
+    next.set(ns, n + 1);
+    return `${ns}:${n}`;
   };
   items.forEach((proposals, itemIndex) => {
-    // Local $new:n -> global ref (or the ref of an equivalent earlier create).
+    // Local ref -> global ref (or the ref of an equivalent earlier create).
     const local = new Map<string, string>();
     for (const m of proposals) {
-      if (m.payload.kind !== "create_issue") continue;
+      const own = ownRef(m.payload);
+      if (!own) continue;
       const dup = seen.get(identity(m.payload));
-      local.set(
-        m.payload.ref,
-        dup && dup.payload.kind === "create_issue" ? dup.payload.ref : nextRef(),
-      );
+      local.set(own, (dup && ownRef(dup.payload)) || nextRef(space(own)));
     }
     for (const m of proposals) {
-      const ownRef = m.payload.kind === "create_issue" ? m.payload.ref : null;
+      const own = ownRef(m.payload);
       let payload = resolveRefs(m.payload, local);
-      if (payload.kind === "create_issue" && ownRef)
-        payload = { ...payload, ref: local.get(ownRef) ?? payload.ref };
+      if (own && "ref" in payload) payload = { ...payload, ref: local.get(own) ?? own };
       const key = identity(payload);
       const existing = seen.get(key);
       if (existing) {
@@ -76,11 +81,21 @@ export function mergeItemProposals(
       out.push(merged);
     }
   });
-  // Creates first, in ref order, so later proposals can use their keys.
-  const refNum = (p: ProposalPayload) =>
-    p.kind === "create_issue" ? Number(p.ref.split(":")[1]) : Number.POSITIVE_INFINITY;
+  // Creates first, teams, then contacts (who may be in them), then issues, each in
+  // ref order, so later proposals can use what they make.
+  const GROUP: Partial<Record<ProposalPayload["kind"], number>> = {
+    create_team: 0,
+    create_person: 1,
+    create_issue: 2,
+  };
+  const order = (p: ProposalPayload) => {
+    const own = ownRef(p);
+    return own
+      ? (GROUP[p.kind] ?? 3) * 1_000_000 + Number(own.split(":")[1])
+      : Number.POSITIVE_INFINITY;
+  };
   return out
     .map((m, i) => ({ m, i }))
-    .sort((a, b) => refNum(a.m.payload) - refNum(b.m.payload) || a.i - b.i)
+    .sort((a, b) => order(a.m.payload) - order(b.m.payload) || a.i - b.i)
     .map(({ m }) => m);
 }

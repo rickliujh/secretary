@@ -277,3 +277,51 @@ describe("link_issues edit form (D45)", () => {
     ).toBe(false);
   });
 });
+
+describe("new contacts and teams in the edit form (D60)", () => {
+  const sarah = ProposalPayloadSchema.parse({
+    kind: "create_person",
+    ref: "$person:1",
+    displayName: "Sarah Lee",
+    team: "$team:1",
+    profile: { formality: "formal" },
+  });
+
+  test("an untouched new contact comes back as it was; empty fields are none", () => {
+    const values = toFormValues(sarah);
+    expect(values.team).toBe("$team:1");
+    expect(values.profile__formality).toBe("formal");
+    expect(ProposalPayloadSchema.parse(fromFormValues(sarah, values))).toEqual(sarah);
+    const edited = ProposalPayloadSchema.parse(
+      fromFormValues(sarah, {
+        ...values,
+        team: "",
+        email: "sarah@example.com",
+        profile__formality: "",
+        profile__tone: "dry",
+      }),
+    );
+    expect(edited).toMatchObject({
+      team: null,
+      email: "sarah@example.com",
+      profile: { tone: "dry" },
+    });
+    expect("formality" in (edited as { profile: object }).profile).toBe(false);
+  });
+
+  test("a contact's team: empty is no change, the box takes them out of their team", () => {
+    const move = ProposalPayloadSchema.parse({
+      kind: "update_person",
+      personId: "p-ana",
+      changes: { team: "t-plat" },
+    });
+    const values = toFormValues(move);
+    expect(values.changes__team).toBe("t-plat");
+    expect(fromFormValues(move, { ...values, changes__team: "" })).toMatchObject({ changes: {} });
+    expect(
+      fromFormValues(move, { ...values, changes__team: "", changes__team__clear: "true" }),
+    ).toMatchObject({ changes: { team: null } });
+    const out = ProposalPayloadSchema.parse({ ...move, changes: { team: null } });
+    expect(toFormValues(out).changes__team__clear).toBe("true");
+  });
+});

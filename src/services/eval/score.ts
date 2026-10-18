@@ -52,6 +52,11 @@ function payloadTarget(p: ProposalPayload): string | undefined {
       return p.personId;
     case "update_team":
       return p.teamId;
+    // A new contact or team by its name (D60); its id is made at approval.
+    case "create_person":
+      return p.displayName;
+    case "create_team":
+      return p.name;
     default:
       return undefined;
   }

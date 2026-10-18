@@ -30,6 +30,7 @@ import { inboxDetail, type ProposalView, type ThreadMessage } from "@/services/i
 import type { Source } from "@/services/intake";
 import { hasInput, type MessagePart } from "@/services/intake/thread";
 import { describePayload } from "@/services/proposals/schema";
+import { threadRefs } from "@/services/proposals/thread-refs";
 import { executedRefs, groupSmallAsks } from "@/services/small-asks/bundle";
 import { Composer, type ComposerMessage } from "./composer";
 import { PASTED_HIGHLIGHT } from "./message-doc";
@@ -280,6 +281,8 @@ export function ThreadView({ id }: { id: string }) {
     .at(-1);
   const answering = openQuestion && openQuestion.id !== skipAnswer ? openQuestion : null;
   const created = executedRefs(d.proposals);
+  // The thread's new contacts and teams, for names and selects before they exist (D60).
+  const threadLookups = { ...lookups, refs: threadRefs(d.proposals) };
   const last = d.messages.at(-1);
   const firstUser = d.messages.find((m) => m.role === "user");
   const origin = firstUser?.role === "user" ? firstUser.origin : null;
@@ -311,7 +314,7 @@ export function ThreadView({ id }: { id: string }) {
         key={m.id}
         summary={m.summary}
         proposals={byMessage.get(m.id) ?? []}
-        lookups={lookups}
+        lookups={threadLookups}
         answeringId={answering?.id ?? null}
         created={created}
       />

@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect, Either, Layer } from "effect";
 import {
   inboxItems,
   intakeItems,
@@ -14,15 +14,19 @@ import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redact } from "@/lib/redact";
 import { bindDb, Db } from "@/services/db";
-import { Executor, undoOf } from "@/services/executor";
+import { Executor, ExecutorError, undoOf } from "@/services/executor";
 import { JiraClient } from "@/services/jira";
 import { Sync } from "@/services/sync";
 import { deletedKeys } from "@/services/sync/deleted";
 import {
+  createdIds,
   type DecisionResult,
   describePayload,
+  directoryPlaceholders,
+  directoryRefs,
   effectivePayload,
   issueRefs,
+  ownRef,
   ProposalError,
   type ProposalPayload,
   ProposalPayloadSchema,
@@ -44,8 +48,12 @@ import {
 } from "./revoke";
 import { revokeFacts } from "./revoke-facts";
 import { runRevokeStep } from "./revoke-run";
+import { threadRefs, waitingMessage } from "./thread-refs";
 
 type Row = typeof proposals.$inferSelect;
+
+/** Kinds whose revoke first revokes what the thread did with what they made. */
+const CREATE_KINDS: readonly string[] = ["create_issue", "create_person", "create_team"];
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -114,11 +122,13 @@ const make = Effect.gen(function* () {
       );
     });
 
-  /** Keys of issues already created by this inbox item's proposals, by `$new` ref. */
+  /**
+   * What this inbox item's executed creates made, by their ref: issue keys by
+   * `$new` ref, contact and team ids by `$person` and `$team` ref (D60).
+   */
   const createdRefs = (inboxItemId: string | null) =>
     Effect.gen(function* () {
-      const map = new Map<string, string>();
-      if (!inboxItemId) return map;
+      if (!inboxItemId) return { made: new Map<string, string>(), names: threadRefs([]) };
       const rows = yield* q((d) =>
         d
           .select()
@@ -126,18 +136,13 @@ const make = Effect.gen(function* () {
           .where(
             and(
               eq(proposals.inboxItemId, inboxItemId),
-              eq(proposals.kind, "create_issue"),
-              eq(proposals.status, "executed"),
+              inArray(proposals.kind, ["create_issue", "create_person", "create_team"]),
             ),
           )
           .all(),
       );
-      for (const r of rows) {
-        const payload = effectivePayload(r);
-        const key = (r.result as { issueKey?: string } | null)?.issueKey;
-        if (payload.kind === "create_issue" && key) map.set(payload.ref, key);
-      }
-      return map;
+      // A contact or team that existed by approval maps its ref to that one (FR-18.4).
+      return { made: createdIds(rows), names: threadRefs(rows) };
     });
 
   /** Files the inbox item once nothing is left to decide. */
@@ -211,7 +216,8 @@ const make = Effect.gen(function* () {
       // What earlier approvals already recorded: nothing for a pending proposal.
       const recorded = row.status === "failed" ? payload : original;
       if (edited) payload = yield* parseEdit(row, edited);
-      const resolved = resolveRefs(payload, yield* createdRefs(row.inboxItemId));
+      const refs = yield* createdRefs(row.inboxItemId);
+      const resolved = resolveRefs(payload, refs.made);
       // A ticket a revoke deleted no longer exists, whichever thread proposed acting on it
       // (FR-14.6). A draft only mentions it, and a wait update changes Secretary's own row.
       const deleted = yield* withDb(deletedKeys);
@@ -237,9 +243,15 @@ const make = Effect.gen(function* () {
           .where(eq(proposals.id, id)),
       );
 
-      const outcome = yield* Effect.either(
-        executor.runProposal(resolved, { proposalId: id, inboxItemId: row.inboxItemId }),
-      );
+      // A new contact or team it needs that is not added yet, named (D60).
+      const waiting = directoryPlaceholders(resolved);
+      const outcome = waiting.length
+        ? Either.left(
+            new ExecutorError({ kind: "invalid", message: waitingMessage(waiting, refs.names) }),
+          )
+        : yield* Effect.either(
+            executor.runProposal(resolved, { proposalId: id, inboxItemId: row.inboxItemId }),
+          );
       const result: DecisionResult =
         outcome._tag === "Right"
           ? {
@@ -285,6 +297,8 @@ const make = Effect.gen(function* () {
           .set({ status: "rejected", decidedAt: nowIso() })
           .where(eq(proposals.id, id)),
       );
+      // What needs a rejected create can never run: dropped as after a revoke (D60).
+      if (CREATE_KINDS.includes(row.kind)) yield* rejectOrphans(row, [toSubject(row)], "rejected");
       yield* settleInbox(row.inboxItemId);
     });
 
@@ -443,9 +457,10 @@ const make = Effect.gen(function* () {
           subjects: [subject],
           user: (x: string) => x,
         };
-      // Revoking a ticket first revokes what the thread did to it (FR-14.4).
+      // Revoking a ticket, contact or team first revokes what the thread did with it
+      // (FR-14.4, FR-18.6).
       const siblings =
-        subject.payload.kind === "create_issue" && row.inboxItemId
+        CREATE_KINDS.includes(subject.payload.kind) && row.inboxItemId
           ? (yield* q((d) =>
               d
                 .select()
@@ -494,21 +509,32 @@ const make = Effect.gen(function* () {
 
   /**
    * After a create is revoked, the proposals of its thread still pending that
-   * act on the ticket (or a sub-task revoked with it) can never run: they are
-   * rejected without recording a correction, like a dismiss, and the thread is
-   * filed once nothing is left to decide.
+   * act on the ticket (or a sub-task revoked with it), or use the contact or team
+   * (D60), can never run: they are rejected without recording a correction, like
+   * a dismiss, and the thread is filed once nothing is left to decide.
    */
-  const rejectOrphans = (row: Row, subjects: readonly RevokeSubject[]) =>
+  const rejectOrphans = (
+    row: Row,
+    subjects: readonly RevokeSubject[],
+    how: "revoked" | "rejected" = "revoked",
+  ) =>
     Effect.gen(function* () {
       if (!row.inboxItemId) return;
       const names = new Set(
-        subjects.flatMap((s) =>
-          s.payload.kind === "create_issue"
-            ? [s.payload.ref, (s.result as { issueKey?: string } | null)?.issueKey].filter(
-                (x): x is string => !!x,
-              )
-            : [],
-        ),
+        subjects.flatMap((s) => {
+          const res = (s.result ?? {}) as { issueKey?: string; personId?: string; teamId?: string };
+          const made =
+            s.payload.kind === "create_issue"
+              ? res.issueKey
+              : s.payload.kind === "create_person"
+                ? res.personId
+                : s.payload.kind === "create_team"
+                  ? res.teamId
+                  : undefined;
+          return CREATE_KINDS.includes(s.payload.kind) && "ref" in s.payload
+            ? [s.payload.ref, made].filter((x): x is string => !!x)
+            : [];
+        }),
       );
       if (!names.size) return;
       const pending = yield* q((d) =>
@@ -520,19 +546,34 @@ const make = Effect.gen(function* () {
           )
           .all(),
       );
-      const orphans = pending
-        .filter((p) => issueRefs(effectivePayload(p)).some((r) => names.has(r)))
-        .map((p) => p.id);
-      if (orphans.length)
+      const uses = (p: Row, refs: (x: ProposalPayload) => string[]) =>
+        refs(effectivePayload(p)).some((r) => names.has(r));
+      // What hangs on an orphaned create (a contact in a rejected team) goes too.
+      const orphans: Row[] = [];
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const p of pending) {
+          if (orphans.includes(p) || !(uses(p, issueRefs) || uses(p, directoryRefs))) continue;
+          orphans.push(p);
+          const own = ownRef(effectivePayload(p));
+          if (own) names.add(own);
+          grew = true;
+        }
+      }
+      const reason = (p: Row) =>
+        uses(p, issueRefs)
+          ? `The ticket it acts on was ${how}.`
+          : `The contact or team it needs was ${how}.`;
+      for (const p of orphans)
         yield* q((d) =>
           d
             .update(proposals)
             .set({
               status: "rejected",
               decidedAt: nowIso(),
-              result: { dismissed: true, reason: "The ticket it acts on was revoked." },
+              result: { dismissed: true, reason: reason(p) },
             })
-            .where(and(inArray(proposals.id, orphans), eq(proposals.status, "pending"))),
+            .where(and(eq(proposals.id, p.id), eq(proposals.status, "pending"))),
         );
       yield* settleInbox(row.inboxItemId);
     });

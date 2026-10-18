@@ -530,3 +530,29 @@ Checklist
   action.
 - typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
 
+## Phase 22: New contacts and teams from intake and chat (FR-18, D60)
+
+Branch `feat/22-create-contacts` from `main`.
+
+Tasks
+1. Schema: `create_person`, `create_team` proposal kinds with `$person:n` and
+   `$team:n` refs; refs accepted where person and team ids go; `update_person`
+   gains `team`. Tests.
+2. Classify: flat schema fields and enums, the rule in the prompt, version 14,
+   code validation (refs defined earlier, email, Jira user from the snapshot,
+   duplicates against Context and within the item) with repair. Tests.
+3. Executor: inserts through the Directory queries, duplicate check at approval,
+   ref resolution for the proposals that use them, undo data. Revoke: dependents
+   first, then delete when unchanged and unreferenced. Tests, including mock-Jira
+   free service tests for the whole thread.
+4. UI: cards, edit dialog fields (team select with the thread's new teams),
+   executed cards linking to Context; chat `propose_actions` description.
+5. Eval cases (explicit add, team plus contact, unknown named owner, existing
+   contact not duplicated, bystanders in pasted text) and a live run on the eval
+   model.
+
+Checklist
+- FR-18 AC passes in service tests.
+- The live eval passes the new cases and keeps the old ones.
+- typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
+

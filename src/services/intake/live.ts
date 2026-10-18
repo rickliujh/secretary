@@ -38,9 +38,13 @@ import {
 import { bindDb, Db } from "@/services/db";
 import { Llm } from "@/services/llm";
 import {
+  createdIds,
   describePayload,
   effectivePayload,
   issueRefs,
+  ownRef,
+  placeholderRefs,
+  resolveRefs,
   withoutCodeFields,
 } from "@/services/proposals/schema";
 import { Retrieval } from "@/services/retrieval";
@@ -103,6 +107,8 @@ type Job = {
   ownInput: boolean;
   /** The questions the model asked about this item so far (D55 answers). */
   questions?: string[];
+  /** Proposals this turn replaces (every revised item's), so none is offered as existing. */
+  replacing?: ReadonlySet<string>;
 };
 
 type Classified = {
@@ -307,13 +313,36 @@ const make = Effect.gen(function* () {
   const classify = (inboxItemId: string, job: Job, ctx: Ctx) =>
     Effect.gen(function* () {
       const contacts = yield* contactsQuery;
-      // Stored refs -> $new:1.. for the model; the merge renumbers them afterwards.
+      // New contacts and teams the thread's other items propose, not added yet
+      // (D60): listed by their ref, so this item uses them instead of a second one.
+      const threadCreates = ctx.thread.rows.flatMap(
+        (r): NonNullable<ItemSnapshot["threadCreates"]> => {
+          if (!["pending", "approved", "failed"].includes(r.status)) return [];
+          if (job.replacing?.has(r.id) || job.revising.some((x) => x.id === r.id)) return [];
+          const p = effectivePayload(r);
+          if (p.kind === "create_person")
+            return [{ ref: p.ref, kind: "person" as const, name: p.displayName }];
+          if (p.kind === "create_team")
+            return [{ ref: p.ref, kind: "team" as const, name: p.name }];
+          return [];
+        },
+      );
+      const taken = new Set(threadCreates.map((c) => c.ref));
+      // Stored refs -> $new:1.., $person:1.., $team:1.. for the model, around the
+      // refs listed above; the merge renumbers them afterwards.
       const local = new Map<string, string>();
+      const counts = new Map<string, number>();
       for (const r of job.revising) {
-        const p = effectivePayload(r);
-        if (p.kind === "create_issue" && !local.has(p.ref))
-          local.set(p.ref, `$new:${local.size + 1}`);
+        const own = ownRef(effectivePayload(r));
+        if (!own || local.has(own)) continue;
+        const ns = own.slice(0, own.indexOf(":"));
+        let n = (counts.get(ns) ?? 0) + 1;
+        while (taken.has(`${ns}:${n}`)) n++;
+        counts.set(ns, n);
+        local.set(own, `${ns}:${n}`);
       }
+      // What the thread's approved creates already made stands in for their refs.
+      const made = createdIds(ctx.thread.rows);
       // The sprint switch the user set stays through the revision (D57); code's, never the model's.
       const sprintChoices: Record<string, boolean> = {};
       for (const r of job.revising) {
@@ -324,7 +353,7 @@ const make = Effect.gen(function* () {
       }
       const pending = job.revising.flatMap((r) => {
         if (r.kind === "needs_clarification") return [];
-        const shape = fromPayload(effectivePayload(r), local);
+        const shape = fromPayload(resolveRefs(effectivePayload(r), made), local);
         return shape
           ? [
               {
@@ -401,6 +430,7 @@ const make = Effect.gen(function* () {
           revokedHere: ctx.thread.revokedKeys,
         })),
         ownInput: job.ownInput,
+        ...(threadCreates.length ? { threadCreates } : {}),
       };
       const result = yield* Effect.either(
         llm.object<ItemOutput>("classify_item", {
@@ -487,7 +517,7 @@ const make = Effect.gen(function* () {
         thread.rows
           .filter((r) => r.status !== "superseded" && !superseded.has(r.id))
           .map(effectivePayload)
-          .flatMap((p) => (p.kind === "create_issue" ? [p.ref] : [])),
+          .flatMap((p) => ownRef(p) ?? []),
       );
       const merged = mergeItemProposals(
         results.map((r) => r.mapped),
@@ -706,19 +736,22 @@ const make = Effect.gen(function* () {
       const affected = withLinkedItems(chosen, pendingPayloads).filter((idx) =>
         thread.current.has(idx),
       );
+      const replacing = new Set(
+        affected.flatMap((idx) => (thread.pendingByIdx.get(idx) ?? []).map((r) => r.id)),
+      );
       const jobs = affected.map((idx) => {
         const own = thread.pendingByIdx.get(idx) ?? [];
         // A create from another item that this item points at comes along, so the
         // model can keep the reference.
         const used = new Set(
-          own.map(effectivePayload).flatMap((p) => issueRefs(p, { only: "new", includeOwn: true })),
+          own.map(effectivePayload).flatMap((p) => placeholderRefs(p, { includeOwn: true })),
         );
         const borrowed = affected
           .filter((other) => other !== idx)
           .flatMap((other) => thread.pendingByIdx.get(other) ?? [])
           .filter((r) => {
-            const p = effectivePayload(r);
-            return p.kind === "create_issue" && used.has(p.ref);
+            const ref = ownRef(effectivePayload(r));
+            return !!ref && used.has(ref);
           });
         const snapshot = thread.current.get(idx)?.snapshot as Partial<ItemSnapshot> | null;
         // Each item keeps where its input came from: a paste in a typed thread stays
@@ -730,6 +763,7 @@ const make = Effect.gen(function* () {
           quote: thread.current.get(idx)?.quote ?? "",
           instructions: thread.instructions,
           revising: [...borrowed, ...own],
+          replacing,
           askedOn: snapshot?.askedOn ?? snapshot?.today,
           source: snapshot?.source ?? (idx === 0 ? thread.item.source : "other"),
           ownInput: snapshot?.ownInput ?? first,

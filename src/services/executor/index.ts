@@ -32,6 +32,14 @@ export type ProposalResult = {
   dependencyId?: string;
   memoryId?: string;
   communicationId?: string;
+  /** The contact or team an approval added (D60), for resolving `$person:n` / `$team:n` refs. */
+  personId?: string;
+  teamId?: string;
+  /**
+   * Set when the contact or team existed by approval, so nothing was added and
+   * the thread uses that one (FR-18.4); there is nothing to revoke.
+   */
+  existingId?: string;
   /** What revoking the approval needs, read just before the write (D54). */
   undo?: Undo;
 };
@@ -39,7 +47,7 @@ export type ProposalResult = {
 export interface ExecutorShape {
   /**
    * Executes one approved proposal (design.md 7.3). `$new` refs must already
-   * be resolved to issue keys.
+   * be resolved to issue keys, and `$person` / `$team` refs to ids (D60).
    */
   readonly runProposal: (
     payload: ProposalPayload,
