@@ -10,6 +10,7 @@ import { listDependencies } from "@/services/dependencies/queries";
 import { parseIssueLinks } from "@/services/jira/schemas";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
+import { workByIssue } from "@/services/work/queries";
 import { buildEpicHealth, type DashboardInputs, type DashIssue } from "./sections";
 import { buildToday, groupThreads, type TodayInputs } from "./today";
 
@@ -145,6 +146,7 @@ export const loadTodayInputs = (now = new Date()) =>
         pending.flatMap((p) => (p.inboxItemId ? [{ ...p, inboxItemId: p.inboxItemId }] : [])),
       ),
       smallAskLabel: home.projectKey && home.label.trim() ? home.label.trim() : null,
+      workItems: yield* workByIssue,
     } satisfies TodayInputs;
   });
 

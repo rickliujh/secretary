@@ -12,6 +12,7 @@ import { isInterrupted } from "@/app/errors";
 import { useAppMutation, useErrorToast } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { type AppServices, run } from "@/app/runtime";
+import { requestWorkPass } from "@/app/work";
 import { Intake, type ReplyInput, type TriageInput, type TriageResult } from "@/services/intake";
 import { type ProposalPayload, Proposals } from "@/services/proposals";
 
@@ -36,6 +37,8 @@ export function useInvalidateAfterDecision() {
   const client = useQueryClient();
   return () => {
     for (const key of DECISION_KEYS) void client.invalidateQueries({ queryKey: key });
+    // A triage or a reply is news for the work model (D61).
+    requestWorkPass();
   };
 }
 
@@ -183,12 +186,16 @@ function useDecisionMutation<A, E, I>(
   mutationKey?: readonly unknown[],
   opts: { awaitRefresh?: boolean } = {},
 ) {
-  return useAppMutation(program, {
-    invalidate: DECISION_KEYS,
-    invalidateOnError: true,
-    ...(mutationKey ? { mutationKey } : {}),
-    ...opts,
-  });
+  // Every decision is news for the work model (D61), whether it ran or failed.
+  return useAppMutation(
+    (input: I) => Effect.ensuring(program(input), Effect.sync(requestWorkPass)),
+    {
+      invalidate: DECISION_KEYS,
+      invalidateOnError: true,
+      ...(mutationKey ? { mutationKey } : {}),
+      ...opts,
+    },
+  );
 }
 
 /** Names revoke mutations, so every Revoke of a thread can wait while one runs. */

@@ -137,12 +137,18 @@ export const dropWait = (dependencyId: string, label: string, reason: string) =>
     const why = reason.trim();
     if (!why)
       return yield* new ExecutorError({ kind: "invalid", message: "Say why it is dropped." });
-    yield* logFollowup(dependencyId, {
-      channel: "other",
-      summary: `Stopped waiting: ${why}`,
-      nextFollowupAt: null,
-    });
-    yield* setStatus(dependencyId, "resolved");
+    yield* logFollowup(
+      dependencyId,
+      {
+        channel: "other",
+        summary: `Stopped waiting: ${why}`,
+        nextFollowupAt: null,
+      },
+      undefined,
+      // One event for the drop, below: not a chase, and not a delivery.
+      { event: false },
+    );
+    yield* setStatus(dependencyId, "resolved", { dropped: why });
     return { message: `Stopped waiting on ${label}` } satisfies ActionResult;
   });
 

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WorkTab } from "@/components/work/work-tab";
 import { dateTime, relativeTime, shortDate } from "@/lib/time";
 import { contactsByUsername } from "@/services/directory/queries";
 import { normalizeUsername } from "@/services/directory/schema";
@@ -304,6 +305,7 @@ export function TicketSheet({
           <Tabs defaultValue="details" className="min-h-0 flex-1 gap-0">
             <TabsList className="mx-4 mt-3 flex-wrap justify-start group-data-horizontal/tabs:h-auto *:h-7 *:flex-none">
               <TabsTrigger value="details">Details</TabsTrigger>
+              <TabsTrigger value="work">Work</TabsTrigger>
               <TabsTrigger value="description">Description</TabsTrigger>
               <TabsTrigger value="comments">Comments ({d.comments.length})</TabsTrigger>
               <TabsTrigger value="waiting">Waiting on</TabsTrigger>
@@ -314,6 +316,9 @@ export function TicketSheet({
               <div className="p-4">
                 <TabsContent value="details">
                   <Details detail={d} />
+                </TabsContent>
+                <TabsContent value="work">
+                  <WorkTab issueKey={d.issue.key} />
                 </TabsContent>
                 <TabsContent value="description">
                   {d.issue.descriptionHtml ? (
