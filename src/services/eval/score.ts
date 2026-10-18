@@ -29,6 +29,8 @@ const dateOf = (p: ProposalPayload): string | null | undefined => {
 export type EvalExpectation = {
   /** Every one of these must be proposed. */
   required: Expected[];
+  /** From each group, at least one must be proposed ("a comment or a transition on PAY-12"). */
+  anyOf?: Expected[][];
   /** None of these kinds may be proposed. */
   forbiddenKinds?: ProposalKind[];
 };
@@ -68,16 +70,19 @@ export function scoreCase(
   expected: EvalExpectation,
   actual: readonly ProposalPayload[],
 ): CaseScore {
-  const missing = expected.required.filter(
-    (e) =>
-      !actual.some(
-        (a) =>
-          a.kind === e.kind &&
-          (e.target === undefined || payloadTarget(a) === e.target) &&
-          (e.date === undefined || dateOf(a) === e.date) &&
-          (e.fields === undefined || hasFields(a, e.fields)),
-      ),
-  );
+  const found = (e: Expected) =>
+    actual.some(
+      (a) =>
+        a.kind === e.kind &&
+        (e.target === undefined || payloadTarget(a) === e.target) &&
+        (e.date === undefined || dateOf(a) === e.date) &&
+        (e.fields === undefined || hasFields(a, e.fields)),
+    );
+  const missing = [
+    ...expected.required.filter((e) => !found(e)),
+    // A group none of whose options was proposed is missing as a whole.
+    ...(expected.anyOf ?? []).filter((group) => !group.some(found)).flat(),
+  ];
   const forbidden = [
     ...new Set(actual.map((a) => a.kind).filter((k) => expected.forbiddenKinds?.includes(k))),
   ];

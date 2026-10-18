@@ -21,23 +21,25 @@ export function retrievalFtsQuery(text: string, max = 16): string | null {
   return unique.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" OR ");
 }
 
-export type Reason = "mentioned" | "search" | "recent" | "sender" | "epic" | "tracked";
+/** Why retrieval offered a ticket; `work`: a ticket of a work item the input touches (prompt version 15, D61). */
+export type Reason = "mentioned" | "work" | "search" | "recent" | "sender" | "epic" | "tracked";
 
 /**
  * Merges candidate sources in priority order, keeping each key once with all
- * its reasons. Explicit mentions always survive the limit.
+ * its reasons. Explicit mentions always survive the limit, and so does a
+ * source marked `keep` (the work block's primary tickets, capped by the caller).
  */
 export function mergeCandidates(
-  sources: [Reason, readonly string[]][],
+  sources: [Reason, readonly string[], boolean?][],
   limit: number,
 ): Map<string, Reason[]> {
   const out = new Map<string, Reason[]>();
-  for (const [reason, keys] of sources) {
+  for (const [reason, keys, keep] of sources) {
     for (const key of keys) {
       const existing = out.get(key);
       if (existing) {
         if (!existing.includes(reason)) existing.push(reason);
-      } else if (out.size < limit || reason === "mentioned") {
+      } else if (out.size < limit || reason === "mentioned" || keep) {
         out.set(key, [reason]);
       }
     }

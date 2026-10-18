@@ -9,7 +9,11 @@ import type { Tier } from "@/services/llm";
  * no HTTP server, the same services and keychain as the rest of the app.
  */
 export class SecretaryTransport implements ChatTransport<UIMessage> {
-  constructor(private readonly tier: () => Tier | undefined) {}
+  constructor(
+    private readonly tier: () => Tier | undefined,
+    /** A tool recorded work events: the app schedules a work pass (D61). */
+    private readonly onWorkChanged: () => void = () => undefined,
+  ) {}
 
   sendMessages({
     messages,
@@ -19,7 +23,9 @@ export class SecretaryTransport implements ChatTransport<UIMessage> {
     abortSignal: AbortSignal | undefined;
   }): Promise<ReadableStream<UIMessageChunk>> {
     return run(
-      Effect.flatMap(Chat, (c) => c.stream({ messages, tier: this.tier(), abortSignal })),
+      Effect.flatMap(Chat, (c) =>
+        c.stream({ messages, tier: this.tier(), abortSignal, onWorkChanged: this.onWorkChanged }),
+      ),
       abortSignal,
     );
   }

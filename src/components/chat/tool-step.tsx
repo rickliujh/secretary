@@ -5,7 +5,9 @@ import {
   BookOpen,
   Hourglass,
   Image as ImageIcon,
+  Layers,
   Loader2,
+  NotebookPen,
   NotebookText,
   Search,
   Sparkles,
@@ -47,6 +49,17 @@ const describe = (part: Part): [ReactNode, string] => {
       return [<BookOpen key="i" />, `Searched Confluence for “${input.text ?? ""}”`];
     case "tool-propose_actions":
       return [<Sparkles key="i" />, "Prepared proposals"];
+    case "tool-work_items":
+      return [
+        <Layers key="i" />,
+        input.view === "changes"
+          ? "Checked what changed in your work"
+          : input.view === "item"
+            ? `Read your work on “${input.item ?? ""}”`
+            : "Read your work items",
+      ];
+    case "tool-note_work":
+      return [<NotebookPen key="i" />, "Noted it on your work"];
     default:
       return [<Search key="i" />, "Looked something up"];
   }

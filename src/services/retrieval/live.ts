@@ -18,6 +18,7 @@ import {
   type ItemSnapshot,
 } from "@/prompts/classify";
 import { takeWithinBudget } from "@/prompts/common";
+import { renderWorkItem, type WorkItemSnapshot } from "@/prompts/work-block";
 import { parseLinkTypes } from "@/services/blockers/logic";
 import { blockLinks } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
@@ -32,7 +33,8 @@ import { userActiveSprints } from "@/services/sprints/active";
 import { promptSprints } from "@/services/sprints/calendar";
 import { deletedKeys, stillRevoked } from "@/services/sync/deleted";
 import { getState, parseProjectMeta, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
-import { BUDGETS, CANDIDATE_LIMIT, Retrieval, type SnapshotRequest } from ".";
+import { loadWorkBlock } from "@/services/work/reads";
+import { BUDGETS, CANDIDATE_LIMIT, Retrieval, type SnapshotRequest, WORK_CANDIDATE_LIMIT } from ".";
 import { pointScale, pointUses } from "./points";
 import {
   mergeCandidates,
@@ -150,9 +152,51 @@ const make = Effect.gen(function* () {
           .filter(stillRevoked)
           .map((r) => r.key),
       );
-      const sources: [Reason, string[]][] = [
+      // --- the work items the input touches (D61 Reads, prompt version 15) ------
+      // Read before the candidates: their tickets are candidates the model may act on.
+      const openWaits = (yield* withDb(listDependencies()))
+        // A wait made outside the thread may still point at a deleted ticket.
+        .filter((d) => !excluded.has(d.issueKey));
+      const named = new Set(mentioned);
+      const reachedWork = settings.work.enabled
+        ? (yield* withDb(
+            loadWorkBlock({
+              ownKeys: (req.ownKeys ?? req.references.issueKeys).filter((k) => !excluded.has(k)),
+              keys: req.references.issueKeys.filter((k) => !excluded.has(k)),
+              senderPersonId: sender?.id ?? null,
+              contactIds: req.references.contactIds,
+              ownInput: req.ownInput ?? false,
+              today: req.today,
+              waits: openWaits,
+              ...(req.inboxItemId ? { inboxItemId: req.inboxItemId } : {}),
+            }),
+          )).map((w) => ({
+            ...w,
+            // Deleted tickets are gone; a ticket a revoke closed is shown only when named (FR-14.6).
+            keys: w.keys.filter(
+              (k) => !excluded.has(k.key) && (!closedByRevoke.has(k.key) || named.has(k.key)),
+            ),
+          }))
+        : [];
+      // The primary tickets of items a signal reached pass the limit like named ones, at
+      // most WORK_CANDIDATE_LIMIT; their other tickets, and those of an item listed only
+      // because the user is on it, rank after search and count against the limit.
+      const pinnedWork = [
+        ...new Set(
+          reachedWork
+            .filter((w) => w.reasons.some((r) => r !== "current"))
+            .flatMap((w) => w.keys.filter((k) => k.role === "primary").map((k) => k.key)),
+        ),
+      ].slice(0, WORK_CANDIDATE_LIMIT);
+      const pinned = new Set(pinnedWork);
+      const otherWork = [...new Set(reachedWork.flatMap((w) => w.keys.map((k) => k.key)))].filter(
+        (k) => !pinned.has(k),
+      );
+      const sources: [Reason, string[], boolean?][] = [
         ["mentioned", mentioned],
+        ["work", pinnedWork, true],
         ["search", searched],
+        ["work", otherWork],
         ["sender", senderIssues],
         ["recent", [...viewed, ...updated]],
         ["tracked", tracked],
@@ -165,11 +209,12 @@ const make = Effect.gen(function* () {
         found.filter((k) => closedByRevoke.has(k) && !mentioned.includes(k)),
       );
       const merged = mergeCandidates(
-        sources.map(([reason, keys]): [Reason, string[]] => [
+        sources.map(([reason, keys, keep]): [Reason, string[], boolean?] => [
           reason,
           keys.filter(
             (k) => !excluded.has(k) && (reason === "mentioned" || !closedByRevoke.has(k)),
           ),
+          keep,
         ]),
         CANDIDATE_LIMIT,
       );
@@ -226,7 +271,8 @@ const make = Effect.gen(function* () {
           })),
         (c) => `${c.key} ${c.summary} ${c.status} ${c.issueType}`,
         BUDGETS.candidates,
-        mentioned.length,
+        // Named tickets and the work block's pinned ones come first and always stay.
+        [...merged].filter(([k, r]) => r.includes("mentioned") || pinned.has(k)).length,
       );
 
       // --- projects, priorities, users --------------------------------------
@@ -359,26 +405,23 @@ const make = Effect.gen(function* () {
       // --- open waits update_dependency may pick (D46) ------------------------
       const personTeam = new Map(allPeople.map((p) => [p.id, p.teamId]));
       const waits = pickWaits(
-        (yield* withDb(listDependencies()))
-          // A wait made outside the thread may still point at a deleted ticket.
-          .filter((d) => !excluded.has(d.issueKey))
-          .map((d) => ({
-            id: d.id,
-            issueKey: d.issueKey,
-            label: d.label,
-            kind: d.kind,
-            externalRef: d.externalRef,
-            status: d.status,
-            ownerPersonId: d.ownerPersonId,
-            ownerTeamId: d.ownerTeamId,
-            owner: d.owner.type === "none" ? null : d.owner.name,
-            ownerPersonTeamId: d.ownerPersonId ? (personTeam.get(d.ownerPersonId) ?? null) : null,
-            ownerAwayUntil: d.ownerAway?.awayUntil ?? null,
-            requestedAt: d.requestedAt,
-            expectedAt: d.expectedAt,
-            nextFollowupAt: d.nextFollowupAt,
-            issueSummary: d.issueSummary,
-          })),
+        openWaits.map((d) => ({
+          id: d.id,
+          issueKey: d.issueKey,
+          label: d.label,
+          kind: d.kind,
+          externalRef: d.externalRef,
+          status: d.status,
+          ownerPersonId: d.ownerPersonId,
+          ownerTeamId: d.ownerTeamId,
+          owner: d.owner.type === "none" ? null : d.owner.name,
+          ownerPersonTeamId: d.ownerPersonId ? (personTeam.get(d.ownerPersonId) ?? null) : null,
+          ownerAwayUntil: d.ownerAway?.awayUntil ?? null,
+          requestedAt: d.requestedAt,
+          expectedAt: d.expectedAt,
+          nextFollowupAt: d.nextFollowupAt,
+          issueSummary: d.issueSummary,
+        })),
         {
           senderPersonId: sender?.id ?? null,
           senderTeamId: sender?.teamId ?? null,
@@ -388,6 +431,15 @@ const make = Effect.gen(function* () {
           quote: req.quote,
           today: req.today,
         },
+      );
+      // The work block offers only waits update_dependency may pick (D46), measured
+      // against its budget as the prompt shows it.
+      const offered = new Set(waits.map((w) => w.id));
+      const work: WorkItemSnapshot[] = takeWithinBudget(
+        reachedWork.map((w) => ({ ...w, waits: w.waits.filter((x) => offered.has(x.id)) })),
+        renderWorkItem,
+        BUDGETS.work,
+        1,
       );
 
       // --- memories and correction examples (D26) ---------------------------
@@ -591,6 +643,7 @@ const make = Effect.gen(function* () {
         people: peopleOut,
         dependencies: deps,
         waits,
+        work,
         memories: rules,
         examples,
         notes,

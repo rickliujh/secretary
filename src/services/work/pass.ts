@@ -107,7 +107,8 @@ const itemsToUpdate = query((d) =>
     .all(),
 );
 
-const actorName = (actor: string, contacts: ReadonlyMap<string, string>) => {
+/** How an event's actor reads in a prompt or the chat. */
+export const actorName = (actor: string, contacts: ReadonlyMap<string, string>) => {
   if (actor === "me") return "the user";
   if (actor === "sync") return "Jira";
   if (actor === "unknown") return "someone";
@@ -117,7 +118,7 @@ const actorName = (actor: string, contacts: ReadonlyMap<string, string>) => {
 };
 
 /** The user's own words: a note, an answer, their typed input, their edit. */
-const ownWords = (e: typeof workEvents.$inferSelect) => {
+export const ownWords = (e: Pick<typeof workEvents.$inferSelect, "kind" | "data">) => {
   if (["note", "answer", "ticket_edited", "wait_dropped"].includes(e.kind)) return true;
   if (e.kind !== "message") return false;
   const m = MessageDataSchema.safeParse(e.data);
