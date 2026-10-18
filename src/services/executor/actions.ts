@@ -4,6 +4,7 @@
  */
 import { z } from "zod";
 import { IsoDate, IssueKey, StoryPoints } from "@/services/proposals/schema";
+import type { FieldChange } from "@/services/work/diff";
 
 /** One Jira label: Jira labels hold no spaces (D58). */
 export const JiraLabel = z.string().min(1).max(255).regex(/^\S+$/, "Jira labels hold no spaces");
@@ -143,5 +144,41 @@ export function describeAction(a: JiraAction): string {
       return `Delete comment ${a.commentId} on ${a.issueKey}`;
     case "move_to_backlog":
       return `Move ${a.issueKey} to the backlog`;
+  }
+}
+
+/**
+ * What a write changes on its issue, so the re-read after it can tell the
+ * write's own changes from anyone else's (D61): the fields it sets and the
+ * comment it posts (its id from Jira's response).
+ */
+export function ownChanges(
+  a: JiraAction,
+  response: unknown,
+): { fields: FieldChange["field"][]; commentIds: string[] } {
+  const id = (response as { id?: unknown } | null)?.id;
+  switch (a.kind) {
+    case "add_comment":
+      return { fields: [], commentIds: id === undefined || id === null ? [] : [String(id)] };
+    case "transition":
+      return { fields: ["status", "resolution"], commentIds: [] };
+    case "assign":
+      return { fields: ["assignee"], commentIds: [] };
+    case "update_fields": {
+      const f = a.fields;
+      const fields: FieldChange["field"][] = [];
+      if (f.summary !== undefined) fields.push("summary");
+      if (f.dueDate !== undefined) fields.push("dueDate");
+      if (f.storyPoints !== undefined) fields.push("storyPoints");
+      return { fields, commentIds: [] };
+    }
+    case "link_issues":
+    case "delete_issue_link":
+      return { fields: ["links"], commentIds: [] };
+    case "move_to_sprint":
+    case "move_to_backlog":
+      return { fields: ["sprint"], commentIds: [] };
+    default:
+      return { fields: [], commentIds: [] };
   }
 }

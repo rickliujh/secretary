@@ -312,8 +312,16 @@ export const inboxItems = sqliteTable(
     /** One-line triage summary (FR-2.2). */
     summary: text("summary"),
     triage: text("triage", { mode: "json" }).$type<unknown>(),
+    /**
+     * Set on a work item's own thread (D61): it holds the secretary's questions
+     * about that item, not input to classify. Null for every other thread.
+     */
+    workItemId: text("work_item_id"),
   },
-  (t) => [index("inbox_items_received_idx").on(t.receivedAt)],
+  (t) => [
+    index("inbox_items_received_idx").on(t.receivedAt),
+    index("inbox_items_work_idx").on(t.workItemId),
+  ],
 );
 
 /**
@@ -412,6 +420,97 @@ export const actionsLog = sqliteTable(
     at: text("at").notNull(),
   },
   (t) => [index("actions_log_at_idx").on(t.at)],
+);
+
+// ---------------------------------------------------------------------------
+// The work model (FR-19, D61)
+// ---------------------------------------------------------------------------
+
+/** A piece of work in flight: tickets serving one goal, with the secretary's state. */
+export const workItems = sqliteTable(
+  "work_items",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    /** Who named it: code (epic or ticket), the state call (its goal) or the user (a rename). */
+    nameBy: text("name_by", { enum: ["code", "state", "user"] })
+      .notNull()
+      .default("code"),
+    goal: text("goal"),
+    status: text("status", { enum: ["active", "done", "dismissed"] })
+      .notNull()
+      .default("active"),
+    /** The state in D61's shape (`services/work/schema.ts`); null before the first update. */
+    state: text("state", { mode: "json" }).$type<unknown>(),
+    stateVersion: integer("state_version").notNull().default(0),
+    stateUpdatedAt: text("state_updated_at"),
+    /** The status note the user wrote; kept word for word while `note_edited_at` is set. */
+    note: text("note"),
+    /** When the user edited the status note; cleared when a fact the note names changes. */
+    noteEditedAt: text("note_edited_at"),
+    /** The facts the edited note names, as they were when it was written. */
+    noteFacts: text("note_facts", { mode: "json" }).$type<unknown>(),
+    /** The last state update failed validation: the previous state stands, the user should look. */
+    needsLook: bool("needs_look").notNull().default(false),
+    /** The item the user said they are on; at most one. */
+    current: bool("current").notNull().default(false),
+    /** The item this one was merged into (status dismissed). */
+    mergedInto: text("merged_into"),
+    createdAt: text("created_at").notNull(),
+    closedAt: text("closed_at"),
+  },
+  (t) => [index("work_items_status_idx").on(t.status)],
+);
+
+/** Which tickets belong to which work item: each ticket in one item at most. */
+export const workItemIssues = sqliteTable(
+  "work_item_issues",
+  {
+    issueKey: text("issue_key").primaryKey(),
+    workItemId: text("work_item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    /** primary: the user's own active ticket; related: a blocker or a ticket it waits on. */
+    role: text("role", { enum: ["primary", "related"] })
+      .notNull()
+      .default("primary"),
+    addedBy: text("added_by", { enum: ["code", "user", "answer"] })
+      .notNull()
+      .default("code"),
+    addedAt: text("added_at").notNull(),
+  },
+  (t) => [index("work_item_issues_item_idx").on(t.workItemId)],
+);
+
+/** Everything that touched a work item, in order (FR-19.2). */
+export const workEvents = sqliteTable(
+  "work_events",
+  {
+    id: text("id").primaryKey(),
+    /** Null until attached, and for an event that belongs to no item. */
+    workItemId: text("work_item_id").references(() => workItems.id, { onDelete: "set null" }),
+    kind: text("kind").notNull(),
+    at: text("at").notNull(),
+    /** "me", "contact:<id>", "jira:<user>" or "sync". */
+    actor: text("actor").notNull(),
+    issueKey: text("issue_key"),
+    /** The proposal, intake item, dependency, comment or communication it came from. */
+    ref: text("ref"),
+    summary: text("summary").notNull(),
+    data: text("data", { mode: "json" }).$type<unknown>(),
+    /** How it was attached; null while it waits. `none`: it belongs to no item. */
+    attachedBy: text("attached_by", {
+      enum: ["code", "model", "user", "answer", "unsure", "none"],
+    }),
+    /** Folded into the item's state, or never to be (views, unsure attachments). */
+    applied: bool("applied").notNull().default(false),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("work_events_item_idx").on(t.workItemId, t.at),
+    index("work_events_pending_idx").on(t.attachedBy, t.applied),
+    index("work_events_issue_idx").on(t.issueKey),
+  ],
 );
 
 // ---------------------------------------------------------------------------

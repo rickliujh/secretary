@@ -19,6 +19,8 @@ export const TASK_TYPES = [
   "write_report",
   "consolidate_rules",
   "chat",
+  "attach_event",
+  "update_work_state",
 ] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 
@@ -131,6 +133,22 @@ export const TASK_DEFAULTS: Record<TaskType, TaskDefaults> = {
     timeoutMs: 180_000,
     label: "Chat",
     description: "Ask the secretary",
+  },
+  attach_event: {
+    tier: "fast",
+    escalate: false,
+    confidenceThreshold: 0.6,
+    timeoutMs: 45_000,
+    label: "Attach event",
+    description: "Which work item an event belongs to, when code cannot tell",
+  },
+  update_work_state: {
+    tier: "standard",
+    escalate: true,
+    confidenceThreshold: 0,
+    timeoutMs: 120_000,
+    label: "Update work state",
+    description: "Fold new events into a work item's state",
   },
 };
 

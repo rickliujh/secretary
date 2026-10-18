@@ -9,6 +9,7 @@ import { macOverlay, ownWindowButtons } from "@/app/platform";
 import { useFollowupReminders } from "@/app/reminders";
 import { useAutoCleanup, useStorageWarning } from "@/app/storage";
 import { useSyncScheduler } from "@/app/sync";
+import { useWorkPass } from "@/app/work";
 import { AppSidebar } from "@/components/app-sidebar";
 import { CaptureDialog } from "@/components/capture/capture-dialog";
 import { CommandPalette } from "@/components/command-palette";
@@ -35,6 +36,7 @@ export const Route = createRootRoute({
 function Background() {
   useSyncScheduler();
   useFollowupReminders();
+  useWorkPass();
   useAutoCleanup();
   useDeleteWordKey();
   useStorageWarning();

@@ -556,3 +556,91 @@ Checklist
 - The live eval passes the new cases and keeps the old ones.
 - typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
 
+---
+
+# Part 3: The work model (Phases 23–28)
+
+Approved 2026-10-18. What: requirements.md FR-19. How: design.md D61; the picture
+is `docs/work-model-plan.html`. Where this plan and the decision differ, the
+decision wins, and where a decision proves wrong, change the decision first. The
+rules for every phase in Part 2 hold. Each phase is its own branch from `main`,
+`feat/<phase>-<topic>`, with a PR and the user's manual test before it merges.
+Order: 23, then 24, then 25 and 26, then 27, then 28.
+
+## Phase 23: Work items, events, state and questions (FR-19.1 to FR-19.4, D61)
+
+Branch `feat/23-work-model` from `main`.
+
+Tasks
+1. Schema: `work_items`, `work_item_issues`, `work_events` (one migration); zod
+   for the state shape and the event kinds in `services/work/schema.ts`; a `work`
+   settings section (enabled, questions per day, state calls per day, group size
+   cap). Tests.
+2. Grouping: pure `services/work/grouping.ts` (active tickets, strong and weak
+   edges, the cap, stability against existing items and corrections) and
+   `services/work/queries.ts` to apply it; a run after each sync. Unit tests with
+   fixtures: an epic with two active stories and a sub-task; two tickets linked by
+   blocks; a thread naming two tickets; a 12-ticket epic not merged; a split kept
+   on the next run.
+3. Events: append points in Intake, the Executor, the sync upsert (the diff),
+   Comms, the dependency queries, the ticket sheet (opened, edited) and the chat;
+   attachment in code; `attach_event` prompt, schema and validation in
+   `src/prompts/attach-event.ts`. Service tests over the in-memory Db: every kind
+   arrives once; attachment by key, thread and wait; an ambiguous paste becomes a
+   question and waits unattached.
+4. State: `update_work_state` prompt and schema (`src/prompts/work-state.ts`),
+   the derived-facts builder, validation, repair and the needs-look fallback; the
+   pass (`services/work/pass.ts`: debounced, budgeted, the current item first,
+   nothing when nothing changed); a user-edited note kept. Scripted-model tests: a
+   date moved; a commitment from a paste; an invented person rejected; a kept note.
+5. Questions: one `work` thread per item for `needs_clarification`, the ration,
+   the answer path through `Intake.reply` to attachment or grouping, expiry. Tests.
+6. UI: the Work tab in the ticket sheet (status note with edit, tickets, timeline,
+   rename, split, merge, move a ticket); Today rows name their item and the current
+   item comes first; Settings > Secretary with the `work` fields. No Jira write
+   anywhere in this phase.
+7. Eval: `src/test/eval/work-cases.ts` with event sequences and the expected state
+   fields, runnable on the eval model like the intake eval; the FR-19 AC (Phase 23
+   part) as a mock-Jira test.
+
+Checklist
+- The FR-19 AC (Phase 23 part) passes against the mock Jira.
+- Grouping, attachment and state validation are unit-tested; the state eval passes
+  on the eval model.
+- A sync with no change makes no model call; the pass respects the daily budget.
+- typecheck, lint, tests and build pass; CHANGELOG has the phase entry.
+
+The user's manual test: with the real Jira, after one sync, the Work tab on an
+in-progress ticket shows a sensible group and status note; pasting a teammate's
+message about it updates the note without a new item; a paste about two tickets at
+once asks which.
+
+## Phase 24: Intake and chat read the state (FR-19.5)
+
+The retrieval snapshot's `work` block (a new classify prompt version), the chat's
+`work_items` and `note_work` tools, the brief and the report reading the state.
+Eval cases: "Sarah says Friday now" becomes an `update_dependency` on the existing
+wait; "where am I on the cert" is answered from the state.
+
+## Phase 25: Consequence rules and outcome cards (FR-19.6)
+
+Proposal bundles (`bundle_id`, `bundle_kind`), the outcome card with steps the user
+can leave out and one Approve, the first five rules with switches and the per-item
+quiet list, run from the pass.
+
+## Phase 26: Playbooks and standing instructions (FR-19.7)
+
+"Waiting on someone" first: live lookup of their ticket, comment, link or status,
+mirror by default, follow-up, request draft; Settings > Secretary standing
+instructions; teams and people gain `jiraProjects`. Then wait resolved, chase due,
+ticket done.
+
+## Phase 27: Suggestions where the user is (FR-19.8)
+
+The Work tab and Today show next moves; new input is triaged against the current
+item; parking with a reason.
+
+## Phase 28: The end-of-day pass (FR-19.9)
+
+What changed per item, what is due tomorrow, the unsettled questions, once a day.
+

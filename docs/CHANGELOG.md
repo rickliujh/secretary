@@ -1822,3 +1822,117 @@ Known limits
   did with it is undone either.
 - A memory's subject cannot be changed in the edit dialog; a new contact's Jira
   user typed there is not checked against Jira.
+
+## Phase 23: Work items, events, state and questions (2026-10-18)
+
+Built
+- Schema (migration 0017): `work_items`, `work_item_issues`, `work_events`, and
+  `inbox_items.work_item_id` for an item's own thread of questions. zod shapes in
+  `services/work/schema.ts`: the state exactly as D61 has it, the event kinds,
+  the corrections and the questions (`questions-schema.ts`). Settings > Secretary
+  (`work`): on/off, questions a day, state updates a day, group size cap. Task
+  types `attach_event` (fast) and `update_work_state` (standard, escalates).
+- Grouping (`services/work/grouping.ts`, pure union-find): active tickets and the
+  open blockers they wait on; strong edges join alone, weak edges need two
+  signals; the cap; existing items stable, never merged by code; corrections
+  respected (`together` first, `apart` never joined). `queries.ts` loads,
+  applies, closes and reopens items, and holds the user's changes: rename,
+  split, merge, move a ticket, edit the note, the current item, a note.
+- Events, appended by the paths that already exist: Intake (one per intake item
+  and revision, with the quote, the keys and contacts it names), Proposals
+  (executed, failed, revoked), the sync upsert (a diff of the cached row and the
+  new one: status, assignee, due date, sprint, points, summary, links,
+  resolution; new comments by their author; blocker states read in the blocker
+  step), Comms (draft sent), the dependency queries (opened, chased,
+  rescheduled, resolved), the ticket view (opened; edits through the Executor's
+  re-read) and the Work tab (a note). The chat reaches it through
+  `propose_actions`, which is an Inbox turn.
+- Attachment in code (key, the message's proposals, thread, wait, a named
+  contact's open waits), then `attach_event` with the candidates, then a
+  question; the event waits unattached meanwhile.
+- State (`src/prompts/work-state.ts`, `services/work/facts.ts`, `pass.ts`): the
+  facts builder (tickets with their fields, open waits, blockers, people), the
+  portable output schema, code's checks (dates in the facts or the events'
+  words, names in the contacts or the events, tickets of the item, commitments
+  quoting an event with words), repair once, then the previous state with
+  "Needs your look". The status note is code's, from the state and the facts,
+  or the user's words while the facts they name hold.
+- The pass after a sync, a triage or reply, any decision and at launch, in the
+  webview, at most once a minute (`src/app/work.ts`, `work-scheduler.ts`): group,
+  expire questions, attach, release notes, one state call per item with news,
+  the current item first, within the day's budget, then ask what is left.
+- Questions: in the message's own thread for an Inbox paste, else in the item's
+  work thread, rationed per day, the most consequential first, choices as
+  buttons, answered through `Intake.reply`; unanswered after 7 days (or
+  skipped) the event goes on the timeline as unsure.
+- UI: the Work tab in the ticket view (status note with edit, promises, open
+  questions, people, tickets with Move, Split, Merge into, Add note, "I'm on this
+  now", the timeline, a link to the item's questions); Today rows name their
+  item and the item the user is on comes first; question cards show choices;
+  Settings > Secretary.
+- Eval: `src/test/eval/work-cases.ts` (seven event sequences with the state
+  fields they should give) and `work-eval.live.test.ts`, skipped unless the eval
+  is configured; `work-cases.test.ts` checks each case's ideal answer.
+- Tests: grouping (an epic with two stories and a sub-task, a blocks link with
+  its blocker, a thread naming two tickets, waits on one owner in an epic, a
+  12-ticket epic held at the cap, stability, a split kept, corrections), events
+  from every path once, attachment by key, thread, wait and person, the model's
+  pick, an ambiguous paste asking and changing nothing, the pass with no news
+  making no call, the budget and the current item first, needs-look after a
+  failed repair, the goal naming the item, the ration, answers, expiry, the
+  user's changes, the kept and released note, the work thread through
+  `Intake.reply`, proposal events, Today's rows, dates, the diff, choices, and
+  the FR-19 AC against the mock Jira (`work.mock-jira.test.ts`).
+- Review fixes: a split or moved ticket is never asked about again; the stored
+  state always parses; pasted words stay inside the untrusted block; re-reads
+  after a write record other people's changes; one open meaning question per
+  item; merges keep what the merged item knew; related tickets never start an
+  item; a dropped wait is `wait_dropped`; old waiting events settle; pastes
+  with no sender are by someone unknown. Tests for each (`review.test.ts` and
+  the files they touch).
+
+Decisions and defaults
+- Defaults: work model on; 3 questions a day outside the thread the user is in;
+  60 state updates a day; groups of at most 8 tickets; one pass a minute at
+  most, 2 s after a request; questions expire after 7 days; an event no signal
+  reaches waits 7 days; tickets acted on count as active for 30 days; one view
+  event per ticket per 30 minutes; at most 30 events per state call.
+- An open blocker joins its ticket's item as a related ticket (the AC's PLAT-812);
+  only primary tickets decide when an item closes.
+- Two existing items are never merged by code; a strong link between them is
+  asked about, like the cap.
+- A question about an Inbox paste goes in that thread (free of the ration); a
+  work thread takes only answers.
+- The state call returns a `question` with `choices` beside the state for what
+  a commitment means; the answer is an event the next update reads.
+- A result that fails validation after repair marks its events applied (so they
+  are not tried again every pass) and sets "Needs your look"; a provider error
+  leaves them for the next pass.
+- The item takes its goal as its name until the user renames it.
+- Dates in an event's words are read with chrono-node (English only); a weekday
+  counts for this week and next, since the check only rejects dates nothing
+  supports.
+- `attach_event` calls do not count against the daily budget (rare, fast tier).
+- "I'm on this now" in the Work tab sets the current item until Phase 24's
+  `note_work`.
+- Work item corrections are left out of classify's examples and rule
+  consolidation; the Memory page shows them as "a work item". The work tables
+  are in the export.
+- `docs/**/*.html` is left out of biome: `work-model-plan.html` is a picture, not
+  source, and failed the lint as committed.
+
+Known limits
+- Not verified in the running app: the Work tab, the choice buttons, Today's
+  item badges and Settings > Secretary are covered by typecheck and build only;
+  the pass's timing in the webview by the scheduler's unit tests.
+- The state eval has not been run on the eval model yet (the coordinator runs
+  it).
+- A ticket that is no longer the user's (reassigned, not done) keeps its item
+  open until it is done; there is no "dismiss item" button yet.
+- Several state calls may follow a large first sync once events arrive; a first
+  item gets no call until something happens to it, so its note starts from the
+  facts.
+- The chat records no note of its own yet (`note_work`, Phase 24), and a chat
+  request asks for a pass only through the next sync or decision.
+- Answers typed in free words are matched to choices in code (number, key,
+  name); anything else asks again.

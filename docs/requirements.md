@@ -5,6 +5,9 @@ Owner: Rick Liu. Executor: Claude Opus 5.5 (see `implementation-plan.md`).
 Now: built. Later changes to scope are decisions D19–D43 in `design.md` section 12.
 Small asks (FR-10 to FR-13, and the additions to FR-2 and FR-3) were approved on
 2026-10-03 and are built: decisions D44–D51, Phases 11–16 of `implementation-plan.md`.
+The work model (FR-19) was approved on 2026-10-18: decision D61, Phases 23–28. It is
+the direction for everything after v0.1.0: the secretary keeps a model of the user's
+work in flight and acts from it, instead of handling each input on its own.
 
 ## 1. Vision
 
@@ -66,6 +69,9 @@ Principles, in priority order:
 | Wait | Another word for an open dependency: someone else has the next move |
 | Blocker | A ticket another ticket waits for, recorded in Jira as an "is blocked by" link (FR-3.8) |
 | Woke up | A ticket whose blockers are all done, or a wait whose owner is back, shown first on Today with the reason |
+| Work item | The group of tickets that serve one goal the user is working toward, with the secretary's record of where it stands (FR-19). Often one ticket; by default not limited to one |
+| Event | Anything that touched a work item, in order: a message to the Inbox or chat, an approval, a change seen in Jira, a draft sent, a wait changed, a ticket opened, a note from the user (FR-19.2) |
+| State | What the secretary believes about a work item now: the goal, the current step, commitments, open questions, what should happen next (FR-19.3) |
 
 ## 4. Functional requirements
 
@@ -463,6 +469,106 @@ unchanged.
   in it; approving both shows them on the Context page with Sarah in Payments.
   "Sarah will send the cert by Friday" pasted after that proposes a wait owned by
   the existing Sarah, not a new contact.
+
+### FR-19 The work model: understand the user's work (D61)
+
+Approved 2026-10-18. The user's words: the app "should understand my work and help
+me organize the work on my plate, doing the chores so I can focus on real work",
+and it "didn't track what should be changed, updated, when I'm in the middle of
+something". The cause is structural: each input and each page is handled on its
+own, against a word match over ticket summaries; Jira holds the shared facts and
+nothing holds the user's working state. FR-19 adds that state and makes everything
+else read from it. The hard rules do not change: every Jira write is still a
+proposal the user approves, and code, not the model, decides what gets done.
+FR-19.1 to FR-19.4 are Phase 23, FR-19.5 Phase 24, FR-19.6 Phase 25, FR-19.7
+Phase 26, FR-19.8 Phase 27 and FR-19.9 Phase 28. The picture is
+`docs/work-model-plan.html`.
+
+- FR-19.1 (Must) Work items. A work item is the group of tickets that serve one
+  goal, named after the goal. Grouping is the default from day one: code builds it
+  from the tickets' parent and epic, their blocks and relates links, open waits
+  with the same owner, small asks from the same requester, and tickets named
+  together in one message or thread. A ticket becomes part of a work item when it
+  is active for the user: assigned to them and in progress or in an active sprint,
+  a tracked small ask, or any ticket a proposal or the ticket view acts on. A work
+  item closes when its tickets are all done and stays readable as history. The user
+  can rename, split and merge items and move a ticket between them; each such
+  change is recorded as a correction the grouping respects from then on.
+- FR-19.2 (Must) Event log. Everything that touches a work item is recorded in
+  order, with who did it and when: a message to the Inbox or the chat; a proposal
+  approved, executed, failed or revoked; a change seen in Jira at sync (status,
+  assignee, due date, sprint, points, summary, links, a new comment); a draft
+  marked sent; a wait opened, chased, rescheduled or resolved; a ticket opened or
+  edited by the user; a note from the user ("I'm on the cert now"). Code attaches
+  each event by ticket key, thread, wait and names. When an event could belong to
+  more than one item, or to none, and the signals do not settle it, the secretary
+  asks instead of guessing (FR-19.4).
+- FR-19.3 (Must) State. Each work item carries what the secretary believes now, in
+  a fixed shape: the goal, the current step, what should happen next and when, the
+  commitments the user made (what, to whom, by when, where it was said), open
+  questions, and the people involved with their roles. Waits, blockers, dates and
+  the tickets' Jira fields are read from the data the app already holds, never
+  restated. After new events the state is brought up to date: code derives what it
+  can; one narrow model call folds the new events into the previous state; code
+  checks every date, person and ticket in the result against the facts and the
+  events' text; a result that fails is repaired once, then the previous state stays
+  with a mark that it needs the user's look. The state is shown on every ticket of
+  the item and on Today as a short status note the user can edit; an edit is kept
+  word for word until a fact it names changes, and is recorded as a correction.
+- FR-19.4 (Must) Questions when uncertain. The user will tell the app as much as
+  they can, and the app must still infer from Jira activity, pastes, approvals and
+  the tickets they open on its own. When it is uncertain, about which item an event
+  belongs to, whether two tickets are one piece of work, or what a commitment
+  means, it asks one short question in the Inbox with the choices it considered,
+  and goes on without the answer in the meantime. Questions are rationed (a
+  setting, default three a day outside an open thread), the most consequential
+  first; the rest wait. A guess is never written into the state.
+- FR-19.5 (Must) Everything reads the state. Intake gets the state of the items an
+  input touches before the candidate tickets, so "Sarah says Friday now" is read as
+  a change to the cert wait on PAY-12 and not as a new item. The chat answers
+  "where am I on the cert?", "what changed since this morning?" and "what did I
+  promise Dana?" from the state and the event log, and "I'm on PAY-12 now" records
+  a note and makes that item current. The brief and the report draw on the same
+  state.
+- FR-19.6 (Must) Consequences. When an event changes a fact, code works out what
+  else is now stale and proposes the updates, as one card per situation that lists
+  its steps, each of which the user can leave out, with one Approve. The first
+  rules: an expected date moved (the wait, dependent due dates, anyone owed an
+  ETA); a blocker closed (resume, and say so on the ticket); a commitment due today
+  or missed; a teammate changed or commented on the user's ticket (read it; is a
+  reply owed); a wait unanswered past its chase interval. Each rule has a switch,
+  and a rule the user rejects twice on the same item goes quiet there.
+- FR-19.7 (Must) Playbooks: the chores. A recognised situation expands, in code,
+  into the complete set of actions a secretary would take, offered as one card. The
+  first is "waiting on someone": find their ticket (a bounded live search in the
+  owner's Jira projects; if found, a blocked-by link, else a person or team wait);
+  a comment on the user's ticket saying who, what, expected when, with the link;
+  Blocked or On hold when the project has such a status and the user's standing
+  instructions say so; the wait mirrored into Jira by default; the next follow-up
+  from the expected date or the owner's responsiveness; the request message
+  prepared when the ask has not gone out yet. Later: wait resolved (resolve,
+  comment, unblock, wake), chase due (draft, log the send, optional comment),
+  ticket done (transition, comment, resolve its waits, wake dependents). Standing
+  instructions live in Settings as switches the playbooks read; leaving the same
+  step out twice offers to make that the instruction.
+- FR-19.8 (Should) Suggestions where the user is. Opening a ticket, starting a
+  draft or saying "I'm on this now" shows the item's state and the next moves the
+  rules derived, ranked against the sprint and the dates. Input that arrives while
+  the user is on something else is triaged against the current item: it changes
+  what they are doing, or it is parked with a reason and comes back when they
+  finish.
+- FR-19.9 (Should) The end-of-day pass. A short pass, once a day when the user asks
+  or at a set time while the app runs, that shows what changed on each active item
+  and what is due tomorrow, and asks only the questions the rules could not settle.
+- AC (Phase 23, against the mock Jira): PAY-12 assigned to the user in the active
+  sprint and blocked by PLAT-812 gives one work item holding both. With a wait on
+  Sarah for the cert open on PAY-12, pasting "Sarah says the cert will be Friday
+  now" attaches to that item and moves its next expected date to that Friday
+  without creating a second item. A paste that names no ticket and matches two
+  items produces a question naming both, and no state changes until it is
+  answered. Editing the status note keeps the user's words through the next sync.
+  A sync that shows PLAT-812 done records the event and changes the item's
+  current step. A sync with no change makes no model call.
 
 ## 5. Non-functional requirements
 
