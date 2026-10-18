@@ -28,6 +28,24 @@ describe("eval scoring", () => {
     expect(scoreCase(want("2026-10-26"), update).pass).toBe(false);
   });
 
+  test("anyOf: one option of each group is enough; a group with none is missing whole", () => {
+    const group = [
+      { kind: "add_comment" as const, target: "PAY-4" },
+      { kind: "transition_issue" as const, target: "PAY-4" },
+    ];
+    expect(scoreCase({ required: [], anyOf: [group] }, actual)).toEqual({
+      pass: true,
+      missing: [],
+      forbidden: [],
+    });
+    const other = group.map((g) => ({ ...g, target: "PAY-12" }));
+    expect(scoreCase({ required: [], anyOf: [group, other] }, actual)).toEqual({
+      pass: false,
+      missing: other,
+      forbidden: [],
+    });
+  });
+
   test("required kinds and targets must all be present", () => {
     expect(
       scoreCase(
