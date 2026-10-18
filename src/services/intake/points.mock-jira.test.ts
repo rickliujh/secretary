@@ -277,6 +277,7 @@ describe("story points on proposals against the mock Jira (FR-15 AC)", () => {
     expect(r.asked?.payload).toEqual({
       kind: "needs_clarification",
       question: `How many story points should ${target.key} have?`,
+      choices: [],
     });
     // The answer validated the first time: no repair call, no error, one update.
     expect(calls).toHaveLength(2);

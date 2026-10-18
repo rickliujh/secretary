@@ -66,6 +66,7 @@ describe("Settings schema", () => {
         defaultPoints: null,
       },
       sprint: { daysPerPoint: null, lastDay: "jira" },
+      work: { enabled: true, questionsPerDay: 3, stateCallsPerDay: 60, groupSizeCap: 8 },
       network: {
         proxyMode: "system",
         proxyUrl: "",
