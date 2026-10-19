@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { jiraIssues, memories, syncState } from "@/db/schema";
+import { inboxItems, jiraIssues, memories, syncState } from "@/db/schema";
 import { createDraft } from "@/services/comms/queries";
 import { query } from "@/services/db";
 import { createDependency, logFollowup } from "@/services/dependencies/queries";
@@ -40,6 +40,18 @@ const seed = Effect.gen(function* () {
       createdAt: "2026-09-01T00:00:00Z",
     }),
   );
+  // A parked thread (D62) keeps its status, reason and return day.
+  yield* query((d) =>
+    d.insert(inboxItems).values({
+      id: "i-parked",
+      source: "teams",
+      rawText: "Rotate the creds",
+      receivedAt: "2026-09-02T00:00:00Z",
+      status: "parked",
+      parkedReason: "on the cert",
+      parkedUntil: "2026-09-03",
+    }),
+  );
 });
 
 describe("export and import (D27)", () => {
@@ -60,6 +72,13 @@ describe("export and import (D27)", () => {
     expect(file.tables.people).toHaveLength(1);
     expect(file.tables.followups).toHaveLength(1);
     expect(file.tables.communications[0].notesMd).toBe("Chase the review");
+    expect(file.tables.inbox_items).toEqual([
+      expect.objectContaining({
+        status: "parked",
+        parkedReason: "on the cert",
+        parkedUntil: "2026-09-03",
+      }),
+    ]);
 
     // A fresh app: import, then export again and compare.
     const again = await Effect.runPromise(

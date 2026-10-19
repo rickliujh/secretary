@@ -147,14 +147,71 @@ function InstructionSwitches() {
   );
 }
 
+/** The two switches of D62 (Phase 27), each saved at once. */
+const WHERE_YOU_ARE = [
+  {
+    name: "suggestions",
+    label: "Suggest next moves where I am",
+    line: "The Work tab, Today's \"You're on\" panel and the Drafts page list the next moves of the work item, ranked by their dates. Code ranks them; no model is asked.",
+  },
+  {
+    name: "parkInput",
+    label: "Offer to park input about other work",
+    line: "While you are on a work item, an Inbox thread about other work shows Park. A parked thread keeps its proposals pending and comes back when you finish, move on, or tomorrow.",
+  },
+] as const;
+
 /**
- * Settings > Secretary (D61): the work model's switch and budgets, the
- * follow-up rules, and the standing instructions below them.
+ * Suggestions where the user is (FR-19.8, D62): next moves, and parking input
+ * about other work while an item is current. A switch saves at once.
+ */
+function WhereYouAre() {
+  const { data: settings } = useSettings();
+  const update = useUpdateSettings();
+  const secretary = settings?.secretary;
+  const set = (name: (typeof WHERE_YOU_ARE)[number]["name"], on: boolean) =>
+    update.mutate((s) => ({ ...s, secretary: { ...s.secretary, [name]: on } }));
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Where you are</CardTitle>
+        <CardDescription>
+          Say "I'm on this now" on a work item (its Work tab, or in the chat) and the secretary
+          keeps you on it for the day: what to do next, and other work set aside until you are done.
+          Nothing is decided for you; parking happens only when you press Park.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FieldGroup>
+          {WHERE_YOU_ARE.map((x) => (
+            <Field key={x.name} orientation="horizontal">
+              <Switch
+                id={`where-${x.name}`}
+                checked={secretary?.[x.name] ?? true}
+                disabled={!secretary || update.isPending || settings?.work.enabled === false}
+                onCheckedChange={(on) => set(x.name, on)}
+              />
+              <div className="flex flex-col gap-0.5">
+                <FieldLabel htmlFor={`where-${x.name}`}>{x.label}</FieldLabel>
+                <FieldDescription>{x.line}</FieldDescription>
+              </div>
+            </Field>
+          ))}
+        </FieldGroup>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Settings > Secretary (D61): the work model's switch and budgets, where you
+ * are (D62), the follow-up rules, and the standing instructions below them.
  */
 export function SecretarySection() {
   return (
     <div className="flex flex-col gap-6">
       <WorkCard />
+      <WhereYouAre />
       <RuleSwitches />
       <InstructionSwitches />
     </div>

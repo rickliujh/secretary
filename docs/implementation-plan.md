@@ -896,12 +896,24 @@ blocked nothing). Standing instructions are switches the playbooks read.
       is set, the request draft is on the Drafts page. Leave the comment out
       twice → the app offers to make that the rule.
 
-## Phase 27: Suggestions where the user is (FR-19.8)
+## Phase 27: Suggestions where the user is (FR-19.8, D62)
 
-The Work tab and Today show next moves; new input is triaged against the current
-item; parking with a reason.
+Branch `feat/27-next-moves` from `feat/26-playbooks`.
 
-## Phase 28: The end-of-day pass (FR-19.9)
+1. `services/work/next.ts`: pure `nextMoves(item, facts, cards, situations, today, sprint)`, ranked and capped as D62; unit tests per source and for the ranking.
+2. Migration 0020: `inbox_items.status` gains `parked`; columns `parked_reason`, `parked_until`; export updated.
+3. UI: "Next" strip in the Work tab; "You're on" panel on Today (shadcn `card`), clear-current button; Drafts editor state line; Inbox card "About <item>" marker, Park button with an optional reason, parked section at the bottom of the Inbox with "Bring back"; Settings > Secretary switches.
+4. Return of parked items: in the pass (`pass.ts`) after current changes or closes and at the first pass of a new local day; `parked` and `unparked` events.
+5. Tests: next moves; parking round trip on the db; mock-Jira AC: with PAY-12 current, a paste about OPS-7 shows the Park button, parking keeps its proposals pending, closing PAY-12's item brings it back with the reason; a paste about PAY-12 sorts first.
+6. Docs: D62 row, D61 cross-reference, section 8, CHANGELOG.
 
-What changed per item, what is due tomorrow, the unsettled questions, once a day.
+## Phase 28: The end-of-day pass (FR-19.9, D63)
 
+Branch `feat/28-day-end` from `feat/27-next-moves`.
+
+1. `services/work/dayend.ts`: pure `dayEnd(items, events, facts, drafts, questions, today)` to markdown plus the released questions; business-day aware "tomorrow" (reuse `addBusinessDays`).
+2. Scheduler: `src/app/work.ts` gains the day-end trigger (time setting, once per local day while open); Today button; chat tool `day_end`.
+3. The `secretary` inbox item per day, replaced on rerun; `day_end` events; questions released up to 5 with choices.
+4. Settings > Secretary: switch and time (`input type=time` through the existing form field).
+5. Tests: markdown content per section; replacement on rerun; release of rationed questions; scheduler fires once a day; chat tool.
+6. Docs: D63 row, section 8, CHANGELOG.

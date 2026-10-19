@@ -228,6 +228,13 @@ export const SecretarySettingsSchema = z.object({
     })
     .prefault({}),
   instructions: InstructionsSchema.prefault({}),
+  /**
+   * Next moves where the user is (D62, Phase 27): the Work tab's "Next" strip,
+   * Today's "You're on" panel and the Drafts page's work line.
+   */
+  suggestions: z.boolean().default(true),
+  /** While an item is current, Inbox threads about other work offer Park (D62). */
+  parkInput: z.boolean().default(true),
 });
 export type SecretarySettings = z.infer<typeof SecretarySettingsSchema>;
 

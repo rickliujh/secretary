@@ -2247,3 +2247,78 @@ Known limits
   list, the offer line, the settings card and the sheets' project editor are
   covered by typecheck, build and the service tests only.
 - The live eval was not run; no prompt changed.
+
+## Phase 27: Suggestions where the user is (2026-10-19)
+
+Built
+- Next moves (`services/work/next.ts`, pure; reads in `next-query.ts`): an
+  item's pending outcome cards, what its rules would raise while switched off
+  or quiet there (a line, no card), open waits with a follow-up date, open
+  promises with a due date, primary tickets due or in a sprint ending within
+  three working days, and the user's own note when it names a date. Ranked
+  overdue, today, before the sprint ends, then by date; at most five. No
+  model call.
+- Held lines: the pass runs the off and quiet rules too and keeps what they
+  raise in the outcome memory (`held`); change-driven lines last the day.
+- Migration 0020: `inbox_items.parked_reason`, `inbox_items.parked_until`,
+  `work_items.current_on`; `inbox_items.status` gains `parked`. Event kinds
+  `parked` and `unparked` (timeline only).
+- Current for the day: `setCurrent` stamps `current_on`; the pass clears an
+  item set on an earlier day.
+- Parking (`services/work/park.ts`): a thread about other work while an item
+  is current can be parked with an optional reason; its proposals stay
+  pending; it leaves Today, the Inbox badge and the question ration. The pass
+  brings it back to the top when the current item changes or closes, or on
+  the next day, with its reason; Bring back does it by hand.
+- Inbox: rows and the thread header say "About <item>" or "about what you're
+  on" (sorted first); Park in a popover; a Parked section with Bring back.
+- Work tab "Next" strip; Today's "You're on" card (Open the ticket, Not on it
+  now; moves already listed below are not repeated); a work line above the
+  draft editor.
+- Settings > Secretary > Where you are: `suggestions` and `parkInput`.
+- Tests: each source of next moves, the dedupe, the ranking and the cap, what
+  Today already shows; held situations and their memory; parking round trips
+  on the db (the badge, Today, the order, a change of current, a closed item,
+  a new day, refusals, Bring back); the ration with a parked work thread; the
+  export of a parked thread; the mock-Jira AC (with PAY-12 current a paste
+  about OPS-7 can be parked, its proposal stays pending, PAY-12 done brings
+  it back first with its reason, a paste about PAY-12 sorts first, and no
+  model call is made for any of it).
+
+Decisions and defaults
+- A pending card counts as due today (a decision waits), or on the earlier
+  date its facts name; a ticket in an ending sprint counts on the sprint's
+  last day unless it is due before then.
+- On the same day: card, held line, promise, wait, ticket, note.
+- A parked thread returns at the latest on the next local day; one parked
+  against an item merged into the current one stays parked.
+- No rationed question goes into a parked work thread; a meaning question
+  for it is dropped like one over the ration.
+- A reply, a re-triage or the last decision in a parked thread takes it up:
+  it comes back with an `unparked` event ("replied", "decided").
+- The "You're on" card lists the current item's first five moves even when
+  Today's lists show them too.
+- With `parkInput` off the Inbox shows no marks and keeps its date order.
+
+Review fixes
+- The Inbox lists every parked thread and every thread back from parking
+  beyond its page of 100; a returned thread leads on the day it came back
+  only; with `parkInput` off, date order only.
+- With the work model off, the webview runs the pass's cheap branch at
+  launch and on the switch, so parked threads come back.
+- Wait moves rank on D47's follow-up day (an away owner's wait on the back
+  day); a returned thread gets back the status it had; the brief's pending
+  count leaves parked threads out; the Work tab's star reads current for
+  today; the facts are read once per summary; an empty "You're on" card
+  says "Nothing due on this yet."
+
+Departures
+- `work_items.current_on` was added: "current for the local day it was set"
+  needs the day. Until the first pass of a new day, the prompt's work block
+  and the chat still read the stored flag.
+
+Known limits
+- Not verified in the running app: the strip, the Today card, the Drafts
+  line, the Inbox marks, Park and the parked section are covered by
+  typecheck, build and the service tests only.
+- The live eval was not run; no prompt changed.

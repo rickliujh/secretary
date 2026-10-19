@@ -1,5 +1,5 @@
 /** Loads one snapshot of the cache for Today (FR-12) and the views built on its ranking. */
-import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { inboxItems, issueMeta, jiraComments, jiraIssues, people, proposals } from "@/db/schema";
 import { localDate } from "@/lib/dates";
@@ -129,7 +129,8 @@ const pendingInbox = query((d) =>
     .from(proposals)
     .innerJoin(inboxItems, eq(inboxItems.id, proposals.inboxItemId))
     .leftJoin(people, eq(people.id, inboxItems.senderPersonId))
-    .where(eq(proposals.status, "pending"))
+    // A thread the user parked waits until it is back (D62).
+    .where(and(eq(proposals.status, "pending"), ne(inboxItems.status, "parked")))
     .orderBy(asc(proposals.createdAt))
     .all(),
 );
