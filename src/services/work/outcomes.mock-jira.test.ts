@@ -361,7 +361,9 @@ describe("outcome cards against the mock Jira (FR-19.6 AC, Phase 25)", () => {
     expect(r.pay?.due).toBe(NEW);
     expect(r.pay?.comments.at(-1)?.body).toContain("PLAT-812 is done; picking this up again.");
 
-    // 4. Two chase cards dismissed; the third run offers nothing on the item.
+    // 4. Two chase cards dismissed; the third run offers nothing on the item. The new
+    // wait gets no "waiting on someone" card beside its chase (Phase 26): the chase
+    // drafts and comments, and Platform has no Jira project to search.
     expect(r.chases).toEqual([1, 1, 0]);
     expect(r.chaseCards).toHaveLength(2);
     expect(r.chaseCards.every((c) => c.status === "dismissed")).toBe(true);

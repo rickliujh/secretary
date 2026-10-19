@@ -88,7 +88,8 @@ describe("sync and executor against the mock Jira", () => {
       ),
     );
     expect(r.first.full).toBe(true);
-    expect(r.count).toBe(issues.size);
+    // PLAT-812 is another team's ticket, outside the sync scope (Phase 26).
+    expect(r.count).toBe([...issues.values()].filter((i) => !i.outOfScope).length);
     expect(r.second.full).toBe(false);
     expect(r.second.fetched).toBeGreaterThanOrEqual(1);
     expect(r.second.fetched).toBeLessThan(issues.size);

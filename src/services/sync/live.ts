@@ -5,6 +5,7 @@ import { nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { type BlockerState, type LinkTypes, pickBlocksType } from "@/services/blockers/logic";
 import { bindDb, Db, type DbError } from "@/services/db";
+import { inferJiraProjects } from "@/services/directory/projects";
 import { JiraClient, type JiraError, type RawIssue, type SearchResult } from "@/services/jira";
 import { discoverFieldIds, effectiveFieldIds, type FieldIds } from "@/services/jira/fields";
 import { type CommentRow, issueFields, mapComment, mapIssue } from "@/services/jira/mapping";
@@ -477,6 +478,13 @@ const make = Effect.gen(function* () {
         ),
       );
       if (blockers?.woke.length) logger.info(`Unblocked: ${blockers.woke.join(", ")}`);
+
+      // Contacts and teams work in the projects of their synced tickets (Phase 26).
+      yield* withDb(inferJiraProjects).pipe(
+        Effect.catchAll((e) =>
+          Effect.sync(() => logger.warn("Inferring Jira projects failed", e.message)),
+        ),
+      );
 
       const previous = yield* withDb(getState(SYNC_KEYS.watermark));
       if (maxUpdated && (!previous || maxUpdated > previous))

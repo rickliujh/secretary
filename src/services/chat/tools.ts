@@ -9,6 +9,7 @@ import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { Effect } from "effect";
 import { z } from "zod";
 import {
+  bundles,
   communications,
   contextNotes,
   inboxItems,
@@ -47,6 +48,7 @@ import {
   workItemView,
   workList,
 } from "@/services/work/reads";
+import { bundleRecordOf } from "@/services/work/schema";
 import { blockedFacts, pendingDecisions, smallAskFacts, weekAhead } from "./agenda";
 import { type AttachmentRef, type ImageForModel, pickImages, prepareImage } from "./images";
 
@@ -859,15 +861,29 @@ export function chatTools(
             const rows = yield* query((d) =>
               d.select().from(proposals).where(eq(proposals.inboxItemId, r.inboxItemId)).all(),
             );
+            // A wait expands into its chores before the card is shown (Phase 26): the
+            // answer names each card's steps, so the user knows what they will approve.
+            const cards = (yield* query((d) =>
+              d.select().from(bundles).where(eq(bundles.inboxItemId, r.inboxItemId)).all(),
+            )).flatMap((b) => {
+              const record = bundleRecordOf(b.record);
+              return record
+                ? [{ card: record.title, steps: record.steps.map((s) => s.label) }]
+                : [];
+            });
             return {
               threadId: r.inboxItemId,
               proposed: rows
-                .filter((p) => p.kind !== "needs_clarification")
+                .filter((p) => p.kind !== "needs_clarification" && !p.bundleId)
                 .map((p) => describePayload(p.payload as ProposalPayload)),
+              ...(cards.length ? { playbooks: cards } : {}),
               questions: rows
                 .filter((p) => p.kind === "needs_clarification")
                 .map((p) => describePayload(p.payload as ProposalPayload)),
-              note: proposeNote(rows.map((p) => p.kind)),
+              note: proposeNote(
+                rows.map((p) => p.kind),
+                cards.length > 0,
+              ),
             };
           }),
         ),
@@ -879,11 +895,14 @@ export function chatTools(
  * What the model is told after propose_actions. A draft request is written by the
  * Drafts page after approval, so the chat must not write its own version too.
  */
-export function proposeNote(kinds: readonly string[]): string {
+export function proposeNote(kinds: readonly string[], playbooks = false): string {
   const base = "Nothing has changed yet. The user approves these in the Inbox.";
+  const steps = playbooks
+    ? " Each playbook card is one approval: name its steps in your answer, in a short list, so the user knows what it will do."
+    : "";
   return kinds.includes("draft_message")
-    ? `${base} A draft request is among them: the Drafts page writes the message after the user approves it, so do not write the message, a subject or a sample in your reply.`
-    : base;
+    ? `${base}${steps} A draft request is among them: the Drafts page writes the message after the user approves it, so do not write the message, a subject or a sample in your reply.`
+    : `${base}${steps}`;
 }
 
 export type ChatTools = ReturnType<typeof chatTools>;

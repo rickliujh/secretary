@@ -143,12 +143,25 @@ describe("runOutcomes", () => {
     expect(record?.rule).toBe("wait_unanswered");
     expect(record?.keys).toEqual(["PAY-12"]);
     expect(record?.steps).toEqual([
-      { seq: 0, label: "Draft a chase to Platform", required: true },
-      { seq: 1, label: expect.stringContaining("Next follow-up on"), required: false },
+      { seq: 0, label: "Draft a chase to Platform", required: true, choice: false },
+      {
+        seq: 1,
+        label: expect.stringContaining("Next follow-up on"),
+        required: false,
+        choice: false,
+      },
+      // chase_due (Phase 26): the standing instruction says so on the ticket.
+      {
+        seq: 2,
+        label: 'Comment on PAY-12: "Still waiting on Platform for the thing on PAY-12."',
+        required: false,
+        choice: false,
+      },
     ]);
     expect(r.steps.map((p) => [p.seq, p.kind, p.status, p.bundleId, p.bundleKind])).toEqual([
       [0, "draft_message", "pending", r.card?.id, "wait_unanswered"],
       [1, "update_dependency", "pending", r.card?.id, "wait_unanswered"],
+      [2, "add_comment", "pending", r.card?.id, "wait_unanswered"],
     ]);
     expect(r.events).toHaveLength(1);
     expect(r.events[0]).toMatchObject({
@@ -158,7 +171,7 @@ describe("runOutcomes", () => {
       actor: "secretary",
     });
     expect(r.open).toEqual([
-      expect.objectContaining({ id: r.card?.id, steps: 2, keys: ["PAY-12"], itemName: "Item w1" }),
+      expect.objectContaining({ id: r.card?.id, steps: 3, keys: ["PAY-12"], itemName: "Item w1" }),
     ]);
   });
 
@@ -399,5 +412,75 @@ describe("runOutcomes", () => {
     const comments = r.all.map((c) => situationOf(c.triage)?.comments);
     expect(comments).toContainEqual(["c-wa-2"]);
     expect(new Set(comments.flat()).size).toBe(8);
+  });
+});
+
+describe("a new wait with no bundle (Phase 26)", () => {
+  test("gets the waiting card without a wait step (reduced with no owner); one a bundle made does not", async () => {
+    const { run: go } = workTestLayer();
+    const r = await go(
+      Effect.gen(function* () {
+        yield* seedBase;
+        yield* seedItem("w1", ["PAY-12", "PAY-13", "PAY-14"]);
+        yield* run();
+        // From the dependency dialog: owned by Platform, nothing due yet.
+        yield* seedWait("d-dialog", "PAY-12", { status: "open", nextFollowupAt: day(5) });
+        // No owner: the reduced playbook (no search, no request).
+        yield* seedWait("d-none", "PAY-13", {
+          ownerTeamId: null,
+          status: "open",
+          nextFollowupAt: day(5),
+        });
+        // Made by an approved playbook bundle.
+        yield* seedWait("d-bundle", "PAY-14", { status: "open", nextFollowupAt: day(5) });
+        yield* query((d) =>
+          d.insert(proposals).values({
+            id: "p-bundle",
+            kind: "link_dependency",
+            payload: {},
+            status: "executed",
+            result: { dependencyId: "d-bundle" },
+            createdAt: nowIso(),
+            bundleId: "p-bundle",
+            bundleKind: "waiting_on_someone",
+          }),
+        );
+        const result = yield* run();
+        const all = yield* cards;
+        const stepsOf = (id: string) =>
+          query((d) =>
+            d
+              .select()
+              .from(proposals)
+              .where(eq(proposals.bundleId, id))
+              .orderBy(asc(proposals.seq))
+              .all(),
+          );
+        const card = all.find((c) => situationOf(c.triage)?.waits.includes("d-dialog"));
+        const reduced = all.find((c) => situationOf(c.triage)?.waits.includes("d-none"));
+        return {
+          result,
+          card,
+          steps: yield* stepsOf(card?.id ?? ""),
+          reduced: yield* stepsOf(reduced?.id ?? ""),
+          again: yield* run(),
+        };
+      }),
+    );
+    expect(r.result.offered).toBe(2);
+    expect(r.reduced.map((p) => p.kind)).toEqual(["add_comment"]);
+    expect(r.reduced[0]?.payload).toMatchObject({ bodyMd: "Waiting for the thing on PAY-13." });
+    const record = situationOf(r.card?.triage);
+    expect(record?.rule).toBe("waiting_on_someone");
+    expect(record?.waits).toEqual(["d-dialog"]);
+    // No projects on record for Platform, so nothing was searched.
+    expect(record?.found).toMatchObject({ projects: [], results: [] });
+    expect(r.steps.map((p) => p.kind)).toEqual(["add_comment", "draft_message"]);
+    expect(r.steps[1]?.payload).toMatchObject({
+      intent: "request",
+      recipientTeamId: "t-platform",
+      dependencyId: "d-dialog",
+    });
+    expect(r.again.offered).toBe(0);
   });
 });

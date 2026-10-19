@@ -8,8 +8,14 @@
  *   bun run mock:jira --port 9000
  *
  * In Settings > Jira use base URL http://localhost:8089 and any token.
- * JQL support is minimal: `updated >= "yyyy/MM/dd HH:mm"` (UTC) and
- * `parent in (...)` are honoured; everything else matches all issues.
+ * JQL support is minimal: `updated >= "yyyy/MM/dd HH:mm"` (UTC),
+ * `parent in (...)`, `project in (...)`, `statusCategory != Done`, `text ~
+ * "words"` (every word, in summary, description or comments) and `ORDER BY
+ * updated DESC` are honoured; everything else matches all issues.
+ *
+ * Phase 26: a third project, PLAT (Platform), holds PLAT-812 "Renew the
+ * payments cert", assigned to Sarah Chen. It is outside the user's sync scope:
+ * a search returns it only when its JQL names the project or the key.
  *
  * Boards: 1 (PAY) and 2 (OPS) run back-to-back two-week sprints from
  * 2026-06-29; the one covering today is active and two more are planned.
@@ -108,6 +114,11 @@ type Issue = {
     globalId: string;
     object: { url: string; title: string; summary?: string; status?: { resolved: boolean } };
   }[];
+  /**
+   * Outside the user's sync scope (another team's project, Phase 26): a search
+   * returns it only when its JQL names its project or its key.
+   */
+  outOfScope?: boolean;
 };
 
 const STATUSES = {
@@ -257,6 +268,16 @@ const USERS: User[] = [
   { name: "tom.k", displayName: "Tom Kay", emailAddress: "tom@example.com" },
   { name: "priya.s", displayName: "Priya Shah", emailAddress: "priya@example.com" },
 ];
+/** Platform's people (Phase 26), kept apart so the seeded random data does not change. */
+export const PLATFORM_USERS: User[] = [
+  { name: "sarah.c", displayName: "Sarah Chen", emailAddress: "sarah@example.com" },
+];
+/** Projects the mock serves: PAY and OPS are the user's, PLAT another team's (Phase 26). */
+const PROJECTS = [
+  { id: "PAY", key: "PAY", name: "Payments" },
+  { id: "OPS", key: "OPS", name: "Operations" },
+  { id: "PLAT", key: "PLAT", name: "Platform" },
+] as const;
 
 const args = process.argv.slice(2);
 const flag = (name: string, fallback: number) => {
@@ -429,6 +450,32 @@ export function generate(total: number, now = Date.now()): Map<string, Issue> {
     }
   }
   for (const issue of issues.values()) seedHistory(issue, now);
+  // Platform's open ticket for the cert (Phase 26), outside the sync scope; added
+  // last and without the random generator, so the seeded data stays as it was.
+  const at = iso(clock + 3_600_000);
+  issues.set("PLAT-812", {
+    id: "29812",
+    key: "PLAT-812",
+    project: "PLAT",
+    type: "Task",
+    summary: "Renew the payments cert",
+    description: "The payments gateway certificate expires soon; Platform issues the new one.",
+    status: "In Progress",
+    priority: "High",
+    assignee: PLATFORM_USERS[0] ?? null,
+    reporter: PLATFORM_USERS[0] ?? USERS[0],
+    epic: null,
+    epicName: null,
+    parent: null,
+    labels: [],
+    due: null,
+    created: at,
+    updated: at,
+    comments: [],
+    links: [],
+    points: null,
+    outOfScope: true,
+  } as Issue);
   return issues;
 }
 
@@ -929,15 +976,11 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
         isLast: true,
         values: PRIORITIES.map((name, i) => ({ id: String(i + 1), name })),
       });
-    if (path === "project")
-      return json([
-        { id: "PAY", key: "PAY", name: "Payments" },
-        { id: "OPS", key: "OPS", name: "Operations" },
-      ]);
+    if (path === "project") return json(PROJECTS);
     const projectStatuses = /^project\/([^/]+)\/statuses$/.exec(path);
     if (projectStatuses) {
       const key = decodeURIComponent(projectStatuses[1] ?? "");
-      if (!["PAY", "OPS"].includes(key))
+      if (!PROJECTS.some((p) => p.key === key))
         return error(`No project could be found with key '${key}'.`, 404);
       return json(
         ISSUE_TYPES.map((name) => ({
@@ -975,12 +1018,30 @@ export function createHandler(issues: Map<string, Issue>, opts: MockOptions = {}
           return error(`An issue with key '${unknown}' does not exist for field 'key'.`);
         list = list.filter((i) => keys.includes(i.key));
       }
+      // Another team's project is searched only by name (Phase 26's "find their ticket").
+      const projects = /project in \(([^)]*)\)/i.exec(jql)?.[1]?.split(/,\s*/);
+      if (projects) list = list.filter((i) => projects.includes(i.project));
+      else if (!keys) list = list.filter((i) => !i.outOfScope);
+      if (/statusCategory\s*!=\s*Done/i.test(jql))
+        list = list.filter((i) => STATUSES[i.status].category !== "done");
+      // `text ~ "a b"`: every word in the summary, description or comments.
+      const text = /text ~ "((?:[^"\\]|\\.)*)"/i.exec(jql)?.[1];
+      if (text) {
+        const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+        list = list.filter((i) => {
+          const hay = [i.summary, i.description ?? "", ...i.comments.map((c) => c.body)]
+            .join(" ")
+            .toLowerCase();
+          return words.every((w) => hay.includes(w));
+        });
+      }
       const since = /updated >= "([^"]+)"/.exec(jql)?.[1];
       if (since)
         list = list.filter(
           (i) => new Date(i.updated.replace("+0000", "Z")).getTime() >= parseJqlDate(since),
         );
       list.sort((a, b) => a.updated.localeCompare(b.updated));
+      if (/order by updated desc/i.test(jql)) list.reverse();
       const page = list.slice(startAt, startAt + max).map((i) => issueOut(i));
       if (cloud) {
         const last = startAt + page.length >= list.length;

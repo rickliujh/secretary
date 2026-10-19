@@ -16,6 +16,7 @@ import {
   type RuleWait,
   runRules,
   teammateTouched,
+  ticketDone,
   waitUnanswered,
 } from "./rules";
 import { EMPTY_STATE, type WorkState } from "./schema";
@@ -548,9 +549,10 @@ describe("wait_unanswered", () => {
 
   test("a due follow-up with nothing since: a chase draft, then the next date", () => {
     const [s] = waitUnanswered(input({ waits: [due] }));
-    expect(kinds(s?.steps ?? [])).toEqual(["draft_message", "update_dependency"]);
+    // chase_due (Phase 26): nothing said on the ticket yet, so a "still waiting" comment.
+    expect(kinds(s?.steps ?? [])).toEqual(["draft_message", "update_dependency", "add_comment"]);
     expect(allValid(s?.steps ?? [])).toBe(true);
-    expect(s?.steps.map((x) => x.required)).toEqual([true, false]);
+    expect(s?.steps.map((x) => x.required)).toEqual([true, false, false]);
     expect(s?.steps[0]?.payload).toMatchObject({
       intent: "chase",
       recipientPersonId: null,
@@ -604,7 +606,11 @@ describe("the rules together", () => {
       "wait_unanswered",
     ]);
     // The chase plans its own follow-up date, which no earlier step sets.
-    expect(kinds(all[2]?.steps ?? [])).toEqual(["draft_message", "update_dependency"]);
+    expect(kinds(all[2]?.steps ?? [])).toEqual([
+      "draft_message",
+      "update_dependency",
+      "add_comment",
+    ]);
     expect(all[2]?.steps[1]?.payload).toMatchObject({
       summary: expect.stringMatching(/^Follow-up planned for /),
     });
@@ -628,5 +634,205 @@ describe("the rules together", () => {
         e("4", "outcome_dismissed", "wait_unanswered"),
       ]),
     ]).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 26: the rules whose steps grew (chase_due, wait_resolved) and ticket_done
+// ---------------------------------------------------------------------------
+
+const instructions = (
+  p: Partial<ReturnType<typeof defaultSettings>["secretary"]["instructions"]>,
+) => {
+  const s = defaultSettings();
+  return {
+    ...s,
+    secretary: { ...s.secretary, instructions: { ...s.secretary.instructions, ...p } },
+  };
+};
+
+describe("chase_due (wait_unanswered, Phase 26)", () => {
+  const due = wait("w-plat", {
+    nextFollowupAt: "2026-10-17",
+    lastFollowupAt: "2026-10-14T09:00:00.000Z",
+    expectedAt: "2026-10-24",
+  });
+
+  test("a comment that it still waits, from a template", () => {
+    const [s] = waitUnanswered(input({ waits: [due] }));
+    expect(s?.steps[2]?.payload).toEqual({
+      kind: "add_comment",
+      target: "PAY-12",
+      bodyMd: "Still waiting on Platform for the new cert, expected 24 Oct.",
+    });
+  });
+
+  test("no comment when the instruction is off", () => {
+    const [s] = waitUnanswered(
+      input({ waits: [due], settings: instructions({ commentWaits: false }) }),
+    );
+    expect(kinds(s?.steps ?? [])).toEqual(["draft_message", "update_dependency"]);
+  });
+
+  test("no comment when the user commented on the ticket within the chase interval", () => {
+    const said = event({
+      kind: "proposal_executed",
+      actor: "me",
+      at: "2026-10-16T09:00:00.000Z",
+      data: { proposalKind: "add_comment", keys: ["PAY-12"] },
+    });
+    const [recent] = waitUnanswered(input({ waits: [due], history: [said] }));
+    expect(kinds(recent?.steps ?? [])).toEqual(["draft_message", "update_dependency"]);
+    // An older comment is past the interval (3 working days): it is said again.
+    const old = { ...said, at: "2026-10-08T09:00:00.000Z" };
+    const [stale] = waitUnanswered(input({ waits: [due], history: [old] }));
+    expect(kinds(stale?.steps ?? [])).toContain("add_comment");
+  });
+});
+
+describe("blocker_closed remembers where a playbook moved the ticket from (Phase 26)", () => {
+  test("back to the status the wait remembers, not the project's in-progress one", () => {
+    const blocked = facts([
+      ticket("PAY-12", { status: "Blocked", blockedBy: ["PLAT-812"] }),
+      ticket("PLAT-812", { role: "related", status: "Done", statusCategory: "done" }),
+    ]);
+    const [s] = blockerClosed(
+      input({
+        facts: blocked,
+        blockedBy: { "PAY-12": ["PLAT-812"] },
+        waits: [
+          wait("w-plat", {
+            externalRef: "PLAT-812",
+            data: { blocked: { issueKey: "PAY-12", from: "In Review", to: "Blocked" } },
+          }),
+        ],
+        newEvents: [
+          event({
+            kind: "jira_change",
+            actor: "sync",
+            issueKey: "PLAT-812",
+            data: { field: "status", from: "In Progress", to: "Done" },
+          }),
+        ],
+      }),
+    );
+    expect(s?.steps[0]?.payload).toEqual({
+      kind: "transition_issue",
+      target: "PAY-12",
+      toStatus: "In Review",
+    });
+  });
+});
+
+describe("ticket_done (Phase 26)", () => {
+  const done = facts([
+    ticket("PAY-12", { status: "Done", statusCategory: "done", summary: "Export the Q3 report" }),
+  ]);
+  // The user's own move in Jira (the change names them).
+  const closed = event({
+    kind: "jira_change",
+    actor: "jira:rick",
+    data: { field: "status", from: "In Progress", to: "Done" },
+  });
+  const requesters = { "PAY-12": { personId: "c-dana", name: "Dana Lee", askedOn: "2026-10-02" } };
+
+  test("resolves its open waits, notes who asked and when, and tells them", () => {
+    const [s, ...rest] = ticketDone(
+      input({ facts: done, newEvents: [closed], waits: [wait("w-plat")], requesters }),
+    );
+    expect(rest).toEqual([]);
+    expect(s?.rule).toBe("ticket_done");
+    expect(kinds(s?.steps ?? [])).toEqual(["update_dependency", "add_comment", "draft_message"]);
+    expect(allValid(s?.steps ?? [])).toBe(true);
+    expect(s?.steps[0]?.payload).toMatchObject({ dependencyId: "w-plat", action: "resolve" });
+    expect(s?.steps[1]?.payload).toMatchObject({
+      target: "PAY-12",
+      bodyMd: "Done; Dana Lee asked for this on 2 Oct.",
+    });
+    expect(s?.steps[2]?.payload).toMatchObject({
+      recipientPersonId: "c-dana",
+      intent: "status_update",
+      issueKeys: ["PAY-12"],
+    });
+    expect(s?.waits).toEqual(["w-plat"]);
+  });
+
+  test("only the user's own move counts: a sync change by someone unknown does not", () => {
+    const bySync = { ...closed, id: "01EVSYNC", actor: "sync" };
+    const byAna = { ...closed, id: "01EVANA", actor: "jira:ana.b" };
+    expect(ticketDone(input({ facts: done, newEvents: [bySync, byAna], requesters }))).toEqual([]);
+    const edited = { ...closed, id: "01EVME", kind: "ticket_edited", actor: "me" };
+    expect(ticketDone(input({ facts: done, newEvents: [edited], requesters }))).toHaveLength(1);
+  });
+
+  test("an approved move into done counts; no requester and no wait means no card", () => {
+    const moved = event({
+      kind: "proposal_executed",
+      actor: "me",
+      data: { proposalKind: "transition_issue", keys: ["PAY-12"] },
+    });
+    expect(ticketDone(input({ facts: done, newEvents: [moved], requesters }))).toHaveLength(1);
+    expect(ticketDone(input({ facts: done, newEvents: [moved] }))).toEqual([]);
+  });
+
+  test("only a primary ticket that is done now, and no comment while the instruction is off", () => {
+    const open = facts([ticket("PAY-12")]);
+    expect(ticketDone(input({ facts: open, newEvents: [closed], requesters }))).toEqual([]);
+    const related = facts([
+      ticket("PAY-12", { role: "related", status: "Done", statusCategory: "done" }),
+    ]);
+    expect(ticketDone(input({ facts: related, newEvents: [closed], requesters }))).toEqual([]);
+    const [quiet] = ticketDone(
+      input({
+        facts: done,
+        newEvents: [closed],
+        requesters,
+        settings: instructions({ commentWaits: false }),
+      }),
+    );
+    expect(kinds(quiet?.steps ?? [])).toEqual(["draft_message"]);
+  });
+
+  test("runs with the rules, and its switch turns it off", () => {
+    const all = runRules(input({ facts: done, newEvents: [closed], requesters }));
+    expect(all.map((s) => s.rule)).toEqual(["ticket_done"]);
+    const s = defaultSettings();
+    const off = {
+      ...s,
+      secretary: { ...s.secretary, rules: { ...s.secretary.rules, ticket_done: false } },
+    };
+    expect(
+      runRules(input({ facts: done, newEvents: [closed], requesters, settings: off })),
+    ).toEqual([]);
+  });
+});
+
+describe("blocker_closed after a wait_resolved bundle (Phase 26)", () => {
+  test("a ticket whose wait on the blocker a wait_resolved bundle handled is not offered again", () => {
+    const blocked = facts([
+      ticket("PAY-12", { status: "Blocked", blockedBy: ["PLAT-812"] }),
+      ticket("PLAT-812", { role: "related", status: "Done", statusCategory: "done" }),
+    ]);
+    const base = {
+      facts: blocked,
+      blockedBy: { "PAY-12": ["PLAT-812"] },
+      newEvents: [
+        event({
+          kind: "jira_change",
+          actor: "sync",
+          issueKey: "PLAT-812",
+          data: { field: "status", from: "In Progress", to: "Done" },
+        }),
+      ],
+    };
+    expect(blockerClosed(input(base))).toHaveLength(1);
+    expect(
+      blockerClosed(
+        input({
+          ...base,
+          handledWaits: [{ issueKey: "PAY-12", label: "the cert", externalRef: "PLAT-812" }],
+        }),
+      ),
+    ).toEqual([]);
   });
 });

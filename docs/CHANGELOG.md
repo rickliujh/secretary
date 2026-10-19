@@ -2135,3 +2135,115 @@ Known limits
   recomputed if the facts move again before it is offered.
 - A card with steps on a wait that changes before approval runs against the
   wait as it is then; the step texts are not refreshed.
+
+## Phase 26: Playbooks and standing instructions (2026-10-19)
+
+Built
+- Migration 0019: `teams.jira_projects` and `people.jira_projects` (json
+  `[{ key, by: "user" | "sync" }]`), `dependencies.data` (json, the Blocked
+  move a playbook made), and the `bundles` table (a playbook bundle inside a
+  thread: its id is the proposal it expanded, its record the step labels and
+  the search). Bundles are part of the export.
+- Jira projects: after every sync a person gets the projects of the in-scope
+  tickets assigned to their Jira user, a team its members' (`by: "sync"`,
+  replaced each time); the person and team sheets edit the user's own keys
+  (`components/directory/jira-projects.tsx`, a tag list offering the projects
+  the app knows, any key can be typed).
+- Standing instructions: `secretary.instructions` with `mirrorWaits` (on),
+  `blockedStatus` (off), `commentWaits` (on), `linkFoundTickets` (on) and
+  `draftRequests` (on), a card in Settings > Secretary below Follow-ups. The
+  Follow-ups card gains `ticket_done` (on).
+- "Waiting on someone" (`services/work/playbooks/`): a `link_dependency` with
+  an owner, from classify or the chat, becomes one bundle in the same thread
+  before the card is shown: the wait (required; mirrored when `mirrorWaits`
+  is on, through a new `link_dependency.mirror` field that defaults to false;
+  the first follow-up from the expected date or the owner's responsiveness),
+  their ticket as the blocker (`link_issues`, only when picked), the comment
+  "Waiting on <owner> for <label>, expected <date>, see <KEY>.", the move to
+  a Blocked-like status (`blockedStatus`), and the request draft (unless it
+  already went out or the input is the owner's own message). "Find their
+  ticket" is one search in the owner's projects (else their team's; none,
+  no search): `statusCategory != Done`, the label's words, newest first, 10
+  results, 8 s; results are stored out of scope (D45); a failure is "Could
+  not search <projects>" and the link step is skipped. Code pre-selects a
+  result only when it alone shares two or more label stems.
+- The card (`components/inbox/outcome-card.tsx`, shared with outcome cards):
+  a radio list of the found tickets with "None of these", the link and
+  comment lines following the pick; `Proposals.approveBundle` takes the pick
+  as `found` and skips the link without a correction when none is picked.
+  Threads show each bundle as one card; Approve all runs it as a bundle.
+- A new wait with an owner that no bundle made (the dependency dialog, which
+  now asks for a work pass) gets a `waiting_on_someone` outcome card of the
+  chores from the next pass.
+- "Wait resolved": an `update_dependency` resolve from classify or the chat
+  expands into the resolve, a comment, and the move back out of the Blocked
+  status the playbook set; approving it wakes the ticket on Today when
+  nothing else holds it. `blocker_closed` resumes to the remembered status.
+- "Chase due": a chase card also comments "Still waiting on ..." when
+  `commentWaits` is on and nothing was said on the ticket within the chase
+  interval. "Ticket done" (new rule): resolves the waits still open on a
+  primary ticket that turned done, notes who asked and when, and drafts a
+  note to the requester of a small ask; items closed in the last two days
+  run it.
+- "Make that the rule?": after the same step was left out of a playbook's
+  cards twice, its next card asks once; Yes turns the instruction off, both
+  answers are remembered (`memories`, subject `playbook`, left out of
+  classify's retrieval).
+- Chat: `propose_actions` returns the playbook cards with their step labels
+  and asks the chat to name them.
+- Mock Jira: a Platform project (PLAT) with PLAT-812 "Renew the payments
+  cert", outside the sync scope; JQL `project in`, `statusCategory != Done`,
+  `text ~` and `ORDER BY updated DESC`.
+- Tests: the JQL builder (projects, stop words, escaping, no projects),
+  scoring and pre-selection, each step's switch, the found-ticket choice, the
+  offer after two left-outs (pure and over the db), the later playbooks'
+  steps, project inference, the pass's card for a new wait, the search
+  against a stub (stored out of scope, a failure), and the mock-Jira AC (chat
+  to one card with PLAT-812 pre-selected and no Blocked move; approved, the
+  mock shows the link, the comment and the remote link; Blocked on adds the
+  move on another ticket with none picked; the owner's "it's done" resolves,
+  comments, moves back and wakes).
+
+Decisions and defaults
+- First follow-up without dates: the chase interval, halved (at least one
+  working day) for a fast owner, doubled (at most 30) for a slow one.
+- The Blocked-like status is the first of the project's synced statuses (in
+  name order) reading Blocked, On hold or Waiting.
+- The comments of "wait resolved" and "ticket done" follow `commentWaits` too.
+- The offer counts left-outs by bundle kind and step kind, only for the steps
+  an instruction governs on that playbook, since the last answer.
+- A wait resolved from intake wakes its ticket (`unblocked_by`
+  `wait:<owner> delivered <label>`) only with no other open wait, no open
+  Jira blocker, and the ticket not done.
+
+Review fixes
+- A playbook card in a thread has Reject: the proposal it expanded is
+  rejected and learned from as classify made it (kept in the bundle record),
+  its chores go without corrections; an edited, approved wait is learned
+  from that proposal to the user's edit. A revision revises it as made.
+- Waits with no owner get the reduced playbook (the wait, the comment, the
+  mirror, the Blocked move; no search, no request). A wait on a ticket the
+  thread is yet to create stays in its small ask's Track row.
+- Inferred Jira projects can be removed in the sheets; a sync does not add a
+  removed one back, and it can be restored.
+- The move back out of Blocked waits for the last open wait on the ticket
+  (the memory passes to it) and is skipped at approval when Jira shows the
+  ticket elsewhere; the bookkeeping follows each step, so Retry keeps it.
+- No mirror without a URL to link (the card says so); no chore the model
+  proposed itself in the turn or the thread dropped; a pending draft to the
+  owner counts as asked; no second draft or comment beside a chase; no
+  `blocker_closed` card for a wait a "wait resolved" bundle handled;
+  `ticket_done` only for the user's own moves.
+- Searches 3 at a time within 12 s a turn, at most 10 projects a search; a
+  bundle-only turn no longer says "Nothing to do here"; the comment switch
+  reads "Comment on my ticket when a wait starts or ends".
+- The live eval scores only classify's own proposals
+  (`src/test/eval/own-proposals.ts`); the fixture Jira takes comments.
+
+Known limits
+- A card on an existing wait cannot set the wait's reference or mirror it:
+  no proposal kind does that, and none was added; a pick there only links.
+- Not verified in the running app: the bundle card in a thread, the radio
+  list, the offer line, the settings card and the sheets' project editor are
+  covered by typecheck, build and the service tests only.
+- The live eval was not run; no prompt changed.

@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect, Either, Layer } from "effect";
 import {
+  bundles,
   inboxItems,
   inboxMessages,
   intakeItems,
@@ -36,6 +37,7 @@ import {
   validateSegments,
 } from "@/prompts/segment";
 import { bindDb, Db } from "@/services/db";
+import { JiraClient } from "@/services/jira";
 import { Llm } from "@/services/llm";
 import {
   createdIds,
@@ -43,6 +45,7 @@ import {
   effectivePayload,
   issueRefs,
   ownRef,
+  ProposalPayloadSchema,
   placeholderRefs,
   resolveRefs,
   withoutCodeFields,
@@ -52,8 +55,15 @@ import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sync } from "@/services/sync";
 import { deletedKeys } from "@/services/sync/deleted";
 import { EVENT_TEXT_CHARS, recordEvents } from "@/services/work/events";
+import { expandTurn } from "@/services/work/playbooks/expand";
+import { revisionPayload } from "@/services/work/playbooks/waiting";
 import { answerWorkQuestion, postMessage } from "@/services/work/questions";
-import type { Actor, MessageData } from "@/services/work/schema";
+import {
+  type Actor,
+  bundleRecordOf,
+  type MessageData,
+  type SituationRecord,
+} from "@/services/work/schema";
 import {
   Intake,
   IntakeError,
@@ -138,6 +148,7 @@ const make = Effect.gen(function* () {
   const retrieval = yield* Retrieval;
   const sync = yield* Sync;
   const settingsSvc = yield* Settings;
+  const jira = yield* JiraClient;
   const { q, withDb } = bindDb(yield* Db);
 
   /**
@@ -356,9 +367,29 @@ const make = Effect.gen(function* () {
         if (p.kind === "create_issue" && p.joinSprintChosen && ref)
           sprintChoices[ref] = p.joinSprint;
       }
+      // The thread's playbook bundles (Phase 26): what the model made before expansion.
+      const records = new Map(
+        (yield* q((d) =>
+          d.select().from(bundles).where(eq(bundles.inboxItemId, inboxItemId)).all(),
+        )).map((b) => [b.id, bundleRecordOf(b.record)] as const),
+      );
       const pending = job.revising.flatMap((r) => {
         if (r.kind === "needs_clarification") return [];
-        const shape = fromPayload(resolveRefs(effectivePayload(r), made), local);
+        // A playbook's own steps are code's chores, not the model's proposals (Phase 26):
+        // the proposal it expanded is revised as the model made it (or as the user
+        // edited it, without the ticket the search found), and expands again.
+        if (r.bundleId && r.bundleId !== r.id) return [];
+        const record = r.bundleId ? records.get(r.bundleId) : null;
+        const origin = record?.origin ? ProposalPayloadSchema.safeParse(record.origin) : null;
+        const payload = record
+          ? revisionPayload({
+              current: effectivePayload(r),
+              edited: !!r.editedPayload,
+              origin: origin?.success ? origin.data : null,
+              found: record.found,
+            })
+          : effectivePayload(r);
+        const shape = fromPayload(resolveRefs(payload, made), local);
         return shape
           ? [
               {
@@ -556,6 +587,26 @@ const make = Effect.gen(function* () {
         results.map((r) => r.mapped),
         reserved,
       );
+      // Playbooks (Phase 26): a wait or a resolved wait brings its chores, as one bundle.
+      // What the thread dropped: classify's own proposals rejected, or replaced by a
+      // revision (now or before), and a playbook's chores the user left out.
+      const chore = (r: ProposalRow) => !!r.bundleId && r.bundleId !== r.id;
+      const dropped = [
+        ...thread.rows.filter(
+          (r) => r.status === "rejected" || (r.status === "superseded" && !chore(r)),
+        ),
+        ...opts.supersede.filter((r) => !chore(r)),
+      ].map(effectivePayload);
+      const expanded = yield* expandTurn(merged, {
+        senderPersonId: thread.item.senderPersonId,
+        today: localDate(),
+        dropped,
+        replacing: superseded,
+      }).pipe(
+        withDb,
+        Effect.provideService(Settings, settingsSvc),
+        Effect.provideService(JiraClient, jira),
+      );
       const now = nowIso();
       const messageId = newId();
       const summaries = results.map((r) => r.summary).filter((s): s is string => !!s);
@@ -571,9 +622,10 @@ const make = Effect.gen(function* () {
         }),
       );
       const base = Math.max(-1, ...thread.rows.map((r) => r.seq)) + 1;
+      const shown = expanded.proposals;
       const rows = [
-        ...merged.map((m, i) => ({
-          id: newId(),
+        ...shown.map((m, i) => ({
+          id: m.id,
           inboxItemId,
           intakeItemId: results[m.itemIndex]?.itemId ?? null,
           messageId,
@@ -585,13 +637,15 @@ const make = Effect.gen(function* () {
           confidence: m.confidence,
           status: "pending" as const,
           createdAt: now,
+          bundleId: m.bundleId,
+          bundleKind: m.bundleKind,
         })),
         ...questions.map((r, i) => ({
           id: newId(),
           inboxItemId,
           intakeItemId: r.itemId,
           messageId,
-          seq: base + merged.length + i,
+          seq: base + shown.length + i,
           kind: "needs_clarification",
           payload: { kind: "needs_clarification", question: r.question },
           rationale: null,
@@ -602,6 +656,33 @@ const make = Effect.gen(function* () {
         })),
       ];
       if (rows.length) yield* q((d) => d.insert(proposals).values(rows));
+      if (expanded.bundles.length)
+        yield* q((d) =>
+          d.insert(bundles).values(
+            expanded.bundles.map((b) => ({
+              id: b.id,
+              inboxItemId,
+              kind: b.kind,
+              createdAt: now,
+              record: {
+                rule: b.kind,
+                key: `${b.kind}:${b.id}`,
+                title: b.title,
+                why: b.why,
+                keys: b.keys,
+                waits: b.waits,
+                comments: [],
+                facts: b.facts,
+                itemName: "",
+                steps: shown.flatMap((m, i) =>
+                  m.bundleId === b.id && m.step ? [{ seq: base + i, ...m.step }] : [],
+                ),
+                found: b.found,
+                origin: b.origin,
+              } satisfies SituationRecord,
+            })),
+          ),
+        );
       // Each item read or revised is a work event (D61), attached later by the pass.
       yield* withDb(
         recordEvents(
@@ -643,8 +724,9 @@ const make = Effect.gen(function* () {
       }
       // FR-7.2: a requested change is a correction worth learning from.
       // The sprint switch is code's field, so it is no part of the example (D57).
+      // A playbook's chores are code's, not part of what the user asked to change.
       const before = opts.supersede
-        .filter((r) => r.kind !== "needs_clarification")
+        .filter((r) => r.kind !== "needs_clarification" && !chore(r))
         .map((r) => withoutCodeFields(effectivePayload(r)));
       if (opts.instruction && before.length) {
         const after = merged.map((m) => withoutCodeFields(m.payload));
