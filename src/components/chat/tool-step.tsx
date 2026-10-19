@@ -11,6 +11,7 @@ import {
   NotebookText,
   Search,
   Sparkles,
+  Sunset,
   Target,
   Ticket,
   Users,
@@ -60,6 +61,8 @@ const describe = (part: Part): [ReactNode, string] => {
       ];
     case "tool-note_work":
       return [<NotebookPen key="i" />, "Noted it on your work"];
+    case "tool-day_end":
+      return [<Sunset key="i" />, "Wrote your end of day"];
     default:
       return [<Search key="i" />, "Looked something up"];
   }
@@ -75,6 +78,8 @@ export function ToolStep({ part }: { part: Part }) {
     part.type === "tool-propose_actions" && output && !failed
       ? (output as { threadId: string; proposed: string[]; questions: string[] })
       : null;
+  const dayEnd =
+    part.type === "tool-day_end" && output && !failed ? (output as { threadId: string }) : null;
   return (
     <div className="flex flex-col gap-1 text-xs text-muted-foreground">
       <span className="flex items-center gap-1.5 [&_svg]:size-3.5">
@@ -112,6 +117,11 @@ export function ToolStep({ part }: { part: Part }) {
             Review and approve in the Inbox
           </Link>
         </div>
+      )}
+      {dayEnd && (
+        <Link to="/inbox" search={{ item: dayEnd.threadId }} className="ml-5 text-xs underline">
+          Open the end of day in the Inbox
+        </Link>
       )}
     </div>
   );

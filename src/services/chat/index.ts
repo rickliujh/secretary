@@ -9,6 +9,8 @@ export type ChatRequest = {
   abortSignal?: AbortSignal;
   /** Runs after a tool recorded work events (a note, a request through intake), D61. */
   onWorkChanged?: () => void;
+  /** Runs after a tool wrote an Inbox item (the end-of-day page, D63). */
+  onInboxChanged?: () => void;
 };
 
 export interface ChatShape {

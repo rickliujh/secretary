@@ -107,6 +107,8 @@ export const EVENT_KINDS = [
   "parked",
   /** A parked thread came back: the current item changed or closed, a new day, or the user. */
   "unparked",
+  /** The end-of-day pass listed the item (D63); timeline only. */
+  "day_end",
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -119,6 +121,7 @@ export const TIMELINE_ONLY: ReadonlySet<EventKind> = new Set([
   "rule_resumed",
   "parked",
   "unparked",
+  "day_end",
 ]);
 
 /** Kinds that carry words someone wrote, so a commitment may come from them. */

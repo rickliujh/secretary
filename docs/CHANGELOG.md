@@ -2322,3 +2322,78 @@ Known limits
   line, the Inbox marks, Park and the parked section are covered by
   typecheck, build and the service tests only.
 - The live eval was not run; no prompt changed.
+
+## Phase 28: The end-of-day pass (2026-10-19)
+
+Built
+- The page (`services/work/dayend.ts`, pure): what changed today on each
+  active item (one line per event, the user's own words first, others'
+  words quoted and escaped, at most eight lines, then Now and Next
+  expected), and tomorrow, the next business day: tickets due, waits to
+  follow up, promises due, drafts unsent for more than a day, and the
+  outcome cards still waiting, by item. No model call, no Jira write.
+- The run (`dayend-query.ts`): one `secretary` Inbox item a day
+  (`situation_key` `day_end:<date>`), replaced on a rerun; a `day_end`
+  event (timeline only, applied) once a day on each item the page names;
+  Done files it.
+- Released questions: the work questions the day's ration leaves unasked
+  are kept for the day (`sync_state` `work.unasked`); the pass posts up to
+  five in the ration's order into their items' work threads, with their
+  choices, marked `releasedOn` so the ration does not count them. Never
+  into a parked thread; a rerun keeps the open ones, drops the answered
+  ones and releases more up to five.
+- Triggers: "End of day" on Today; the chat's `day_end` ("wrap up my day");
+  a time in Settings > Secretary > End of day (off; 17:30 when on), run by
+  `DailyTrigger` in the webview once a local day while the app is open.
+- Inbox: the page opens as its own view with the questions' choice buttons
+  (answered through `Intake.reply` in their work threads), Done and Run
+  again. The Work tab's timeline names `day_end` "End of day".
+- Tests: the page per section (escaping, order, caps, Friday to Monday,
+  overdue labels, old drafts only); release, the ration not spent, the cap
+  of five, a parked thread, a rerun, Done, the timed run skipping a written
+  day, the work model off; `DailyTrigger` once a day and never late; the
+  chat tool; the mock-Jira AC (an item with today's events, a ticket due
+  tomorrow, a wait due for follow-up, an unsent draft and a held question:
+  the page lists each, the question is released and answered through
+  `Intake.reply`, a rerun replaces the page, Done files it, no model call).
+
+Decisions and defaults
+- Tomorrow lists what is due by the next business day, the overdue
+  included and labelled.
+- What changed leaves out timeline-only events (views, corrections, card
+  and park bookkeeping); the current item comes first.
+- An unsent draft is a draft or a copied one older than 24 hours.
+- The questions are listed below the page with their buttons; the page
+  only counts them.
+- The timed run fires when the time passes while the app is open (also on
+  the first check after the machine wakes); an app opened later does not
+  run it, and it does nothing when the day's page exists.
+- The pass and its button need the work model on.
+
+Departures
+- `sync_state` `work.unasked` and the payload's `releasedOn` are new: a
+  meaning question over the ration was dropped before, so the pass had
+  nothing to release without keeping it.
+- The chat request gains `onInboxChanged`, so the Inbox reads the page the
+  chat wrote without asking for a work pass.
+- Run again on the page (the decision named only the rerun).
+
+Review fixes
+- The page renders with `Markdown`'s new `linksAsText` mode: only ticket
+  links are links, images show their alt text; quotes also get zero-width
+  joiners in `://`, `www.` and around `@`. A test renders the page with the
+  app's react-markdown options.
+- `questionLock` serialises the work pass's questions and the end-of-day
+  pass; the page write is an upsert on `situation_key`.
+- A rerun takes back released questions that no longer stand.
+- A re-ask keeps `releasedOn` and is listed in place of its question.
+- Five questions released a day, not five open at once.
+- Run again only on today's page; an older page opens today's.
+- Draft dates in local time; `work.unasked` capped at 50 and keeps
+  questions held back by a parked thread.
+
+Known limits
+- Not verified in the running app: the Today button, the page view, the
+  settings card and the timed trigger are covered by typecheck, build and
+  the tests only.
+- The live eval was not run; the chat prompt gained one line for `day_end`.

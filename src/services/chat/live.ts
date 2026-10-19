@@ -35,6 +35,7 @@ const make = Effect.gen(function* () {
         exec,
         (callId, key, shown) => images.set(callId, imagesMessage(key, shown)),
         req.onWorkChanged,
+        req.onInboxChanged,
       );
       const settings = yield* Effect.provide(Effect.flatMap(Settings, settingsOrDefault), deps);
       const me = yield* Effect.provide(getState(SYNC_KEYS.username), deps).pipe(

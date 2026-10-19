@@ -99,6 +99,7 @@ const KIND_LABEL: Record<string, string> = {
   rule_resumed: "Changed",
   parked: "Parked",
   unparked: "Back",
+  day_end: "End of day",
 };
 
 function useWorkMutation<I, A, E>(f: (input: I) => Effect.Effect<A, E, AppServices>) {
