@@ -58,6 +58,8 @@ export type DashDependency = {
 };
 
 export type RecentComment = {
+  /** The Jira comment id, when known (an outcome card names the comments it is about). */
+  id?: string;
   issueKey: string;
   author: string | null;
   authorDisplay: string | null;
@@ -113,7 +115,7 @@ export type Work = {
   /** Keys Top focus may hold: the active sprint's work plus pins, or the whole scope. */
   focusKeys: ReadonlySet<string>;
   /** Open tickets with a comment or mention by someone else since the user last looked, newest first. */
-  waitingOnMe: (Flagged & { at: string })[];
+  waitingOnMe: (Flagged & { at: string; commentId?: string })[];
   /** Blocked, stale or late tickets in scope, most reasons first. */
   atRisk: Flagged[];
   /** Due within a week or late, soonest first. */
@@ -320,9 +322,11 @@ export function rankWork(
     const unseen = !issue.lastViewedAt || c.created > issue.lastViewedAt;
     if (!unseen) continue;
     const who = c.authorDisplay ?? c.author ?? "Someone";
-    if (c.mentionsMe) waitingOnMe.push({ issue, reasons: [`${who} mentioned you`], at: c.created });
+    const commentId = c.id ? { commentId: c.id } : {};
+    if (c.mentionsMe)
+      waitingOnMe.push({ issue, reasons: [`${who} mentioned you`], at: c.created, ...commentId });
     else if (issue.assignee === input.me)
-      waitingOnMe.push({ issue, reasons: [`${who} commented`], at: c.created });
+      waitingOnMe.push({ issue, reasons: [`${who} commented`], at: c.created, ...commentId });
     else continue;
     seen.add(c.issueKey);
   }

@@ -19,6 +19,7 @@ import { JiraClient } from "@/services/jira";
 import { Sync } from "@/services/sync";
 import { deletedKeys } from "@/services/sync/deleted";
 import { recordEvent } from "@/services/work/events";
+import { situationOf } from "@/services/work/schema";
 import {
   createdIds,
   type DecisionResult,
@@ -182,11 +183,21 @@ const make = Effect.gen(function* () {
   const settleInbox = (inboxItemId: string | null) =>
     Effect.gen(function* () {
       if (!inboxItemId) return;
+      const card = yield* q((d) =>
+        d
+          .select({ source: inboxItems.source })
+          .from(inboxItems)
+          .where(eq(inboxItems.id, inboxItemId))
+          .get(),
+      );
+      // An outcome card stays open while a step failed, so it can be retried (Phase 25).
+      const unsettled: ("pending" | "failed")[] =
+        card?.source === "secretary" ? ["pending", "failed"] : ["pending"];
       const open = yield* q((d) =>
         d
           .select({ id: proposals.id })
           .from(proposals)
-          .where(and(eq(proposals.inboxItemId, inboxItemId), eq(proposals.status, "pending")))
+          .where(and(eq(proposals.inboxItemId, inboxItemId), inArray(proposals.status, unsettled)))
           .all(),
       );
       if (open.length === 0)
@@ -261,9 +272,14 @@ const make = Effect.gen(function* () {
           kind: "invalid",
           message: `${gone.join(", ")} ${gone.length > 1 ? "were" : "was"} deleted when you revoked ${gone.length > 1 ? "them" : "it"}, so this can no longer run. Reject it instead.`,
         });
-      // A change of the sprint switch alone is no correction (D57).
+      // A change of the sprint switch alone is no correction (D57). A step of an
+      // outcome card is code's template, so an edit of it teaches classify nothing.
       const taught = withoutCodeFields(payload);
-      if (!same(taught, withoutCodeFields(original)) && !same(taught, withoutCodeFields(recorded)))
+      if (
+        !row.bundleId &&
+        !same(taught, withoutCodeFields(original)) &&
+        !same(taught, withoutCodeFields(recorded))
+      )
         yield* captureCorrection(row, payload);
       yield* q((d) =>
         d
@@ -332,7 +348,8 @@ const make = Effect.gen(function* () {
           message: `This proposal is already ${row.status}.`,
         });
       }
-      yield* captureCorrection(row, null);
+      if (row.bundleId) yield* leaveOut(row);
+      else yield* captureCorrection(row, null);
       yield* q((d) =>
         d
           .update(proposals)
@@ -346,6 +363,27 @@ const make = Effect.gen(function* () {
 
   const approveAll = (inboxItemId: string) =>
     Effect.gen(function* () {
+      const card = yield* q((d) =>
+        d
+          .select({ source: inboxItems.source })
+          .from(inboxItems)
+          .where(eq(inboxItems.id, inboxItemId))
+          .get(),
+      );
+      // An outcome card runs as its bundle: in order, stopping at a failed required step.
+      if (card?.source === "secretary") {
+        const steps = yield* q((d) =>
+          d
+            .select({ id: proposals.id })
+            .from(proposals)
+            .where(and(eq(proposals.bundleId, inboxItemId), eq(proposals.status, "pending")))
+            .all(),
+        );
+        return yield* approveBundle(
+          inboxItemId,
+          steps.map((x) => x.id),
+        );
+      }
       const pending = yield* q((d) =>
         d
           .select()
@@ -377,6 +415,45 @@ const make = Effect.gen(function* () {
 
   const dismiss = (inboxItemId: string) =>
     Effect.gen(function* () {
+      const card = yield* q((d) =>
+        d.select().from(inboxItems).where(eq(inboxItems.id, inboxItemId)).get(),
+      );
+      // Dismissing an outcome card counts toward its rule going quiet on the item (D61).
+      const situation = card?.source === "secretary" ? situationOf(card.triage) : null;
+      // A card that already ran a step was taken up, not turned down: no quiet count.
+      const ran = situation
+        ? (yield* q((d) =>
+            d
+              .select({ id: proposals.id })
+              .from(proposals)
+              .where(
+                and(
+                  eq(proposals.bundleId, inboxItemId),
+                  inArray(proposals.status, ["executed", "failed", "revoked"]),
+                ),
+              )
+              .all(),
+          )).length > 0
+        : false;
+      if (situation && card?.workItemId && card.status !== "dismissed")
+        yield* withDb(
+          recordEvent({
+            kind: "outcome_dismissed",
+            actor: "me",
+            issueKey: situation.keys[0] ?? null,
+            ref: inboxItemId,
+            summary: `Dismissed: ${situation.title}`,
+            data: {
+              rule: situation.rule,
+              inboxItemId,
+              key: situation.key,
+              ...(ran ? { ran: true } : {}),
+            } as never,
+            workItemId: card.workItemId,
+            attachedBy: "user",
+            applied: true,
+          }),
+        );
       yield* q((d) =>
         d
           .update(proposals)
@@ -387,6 +464,121 @@ const make = Effect.gen(function* () {
         d.update(inboxItems).set({ status: "dismissed" }).where(eq(inboxItems.id, inboxItemId)),
       );
     });
+
+  /**
+   * A step the user left out of an outcome card (Phase 25): a correction on the
+   * work item, never a classify example, since code wrote the step.
+   */
+  const leaveOut = (row: Row) =>
+    Effect.gen(function* () {
+      const card = row.bundleId
+        ? yield* q((d) =>
+            d
+              .select()
+              .from(inboxItems)
+              .where(eq(inboxItems.id, row.bundleId ?? ""))
+              .get(),
+          )
+        : undefined;
+      const situation = situationOf(card?.triage);
+      const label = situation?.steps.find((x) => x.seq === row.seq)?.label ?? row.rationale ?? "";
+      const payload = parsePayload(row.payload);
+      yield* q((d) =>
+        d.insert(memories).values({
+          id: newId(),
+          kind: "example",
+          subjectType: "work_item",
+          subjectId: card?.workItemId ?? null,
+          content: `Left out of "${situation?.title ?? "an outcome"}": ${label || describePayload(payload)}`,
+          exampleInput: situation?.why ?? null,
+          exampleBefore: payload,
+          exampleAfter: {
+            type: "step_left_out",
+            rule: row.bundleKind ?? situation?.rule ?? "",
+            kind: row.kind,
+          },
+          source: "user",
+          sourceInboxItemId: row.inboxItemId,
+          confirmed: true,
+          createdAt: nowIso(),
+        }),
+      );
+    });
+
+  const approveBundle = (
+    bundleId: string,
+    keep: readonly string[],
+    edits: Readonly<Record<string, ProposalPayload>> = {},
+  ) =>
+    Effect.gen(function* () {
+      const card = yield* q((d) =>
+        d.select().from(inboxItems).where(eq(inboxItems.id, bundleId)).get(),
+      );
+      if (!card)
+        return yield* new ProposalError({
+          kind: "not_found",
+          message: "That card no longer exists.",
+        });
+      if (card.status === "dismissed")
+        return yield* new ProposalError({ kind: "decided", message: "This card was dismissed." });
+      const situation = situationOf(card.triage);
+      const required = new Set(situation?.steps.filter((x) => x.required).map((x) => x.seq) ?? []);
+      const steps = yield* q((d) =>
+        d
+          .select()
+          .from(proposals)
+          .where(eq(proposals.bundleId, bundleId))
+          .orderBy(asc(proposals.seq))
+          .all(),
+      );
+      const open = steps.filter((x) => x.status === "pending" || x.status === "failed");
+      const wanted = new Set(keep);
+      // Leaving out a step the others hang on leaves them out too.
+      // Pending or failed alike: a required step not kept takes its dependents with it.
+      const requiredOut = open.some((x) => required.has(x.seq) && !wanted.has(x.id));
+      const run = open.filter((x) => wanted.has(x.id) && (!requiredOut || required.has(x.seq)));
+      const leftOut = open.filter((x) => !run.includes(x));
+      for (const x of leftOut) {
+        yield* leaveOut(x);
+        yield* q((d) =>
+          d
+            .update(proposals)
+            .set({
+              status: "rejected",
+              decidedAt: nowIso(),
+              result: { leftOut: true, reason: "Left out when you approved the card." },
+            })
+            .where(and(eq(proposals.id, x.id), inArray(proposals.status, ["pending", "failed"]))),
+        );
+      }
+      const results: DecisionResult[] = [];
+      for (const x of run) {
+        const result = yield* approve(x.id, edits[x.id]);
+        results.push(result);
+        if (result.status === "failed" && required.has(x.seq)) break;
+      }
+      // A card with no steps (a reminder) is done once seen.
+      if (steps.length === 0)
+        yield* q((d) =>
+          d.update(inboxItems).set({ status: "filed" }).where(eq(inboxItems.id, bundleId)),
+        );
+      else yield* settleInbox(bundleId);
+      return results;
+    });
+
+  const fileBundle = (bundleId: string) =>
+    q((d) =>
+      d
+        .update(inboxItems)
+        .set({ status: "filed" })
+        .where(
+          and(
+            eq(inboxItems.id, bundleId),
+            eq(inboxItems.source, "secretary"),
+            eq(inboxItems.status, "triaged"),
+          ),
+        ),
+    ).pipe(Effect.asVoid);
 
   const toSubject = (row: Row): RevokeSubject => ({
     id: row.id,
@@ -757,6 +949,8 @@ const make = Effect.gen(function* () {
     reject,
     approveAll,
     track,
+    approveBundle,
+    fileBundle,
     saveEdit,
     dismiss,
     revokePlan,

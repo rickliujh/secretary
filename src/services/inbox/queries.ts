@@ -129,6 +129,7 @@ export const inboxDetail = (id: string) =>
           status: inboxItems.status,
           summary: inboxItems.summary,
           triage: inboxItems.triage,
+          workItemId: inboxItems.workItemId,
         })
         .from(inboxItems)
         .leftJoin(people, eq(people.id, inboxItems.senderPersonId))

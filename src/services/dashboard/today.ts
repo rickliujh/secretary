@@ -2,8 +2,8 @@
  * Today (FR-12, D49): one place to look. `buildToday` is pure over one
  * snapshot of the local cache and returns three lists, one per question:
  *
- * - Your move: what waits on the user (woken tickets, small asks, new comments
- *   and mentions, Inbox threads with decisions).
+ * - Your move: what waits on the user (outcome cards, woken tickets, small
+ *   asks, new comments and mentions, Inbox threads with decisions).
  * - Their move: what the user waits on (open dependencies, and the user's
  *   tickets blocked by an open ticket).
  * - Sprint work: the planned work (Top focus, D29) with due-soon and at-risk
@@ -15,6 +15,7 @@ import { type DependencyTiming, timing } from "@/services/dependencies/logic";
 import type { ScoringWeights } from "@/services/settings/schema";
 import { userActiveSprints } from "@/services/sprints/active";
 import type { SprintInfo } from "@/services/sprints/calendar";
+import type { OutcomeRef } from "@/services/work/outcomes";
 import {
   blockInfo,
   type DashboardInputs,
@@ -49,6 +50,8 @@ export type TodayInputs = DashboardInputs & {
   smallAskLabel: string | null;
   /** The active work item of each ticket (D61), so rows name it. */
   workItems?: ReadonlyMap<string, WorkItemRef>;
+  /** Open outcome cards (Phase 25); their tickets' plain wait, woken and comment rows are hidden. */
+  outcomes?: readonly OutcomeRef[];
 };
 
 /** The work item a row's ticket belongs to (D61); `current`: the user is on it. */
@@ -65,6 +68,8 @@ export type TicketRow = {
   at: string;
   /** Carries the home's label (D44). */
   smallAsk: boolean;
+  /** The comment a comment row is for, when known. */
+  commentId?: string;
 };
 
 export type ThreadRow = {
@@ -74,7 +79,15 @@ export type ThreadRow = {
   workItem?: WorkItemRef;
 };
 
-export type YourMoveRow = TicketRow | ThreadRow;
+/** An outcome card (Phase 25): the follow-ups a changed fact calls for, approved in one click. */
+export type OutcomeRow = {
+  kind: "outcome";
+  outcome: OutcomeRef;
+  reason: string;
+  workItem?: WorkItemRef;
+};
+
+export type YourMoveRow = TicketRow | ThreadRow | OutcomeRow;
 
 /** Where a wait stands, in Their move's order (D49). */
 export type WaitState = "overdue" | "followup" | "back" | "open" | "asleep";
@@ -361,12 +374,41 @@ export function buildToday(
   const placed = new Set<string>();
   /** Where each small ask was placed, for `smallAsks.open`. */
   const askState = new Map<string, string>();
+  const items = input.workItems ?? new Map<string, WorkItemRef>();
+
+  // 0. An outcome card stands for what it is about, and only that: the waits it
+  // names, a woken ticket a blocker card resumes, the comments a teammate card is about.
+  const outcomes = input.outcomes ?? [];
+  const cardWaits = new Set(outcomes.flatMap((o) => o.waits));
+  const cardWoken = new Set(
+    outcomes.filter((o) => o.rule === "blocker_closed").flatMap((o) => o.keys),
+  );
+  const cardComments = new Set(
+    outcomes.filter((o) => o.rule === "teammate_touched").flatMap((o) => o.comments),
+  );
+  const outcomeRows: OutcomeRow[] = outcomes.map((o) => {
+    const byTicket = o.keys.map((k) => items.get(k)).find((x) => !!x);
+    const current = [...items.values()].some((x) => x.id === o.workItemId && x.current);
+    const workItem =
+      byTicket ?? (o.workItemId ? { id: o.workItemId, name: o.itemName, current } : undefined);
+    return {
+      kind: "outcome",
+      outcome: o,
+      reason: o.steps ? `${plural(o.steps, "step")} to approve` : "to read",
+      ...(workItem ? { workItem } : {}),
+    };
+  });
+  const outcomeIds = new Set(outcomes.map((o) => o.id));
 
   // 1. Woken tickets.
   const woken: TicketRow[] = [];
   for (const w of input.woken) {
     const issue = byKey.get(w.key);
     if (!open(issue) || placed.has(w.key)) continue;
+    if (cardWoken.has(w.key)) {
+      placed.add(w.key);
+      continue;
+    }
     placed.add(w.key);
     askState.set(w.key, `woke up: ${w.reason}`);
     woken.push({
@@ -390,6 +432,7 @@ export function buildToday(
   for (const c of work.waitingOnMe) {
     if (placed.has(c.issue.key)) continue;
     placed.add(c.issue.key);
+    if (c.commentId && cardComments.has(c.commentId)) continue;
     askState.set(c.issue.key, `your move: ${c.reasons[0] ?? "new comment"}`);
     comments.push({
       kind: "comment",
@@ -397,6 +440,7 @@ export function buildToday(
       reason: c.reasons[0] ?? "New comment",
       at: c.at,
       smallAsk: isAsk(c.issue),
+      ...(c.commentId ? { commentId: c.commentId } : {}),
     });
   }
 
@@ -459,11 +503,12 @@ export function buildToday(
   for (const i of input.issues) if (isAsk(i)) placed.add(i.key);
 
   const threads: ThreadRow[] = input.threads
-    .filter((t) => t.proposals + t.questions > 0)
+    .filter((t) => t.proposals + t.questions > 0 && !outcomeIds.has(t.id))
     .map((t) => ({ kind: "thread", thread: t, reason: threadReason(t, today) }));
 
   // Their move: every open wait, the most pressing first, sleeping ones last.
   const waits: WaitRow[] = openWaits
+    .filter((d) => !cardWaits.has(d.id))
     .map((d): WaitRow => {
       const t = timing(d, today);
       const issue = byKey.get(d.issueKey) ?? null;
@@ -517,7 +562,6 @@ export function buildToday(
   const sprintEnd = userActiveSprints(sprints, input.issues, me)[0]?.end ?? null;
 
   // Rows name their work item, and the item the user is on comes first (D61).
-  const items = input.workItems ?? new Map<string, WorkItemRef>();
   const keyOf = (r: YourMoveRow | TheirMoveRow | SprintRow) =>
     "issue" in r && r.issue ? r.issue.key : "dependency" in r ? r.dependency.issueKey : null;
   const named = <R extends YourMoveRow | TheirMoveRow | SprintRow>(rows: R[]): R[] => {
@@ -534,7 +578,7 @@ export function buildToday(
   };
 
   return {
-    yourMove: named([...woken, ...asks, ...comments, ...threads]),
+    yourMove: named([...outcomeRows, ...woken, ...asks, ...comments, ...threads]),
     theirMove: named(theirMove),
     sprintWork: named([
       ...focusRows.map((r) => sprintRow(r, true)),

@@ -1,0 +1,507 @@
+/**
+ * Outcome cards (FR-19.6, D61, Phase 25). After every work pass, which follows
+ * each sync, triage and decision (even when no model call was made), the
+ * consequence rules (`rules.ts`) run for the active items, and each new
+ * situation becomes one card: an inbox item (`source` `secretary`) holding the
+ * situation, with its steps as pending proposals of one bundle in step order.
+ * The user approves them with one click (`Proposals.approveBundle`); nothing
+ * here writes to Jira.
+ *
+ * Idempotent: a situation whose key exists (any status) is not offered again,
+ * and what the rules saw is remembered per item (`sync_state` `work.outcomes`),
+ * so a moved date or a new event counts once. An item whose situations did not
+ * all fit under the cap keeps its old memory, so the rest come next pass.
+ */
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { Effect } from "effect";
+import { z } from "zod";
+import { inboxItems, jiraIssues, people, proposals, workEvents, workItems } from "@/db/schema";
+import { localDate } from "@/lib/dates";
+import { newId, nowIso } from "@/lib/ids";
+import { readJson } from "@/lib/json";
+import { logger } from "@/lib/log";
+import { blockLinks } from "@/services/dashboard/sections";
+import { query } from "@/services/db";
+import { listDependencies } from "@/services/dependencies/queries";
+import { parseIssueLinks } from "@/services/jira/schemas";
+import { parsePayload } from "@/services/proposals/schema";
+import type { AppSettings } from "@/services/settings/schema";
+import { getState, parseProjectMeta, SYNC_KEYS, setState } from "@/services/sync/state";
+import { appendEvents, eventsOfItems } from "./events";
+import { loadItemFacts } from "./facts";
+import {
+  quietRules,
+  RULE_LABELS,
+  RULE_NAMES,
+  type RuleContact,
+  type RuleEvent,
+  type RuleMemory,
+  type RuleName,
+  type RuleWait,
+  runRules,
+} from "./rules";
+import {
+  parseState,
+  type Situation,
+  type SituationRecord,
+  SituationSchema,
+  situationOf,
+  TIMELINE_ONLY,
+} from "./schema";
+
+/** Most new cards one pass offers; the rest wait for the next pass. */
+export const OUTCOMES_PER_PASS = 5;
+
+/** An item seen for the first time after the first run: its events of this many hours are new. */
+const NEW_ITEM_HOURS = 48;
+
+/** Events of an item the rules read for "nothing sent since" checks. */
+const HISTORY_LIMIT = 300;
+
+const MemorySchema = z.object({
+  items: z
+    .record(
+      z.string(),
+      z.object({
+        nextExpectedOn: z.string().nullable().default(null),
+        waits: z.record(z.string(), z.string().nullable()).default({}),
+        /** Seen through: the last event the rules read, offered or not. */
+        lastEventId: z.string().nullable().default(null),
+        /** Situations already known before the rules first ran (kept while they hold); never offered. */
+        known: z.array(z.string()).default([]),
+        /** Situations found but not offered yet (the cap): offered in a later pass. */
+        deferred: z.array(SituationSchema).default([]),
+      }),
+    )
+    .default({}),
+});
+type OutcomeMemory = z.infer<typeof MemorySchema>;
+
+export type OutcomesResult = { offered: number; situations: number };
+
+const toEvent = (e: typeof workEvents.$inferSelect): RuleEvent => ({
+  id: e.id,
+  kind: e.kind,
+  at: e.at,
+  actor: e.actor,
+  issueKey: e.issueKey,
+  ref: e.ref,
+  summary: e.summary,
+  data: e.data,
+});
+
+/** The rules' quiet list of an item, from its dismissals and "Ask again" events. */
+export const quietOfItem = (itemId: string) =>
+  Effect.map(
+    query((d) =>
+      d
+        .select({ id: workEvents.id, kind: workEvents.kind, data: workEvents.data })
+        .from(workEvents)
+        .where(
+          and(
+            eq(workEvents.workItemId, itemId),
+            inArray(workEvents.kind, ["outcome_dismissed", "rule_resumed"]),
+          ),
+        )
+        .all(),
+    ),
+    quietRules,
+  );
+
+/** "Ask again about ..." in the Work tab's item menu: the rule offers cards on the item again. */
+export const resumeRule = (itemId: string, rule: RuleName) =>
+  appendEvents([
+    {
+      kind: "rule_resumed",
+      actor: "me",
+      summary: `Asked again about ${RULE_LABELS[rule].name}`,
+      data: { rule } as never,
+      workItemId: itemId,
+      attachedBy: "user",
+      applied: true,
+    },
+  ]).pipe(Effect.asVoid);
+
+/** Who the rules can write to, with the channel each prefers. */
+const loadContacts = Effect.map(
+  query((d) =>
+    d
+      .select({
+        id: people.id,
+        name: people.displayName,
+        jira: people.jiraUsername,
+        profile: people.profile,
+      })
+      .from(people)
+      .all(),
+  ),
+  (rows) => ({
+    contacts: new Map(
+      rows.map((r): [string, RuleContact] => [
+        r.id,
+        {
+          id: r.id,
+          name: r.name,
+          channel: r.profile?.preferredChannel === "email" ? "email" : "teams",
+        },
+      ]),
+    ),
+    jira: new Map(rows.map((r) => [r.id, r.jira ?? null] as const)),
+  }),
+);
+
+/** The user's Jira user and the names a comment calls them by (display name, first name). */
+const loadMe = Effect.gen(function* () {
+  const username = (yield* getState(SYNC_KEYS.username)) ?? null;
+  if (!username) return { username: null, names: [] as string[] };
+  const row = yield* query((d) =>
+    d
+      .select({ name: jiraIssues.assigneeDisplay })
+      .from(jiraIssues)
+      .where(eq(jiraIssues.assignee, username))
+      .limit(1)
+      .get(),
+  );
+  const display = row?.name?.trim() ?? "";
+  const first = display.split(/\s+/)[0] ?? "";
+  return { username, names: [...new Set([display, first].filter((n) => n.length >= 3))] };
+});
+
+/** Every "is blocked by" key of these tickets, done or not, from the cached links. */
+const blockedByOf = (keys: readonly string[]) =>
+  keys.length === 0
+    ? Effect.succeed({} as Record<string, string[]>)
+    : Effect.map(
+        query((d) =>
+          d
+            .select({ key: jiraIssues.key, raw: jiraIssues.raw })
+            .from(jiraIssues)
+            .where(inArray(jiraIssues.key, [...keys]))
+            .all(),
+        ),
+        (rows) =>
+          Object.fromEntries(
+            rows.map((r) => [
+              r.key,
+              blockLinks(parseIssueLinks((r.raw as { issuelinks?: unknown } | null)?.issuelinks))
+                .filter((l) => l.direction === "blockedBy")
+                .map((l) => l.key),
+            ]),
+          ),
+      );
+
+/** The smallest id of an event no item holds yet: the watermark never passes it. */
+const unattachedFloor = Effect.map(
+  query((d) =>
+    d
+      .select({ id: workEvents.id })
+      .from(workEvents)
+      .where(isNull(workEvents.attachedBy))
+      .orderBy(asc(workEvents.id))
+      .limit(1)
+      .get(),
+  ),
+  (r) => r?.id ?? null,
+);
+
+/** Creates one card: the inbox item, its steps as one bundle in order, and the timeline event. */
+const offer = (item: { id: string; name: string }, s: Situation) =>
+  Effect.gen(function* () {
+    const id = newId();
+    const now = nowIso();
+    const record: SituationRecord = {
+      rule: s.rule,
+      key: s.key,
+      title: s.title,
+      why: s.why,
+      keys: s.keys,
+      waits: s.waits,
+      comments: s.comments,
+      facts: s.facts,
+      itemName: item.name,
+      steps: s.steps.map((x, seq) => ({ seq, label: x.label, required: x.required })),
+    };
+    yield* query((d) =>
+      d.insert(inboxItems).values({
+        id,
+        source: "secretary",
+        rawText: `${s.title}\n${s.why}`,
+        receivedAt: now,
+        status: "triaged",
+        summary: s.title,
+        triage: { situation: record },
+        workItemId: item.id,
+        situationKey: s.key,
+      }),
+    );
+    if (s.steps.length)
+      yield* query((d) =>
+        d.insert(proposals).values(
+          s.steps.map((x, seq) => ({
+            id: newId(),
+            inboxItemId: id,
+            seq,
+            kind: x.payload.kind,
+            payload: x.payload,
+            rationale: x.label,
+            status: "pending" as const,
+            createdAt: now,
+            bundleId: id,
+            bundleKind: s.rule,
+          })),
+        ),
+      );
+    yield* appendEvents([
+      {
+        kind: "outcome_offered",
+        actor: "secretary",
+        issueKey: s.keys[0] ?? null,
+        ref: id,
+        summary: `Offered: ${s.title}`,
+        data: { rule: s.rule, inboxItemId: id, key: s.key } as never,
+        workItemId: item.id,
+        attachedBy: "code",
+        applied: true,
+      },
+    ]);
+    return id;
+  });
+
+/**
+ * Runs the rules for every active item and offers what is new: at most
+ * `OUTCOMES_PER_PASS` cards, the current item first, then in the rules'
+ * priority order.
+ */
+export const runOutcomes = (opts: { now: Date; settings: AppSettings }) =>
+  Effect.gen(function* () {
+    const today = localDate(opts.now);
+    const raw = yield* getState(SYNC_KEYS.outcomes);
+    const first = raw === undefined;
+    const memory: OutcomeMemory = readJson(raw, MemorySchema, { items: {} });
+    const items = yield* query((d) =>
+      d
+        .select({
+          id: workItems.id,
+          name: workItems.name,
+          current: workItems.current,
+          state: workItems.state,
+        })
+        .from(workItems)
+        .where(eq(workItems.status, "active"))
+        .orderBy(asc(workItems.createdAt), asc(workItems.id))
+        .all(),
+    );
+    const deps = yield* listDependencies();
+    const { contacts, jira } = yield* loadContacts;
+    const me = yield* loadMe;
+    const meta = parseProjectMeta(yield* getState(SYNC_KEYS.projectMeta));
+    const statuses = Object.fromEntries(Object.entries(meta).map(([k, v]) => [k, v.statuses]));
+    const pending = (yield* query((d) =>
+      d
+        .select({ payload: proposals.payload, editedPayload: proposals.editedPayload })
+        .from(proposals)
+        .where(eq(proposals.status, "pending"))
+        .all(),
+    )).map((p) => parsePayload(p.editedPayload ?? p.payload));
+    const floor = yield* unattachedFloor;
+    const cutoff = new Date(opts.now.getTime() - NEW_ITEM_HOURS * 3_600_000).toISOString();
+
+    const found: { item: (typeof items)[number]; index: number; s: Situation }[] = [];
+    const seen = new Map<string, RuleMemory & { known: string[] }>();
+    for (const [index, item] of items.entries()) {
+      const facts = yield* loadItemFacts(item.id, { today });
+      const keys = new Set(facts.tickets.map((t) => t.key));
+      const waits = deps
+        .filter((w) => keys.has(w.issueKey) && w.status !== "resolved")
+        .map(
+          (w): RuleWait => ({
+            id: w.id,
+            issueKey: w.issueKey,
+            label: w.label,
+            status: w.status,
+            externalRef: w.externalRef,
+            ownerPersonId: w.ownerPersonId,
+            ownerTeamId: w.ownerTeamId,
+            ownerName: w.owner.name,
+            ownerJira: w.ownerPersonId ? (jira.get(w.ownerPersonId) ?? null) : null,
+            requestedAt: w.requestedAt,
+            expectedAt: w.expectedAt,
+            nextFollowupAt: w.nextFollowupAt,
+            lastFollowupAt: w.lastFollowupAt,
+            ownerAway: w.ownerAway,
+          }),
+        );
+      const history = (yield* eventsOfItems([item.id], HISTORY_LIMIT)).map(toEvent);
+      const prev = memory.items[item.id] ?? null;
+      const isNew = (e: RuleEvent) => {
+        if (TIMELINE_ONLY.has(e.kind as never)) return false;
+        if (prev) return !prev.lastEventId || e.id > prev.lastEventId;
+        // The first run ever reads no old news; an item first seen later reads its last two days.
+        if (first) return false;
+        return e.at >= cutoff;
+      };
+      const newEvents = history.filter(isNew);
+      // The watermark stops before an event no item holds yet, so it is read once attached.
+      const readable = history.map((e) => e.id).filter((x) => !floor || x < floor);
+      const lastEventId =
+        [prev?.lastEventId ?? null, ...readable]
+          .filter((x): x is string => !!x)
+          .sort()
+          .at(-1) ?? null;
+      const state = parseState(item.state);
+      const situations = runRules({
+        item,
+        facts,
+        state,
+        previous: prev,
+        newEvents,
+        history,
+        waits,
+        blockedBy: yield* blockedByOf(facts.tickets.map((t) => t.key)),
+        statuses,
+        contacts,
+        me,
+        pending,
+        today,
+        settings: opts.settings,
+        quiet: yield* quietOfItem(item.id),
+      });
+      // Those found now, and those an earlier pass left for later; the fresh one wins.
+      const now = new Set(situations.map((s) => s.key));
+      const candidates = [...situations, ...(prev?.deferred ?? []).filter((s) => !now.has(s.key))];
+      // The first run ever offers nothing: what holds already (a chase due, a
+      // promise late) is known, and only what changes from then on is offered.
+      const known = first ? [...now] : (prev?.known ?? []).filter((k) => now.has(k));
+      const knownSet = new Set(known);
+      for (const s of candidates) if (!knownSet.has(s.key)) found.push({ item, index, s });
+      // Seen through is advanced for every item, offered or not.
+      seen.set(item.id, {
+        nextExpectedOn: state?.nextExpected?.on ?? null,
+        waits: Object.fromEntries(waits.map((w) => [w.id, w.expectedAt])),
+        lastEventId,
+        known,
+      });
+    }
+
+    const rank = (x: (typeof found)[number]) => RULE_NAMES.indexOf(x.s.rule);
+    found.sort(
+      (a, b) =>
+        Number(b.item.current) - Number(a.item.current) || rank(a) - rank(b) || a.index - b.index,
+    );
+    const keys = [...new Set(found.map((x) => x.s.key))];
+    const existing = new Set(
+      keys.length
+        ? (yield* query((d) =>
+            d
+              .select({ key: inboxItems.situationKey })
+              .from(inboxItems)
+              .where(inArray(inboxItems.situationKey, keys))
+              .all(),
+          )).map((r) => r.key)
+        : [],
+    );
+    const fresh: typeof found = [];
+    for (const x of found) {
+      if (existing.has(x.s.key)) continue;
+      existing.add(x.s.key);
+      fresh.push(x);
+    }
+    const offered = fresh.slice(0, OUTCOMES_PER_PASS);
+    const left = fresh.slice(OUTCOMES_PER_PASS);
+    const deferred = new Set(left.map((x) => x.item.id));
+    for (const x of offered) yield* offer(x.item, x.s);
+
+    // Only active items are remembered; what did not fit under the cap waits in `deferred`.
+    const items2: OutcomeMemory["items"] = {};
+    for (const item of items) {
+      const kept = seen.get(item.id);
+      if (!kept) continue;
+      items2[item.id] = {
+        ...kept,
+        deferred: left.filter((x) => x.item.id === item.id).map((x) => x.s),
+      };
+    }
+    yield* setState(SYNC_KEYS.outcomes, JSON.stringify({ items: items2 } satisfies OutcomeMemory));
+    if (offered.length)
+      logger.info(
+        `Outcomes: ${offered.length} new card${offered.length === 1 ? "" : "s"}${deferred.size ? `, more next pass` : ""}`,
+      );
+    return { offered: offered.length, situations: fresh.length } satisfies OutcomesResult;
+  });
+
+/** Pending outcome cards (Today's "Your move"): title, item, steps, and the tickets they are about. */
+export const pendingOutcomes = Effect.gen(function* () {
+  const cards = yield* query((d) =>
+    d
+      .select({
+        id: inboxItems.id,
+        triage: inboxItems.triage,
+        receivedAt: inboxItems.receivedAt,
+        workItemId: inboxItems.workItemId,
+        itemName: workItems.name,
+      })
+      .from(inboxItems)
+      .leftJoin(workItems, eq(workItems.id, inboxItems.workItemId))
+      .where(and(eq(inboxItems.source, "secretary"), eq(inboxItems.status, "triaged")))
+      .orderBy(asc(inboxItems.receivedAt))
+      .all(),
+  );
+  if (cards.length === 0) return [];
+  const steps = yield* query((d) =>
+    d
+      .select({ bundleId: proposals.bundleId })
+      .from(proposals)
+      .where(
+        and(
+          inArray(
+            proposals.bundleId,
+            cards.map((c) => c.id),
+          ),
+          eq(proposals.status, "pending"),
+        ),
+      )
+      .all(),
+  );
+  const count = new Map<string, number>();
+  for (const s of steps) if (s.bundleId) count.set(s.bundleId, (count.get(s.bundleId) ?? 0) + 1);
+  return cards.flatMap((c) => {
+    const record = situationOf(c.triage);
+    if (!record) return [];
+    return [
+      {
+        id: c.id,
+        rule: record.rule,
+        title: record.title,
+        why: record.why,
+        itemName: c.itemName ?? record.itemName,
+        workItemId: c.workItemId,
+        steps: count.get(c.id) ?? 0,
+        keys: record.keys,
+        waits: record.waits,
+        comments: record.comments,
+        at: c.receivedAt,
+      } satisfies OutcomeRef,
+    ];
+  });
+});
+
+/** An open outcome card as Today lists it. */
+export type OutcomeRef = {
+  id: string;
+  rule: RuleName;
+  title: string;
+  why: string;
+  itemName: string;
+  workItemId: string | null;
+  /** Steps still to decide. */
+  steps: number;
+  keys: string[];
+  /** The waits it is about: Today hides only these wait rows. */
+  waits: string[];
+  /** The comments it is about (`teammate_touched`): Today hides their comment rows. */
+  comments: string[];
+  at: string;
+};
+
+/** The rules quiet on an item, for the Work tab's "Ask again about ..." */
+export const quietRulesOf = (itemId: string) => Effect.map(quietOfItem(itemId), (s) => [...s]);

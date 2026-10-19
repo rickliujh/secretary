@@ -7,6 +7,8 @@
  * prompt, never copied in here.
  */
 import { z } from "zod";
+import { ProposalPayloadSchema } from "@/services/proposals/schema";
+import { RULE_NAMES } from "@/services/settings/schema";
 
 const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
 
@@ -95,11 +97,23 @@ export const EVENT_KINDS = [
   "answer",
   /** The user renamed, split or merged the item or moved a ticket; on the timeline only. */
   "correction",
+  /** A consequence rule offered an outcome card (Phase 25); on the timeline only. */
+  "outcome_offered",
+  /** The user dismissed an outcome card; two on one item quiet its rule there. */
+  "outcome_dismissed",
+  /** The user asked a quiet rule to offer cards on the item again ("Ask again about ..."). */
+  "rule_resumed",
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
 /** Kinds the state update never reads: they are recorded for the timeline only. */
-export const TIMELINE_ONLY: ReadonlySet<EventKind> = new Set(["ticket_viewed", "correction"]);
+export const TIMELINE_ONLY: ReadonlySet<EventKind> = new Set([
+  "ticket_viewed",
+  "correction",
+  "outcome_offered",
+  "outcome_dismissed",
+  "rule_resumed",
+]);
 
 /** Kinds that carry words someone wrote, so a commitment may come from them. */
 export const TEXT_KINDS: ReadonlySet<EventKind> = new Set([
@@ -113,8 +127,15 @@ export const TEXT_KINDS: ReadonlySet<EventKind> = new Set([
 /**
  * Who did it: the user, a contact, a Jira user that is no contact, the sync, or
  * someone unknown (a paste with no sender, a change whose author Jira does not say).
+ * `secretary`: the app itself (an outcome card offered, Phase 25).
  */
-export type Actor = "me" | "sync" | "unknown" | `contact:${string}` | `jira:${string}`;
+export type Actor =
+  | "me"
+  | "sync"
+  | "unknown"
+  | "secretary"
+  | `contact:${string}`
+  | `jira:${string}`;
 
 /** What a message event (one intake item) carries for attachment and the state update. */
 export const MessageDataSchema = z.object({
@@ -184,7 +205,76 @@ export const CorrectionSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("rename"), name: z.string() }),
   z.object({ type: z.literal("note"), note: z.string(), before: z.string() }),
+  /** A step the user left out of an outcome card (Phase 25); `before` holds its payload. */
+  z.object({ type: z.literal("step_left_out"), rule: z.string(), kind: z.string() }),
 ]);
 export type Correction = z.infer<typeof CorrectionSchema>;
+
+// ---------------------------------------------------------------------------
+// Situations and outcome cards (FR-19.6, Phase 25)
+// ---------------------------------------------------------------------------
+
+export const RuleNameSchema = z.enum(RULE_NAMES);
+export type { RuleName } from "@/services/settings/schema";
+
+/**
+ * One step of an outcome: a canonical proposal payload (so validation, editing,
+ * revoke and the Executor need nothing new), its line on the card, and whether
+ * the other steps hang on it (leaving it out drops them; its failure stops them).
+ */
+export const StepDraftSchema = z.object({
+  payload: ProposalPayloadSchema,
+  label: z.string().trim().min(1),
+  required: z.boolean().default(false),
+});
+export type StepDraft = z.infer<typeof StepDraftSchema>;
+
+/**
+ * What a rule found (D61): `key` is `<rule>:<work_item_id>:<fingerprint>` of
+ * the facts it used, so the same situation is offered once. `keys` are the
+ * tickets it is about (Today hides their plain rows while the card is open).
+ */
+export const SituationSchema = z.object({
+  rule: RuleNameSchema,
+  key: z.string().min(1),
+  title: z.string().trim().min(1),
+  /** The facts in one line. */
+  why: z.string().trim().min(1),
+  keys: z.array(z.string()).default([]),
+  /** The waits (dependency ids) it is about: Today hides only these wait rows. */
+  waits: z.array(z.string()).default([]),
+  /** The Jira comment ids it is about (`teammate_touched`): Today hides their comment rows. */
+  comments: z.array(z.string()).default([]),
+  /** The facts the rule used, as it read them. */
+  facts: z.record(z.string(), z.unknown()).default({}),
+  steps: z.array(StepDraftSchema).default([]),
+});
+export type Situation = z.infer<typeof SituationSchema>;
+
+/** An outcome card's `inbox_items.triage`: the situation without the payloads (they are the proposals). */
+export const SituationRecordSchema = z.object({
+  situation: z.object({
+    rule: RuleNameSchema,
+    key: z.string(),
+    title: z.string(),
+    why: z.string(),
+    keys: z.array(z.string()).default([]),
+    waits: z.array(z.string()).default([]),
+    comments: z.array(z.string()).default([]),
+    facts: z.record(z.string(), z.unknown()).default({}),
+    itemName: z.string().default(""),
+    /** One per proposal, by its `seq`. */
+    steps: z
+      .array(z.object({ seq: z.number().int(), label: z.string(), required: z.boolean() }))
+      .default([]),
+  }),
+});
+export type SituationRecord = z.infer<typeof SituationRecordSchema>["situation"];
+
+/** The situation record of an inbox item's triage, or null when it holds none. */
+export function situationOf(triage: unknown): SituationRecord | null {
+  const r = SituationRecordSchema.safeParse(triage);
+  return r.success ? r.data.situation : null;
+}
 
 export * from "./questions-schema";

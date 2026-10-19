@@ -37,6 +37,7 @@ import {
   type Member,
 } from "./grouping";
 import { derivedNote, noteFacts } from "./note";
+import { quietOfItem } from "./outcomes";
 import {
   type Correction,
   CorrectionSchema,
@@ -365,10 +366,11 @@ export const workItemDetail = (issueKey: string, today = localDate()) =>
       d
         .select({ id: inboxItems.id })
         .from(inboxItems)
-        .where(eq(inboxItems.workItemId, item.id))
+        .where(and(eq(inboxItems.workItemId, item.id), ne(inboxItems.source, "secretary")))
         .get(),
     );
     const others = (yield* listActiveItems).filter((o) => o.id !== item.id);
+    const quiet = [...(yield* quietOfItem(item.id))];
     return {
       item: {
         id: item.id,
@@ -387,6 +389,8 @@ export const workItemDetail = (issueKey: string, today = localDate()) =>
       timeline,
       threadId: thread?.id ?? null,
       others,
+      /** Rules dismissed twice here (Phase 25), offered again from the item menu. */
+      quiet,
     };
   });
 export type WorkItemDetail = NonNullable<Effect.Effect.Success<ReturnType<typeof workItemDetail>>>;
