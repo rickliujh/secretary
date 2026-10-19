@@ -13,6 +13,7 @@ import { ProposalsLive } from "@/services/proposals/live";
 import { promptOf, readThread, TODAY } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
+import { json } from "@/test/stub-fetch";
 import { Intake } from ".";
 
 const e = { rationale: "the user asked", evidence: "add Sarah Lee", confidence: 0.9 };
@@ -23,8 +24,14 @@ const answer = (proposals: Record<string, unknown>[]) => ({
   proposals: proposals.map((p) => ({ ...e, ...p })),
 });
 
+/** The fixture Jira takes comments, so a wait's comment chore runs (Phase 26). */
+const comments = {
+  match: (u: URL, r: { method: string }) => u.pathname.endsWith("/comment") && r.method === "POST",
+  respond: () => json({ id: "90001", body: "ok" }, 201),
+};
+
 function layerWith(answers: { text: string }[]) {
-  const intake = intakeTestLayer({ "std-m": answers });
+  const intake = intakeTestLayer({ "std-m": answers }, [comments]);
   return {
     layer: Layer.provideMerge(ProposalsLive, Layer.provideMerge(ExecutorLive, intake.layer)),
     models: intake.models,
@@ -110,7 +117,13 @@ describe("new contacts and teams from intake (FR-18 AC)", () => {
     // The paste named Sarah, who is in Context now: a new contact is refused and repaired.
     expect(models.calls).toHaveLength(3);
     expect(promptOf(models.calls, 2)).toContain(`Sarah Lee is already a contact (${sarahId})`);
-    expect(r.later).toMatchObject([{ kind: "link_dependency", ownerPersonId: sarahId }]);
+    // The wait comes with its chores (Phase 26): the comment and the request to her.
+    expect(r.later).toMatchObject([
+      // No email or page to link, so not mirrored (D18).
+      { kind: "link_dependency", ownerPersonId: sarahId, mirror: false },
+      { kind: "add_comment", target: "PAY-2" },
+      { kind: "draft_message", intent: "request", recipientPersonId: sarahId },
+    ]);
   });
 
   test("a later item in the thread uses the contact an earlier one proposes", async () => {
@@ -164,8 +177,16 @@ describe("new contacts and teams from intake (FR-18 AC)", () => {
     expect(r.proposed).toMatchObject([
       { kind: "create_person", ref: "$person:1" },
       { kind: "link_dependency", ownerPersonId: "$person:1" },
+      { kind: "add_comment", target: "PAY-2" },
+      { kind: "draft_message", recipientPersonId: "$person:1" },
     ]);
-    expect(r.decided.map((d) => d.status)).toEqual(["executed", "executed"]);
+    // The new contact first, then the wait's bundle in order (Phase 26).
+    expect(r.decided.map((d) => d.status)).toEqual([
+      "executed",
+      "executed",
+      "executed",
+      "executed",
+    ]);
     expect(r.people.map((p) => p.displayName)).toEqual(["Sarah Lee"]);
   });
 

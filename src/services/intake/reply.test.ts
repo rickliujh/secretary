@@ -107,12 +107,14 @@ describe("Intake threads (D22)", () => {
       ),
     );
     expect(r.res).toMatchObject({ items: 1, proposals: 1, questions: 0 });
+    // The wait's comment chore goes with it (Phase 26); the model's comment is the new one.
     expect(r.props.map((p) => [p.kind, p.status])).toEqual([
       ["transition_issue", "executed"],
       ["link_dependency", "superseded"],
+      ["add_comment", "superseded"],
       ["add_comment", "pending"],
     ]);
-    expect(r.props[2]?.messageId).toBe(r.messages[3]?.id ?? "");
+    expect(r.props[3]?.messageId).toBe(r.messages[3]?.id ?? "");
     expect(r.messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
     const p = promptOf(models.calls, 1);
     expect(p).toContain("Approved: Move PAY-2 to To Do");
@@ -164,6 +166,7 @@ describe("Intake threads (D22)", () => {
       ["needs_clarification", "executed"],
       ["transition_issue", "pending"],
       ["link_dependency", "pending"],
+      ["add_comment", "pending"],
     ]);
     expect(r.props[0]?.result).toEqual({
       answer: "PAY-2, blocked on INC0012345; move it back to To Do",

@@ -71,10 +71,13 @@ describe("Intake.triage", () => {
       summary: "PAY-2 is blocked on INC0012345",
       rawText: text,
     });
+    // The incident wait brings the reduced playbook (Phase 26): its comment.
     expect(r.props.map((p) => [p.seq, p.kind, p.status])).toEqual([
       [0, "transition_issue", "pending"],
       [1, "link_dependency", "pending"],
+      [2, "add_comment", "pending"],
     ]);
+    expect(r.props[2]?.bundleId).toBe(r.props[1]?.id ?? "");
     expect(r.props[1]?.payload).toMatchObject({ target: "PAY-2", externalRef: "INC0012345" });
     expect(r.props[0]?.evidence).toBe("blocked on INC0012345");
     // Signature and greeting-only lines are stripped before the model sees the text.
@@ -111,6 +114,7 @@ describe("Intake.triage", () => {
       ),
     );
     expect(r.props.map((p) => (p.payload as { target: string }).target)).toEqual([
+      "PAY-2",
       "PAY-2",
       "PAY-2",
     ]);
@@ -164,9 +168,10 @@ describe("Intake.triage", () => {
     expect(r.props.map((p) => p.kind)).toEqual([
       "transition_issue",
       "link_dependency",
+      "add_comment",
       "needs_clarification",
     ]);
-    expect(r.props[2]?.payload).toEqual({
+    expect(r.props[3]?.payload).toEqual({
       kind: "needs_clarification",
       question: "Is this about PAY-2 or OPS-7?",
     });
@@ -193,7 +198,11 @@ describe("Intake.triage", () => {
       );
     };
     const withProposals = await run({ ...answer, confidence: 0.3, question: null });
-    expect(withProposals.props.map((p) => p.kind)).toEqual(["transition_issue", "link_dependency"]);
+    expect(withProposals.props.map((p) => p.kind)).toEqual([
+      "transition_issue",
+      "link_dependency",
+      "add_comment",
+    ]);
     expect(withProposals.items[0]?.lowConfidence).toBe(true);
   });
 

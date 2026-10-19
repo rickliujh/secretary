@@ -338,6 +338,7 @@ describe("new contacts and teams (prompt version 14, D60)", () => {
           ownerTeamId: null,
           externalRef: null,
           externalUrl: null,
+          mirror: false,
           expectedAt: null,
           nextFollowupAt: null,
         },

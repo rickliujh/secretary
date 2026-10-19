@@ -118,7 +118,9 @@ const seedCard = (payloads: ProposalPayload[], required = true) =>
         seq,
         label: `Step ${seq} ${p.kind}`,
         required: required && seq === 0,
+        choice: false,
       })),
+      found: null,
     };
     yield* query((d) =>
       d.insert(inboxItems).values({
