@@ -103,6 +103,10 @@ export const EVENT_KINDS = [
   "outcome_dismissed",
   /** The user asked a quiet rule to offer cards on the item again ("Ask again about ..."). */
   "rule_resumed",
+  /** The user parked an Inbox thread about this item while on another (D62); timeline only. */
+  "parked",
+  /** A parked thread came back: the current item changed or closed, a new day, or the user. */
+  "unparked",
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -113,6 +117,8 @@ export const TIMELINE_ONLY: ReadonlySet<EventKind> = new Set([
   "outcome_offered",
   "outcome_dismissed",
   "rule_resumed",
+  "parked",
+  "unparked",
 ]);
 
 /** Kinds that carry words someone wrote, so a commitment may come from them. */

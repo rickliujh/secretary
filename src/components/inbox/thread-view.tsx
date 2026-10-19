@@ -36,6 +36,7 @@ import type { SituationRecord } from "@/services/work/schema";
 import { Composer, type ComposerMessage } from "./composer";
 import { PASTED_HIGHLIGHT } from "./message-doc";
 import { BundleCard, OutcomeCard } from "./outcome-card";
+import { ThreadPark } from "./park";
 import { ProposalCard } from "./proposal-card";
 import { SmallAskRow } from "./small-ask-row";
 import { useDecisions, useReply } from "./use-inbox";
@@ -396,6 +397,10 @@ export function ThreadView({ id }: { id: string }) {
           <Badge variant="secondary">{d.item.status}</Badge>
         </div>
         <h2 className="text-lg font-semibold">{d.item.summary ?? "Reading..."}</h2>
+        <ThreadPark
+          item={d.item}
+          pending={d.proposals.filter((p) => p.status === "pending").length}
+        />
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"

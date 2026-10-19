@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
-import { useAppMutation } from "@/app/hooks";
+import { useAppMutation, useSettings } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { type AppServices, run } from "@/app/runtime";
 import { requestWorkPass } from "@/app/work";
@@ -53,8 +53,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { localDate } from "@/lib/dates";
 import { onSelect } from "@/lib/select-change";
 import { dateTime, relativeTime, shortDate } from "@/lib/time";
+import { NEXT_LIMIT } from "@/services/work/next";
+import { movesOfItem } from "@/services/work/next-query";
 import { resumeRule } from "@/services/work/outcomes";
 import {
   addNote,
@@ -68,6 +71,7 @@ import {
   workItemDetail,
 } from "@/services/work/queries";
 import { RULE_LABELS, type RuleName } from "@/services/work/rules";
+import { NextMoves } from "./next-moves";
 
 const NEW_ITEM = "__new__";
 
@@ -93,11 +97,14 @@ const KIND_LABEL: Record<string, string> = {
   outcome_offered: "Follow-up",
   outcome_dismissed: "Dismissed",
   rule_resumed: "Changed",
+  parked: "Parked",
+  unparked: "Back",
 };
 
 function useWorkMutation<I, A, E>(f: (input: I) => Effect.Effect<A, E, AppServices>) {
   return useAppMutation(f, {
-    invalidate: [queryKeys.tickets, queryKeys.memories],
+    // The Inbox marks threads against the current item (D62).
+    invalidate: [queryKeys.tickets, queryKeys.memories, queryKeys.inbox],
     onSuccess: requestWorkPass,
   });
 }
@@ -477,6 +484,28 @@ function Timeline({ detail }: { detail: WorkItemDetail }) {
   );
 }
 
+/**
+ * The "Next" strip (D62): the item's next moves, ranked by code from the
+ * dates the app holds, at most five. Hidden while suggestions are off.
+ */
+function NextStrip({ itemId }: { itemId: string }) {
+  const { data: settings } = useSettings();
+  const today = localDate();
+  const on = settings?.secretary.suggestions ?? false;
+  const next = useQuery({
+    queryKey: queryKeys.workNext(itemId, today),
+    queryFn: ({ signal }) => run(movesOfItem(itemId, today), signal),
+    enabled: on,
+  });
+  if (!on || !next.data || next.data.length === 0) return null;
+  return (
+    <section className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3">
+      <h4 className="text-sm font-medium">Next</h4>
+      <NextMoves moves={next.data.slice(0, NEXT_LIMIT)} />
+    </section>
+  );
+}
+
 export function WorkTab({ issueKey }: { issueKey: string }) {
   const [splitting, setSplitting] = useState(false);
   const detail = useQuery({
@@ -523,6 +552,7 @@ export function WorkTab({ issueKey }: { issueKey: string }) {
           Have a look, and edit the note if it is out of date.
         </p>
       )}
+      {d.item.status === "active" && <NextStrip itemId={d.item.id} />}
       <StatusNote key={`${d.item.id}-${d.note}`} detail={d} />
       <StateLists detail={d} />
       <section className="flex flex-col gap-2">

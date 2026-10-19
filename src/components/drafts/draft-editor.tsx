@@ -19,6 +19,7 @@ import { type DraftDetail, draftDetail } from "@/services/comms/queries";
 import { HandoffButton, HandoffHint } from "./handoff-button";
 import { RecipientAway } from "./recipient-away";
 import { useDraftActions } from "./use-drafts";
+import { WorkLine } from "./work-line";
 
 type Variant = "short" | "standard";
 
@@ -53,6 +54,7 @@ export function DraftEditor({
 
   return (
     <div className="flex max-w-3xl flex-col gap-4">
+      <WorkLine issueKeys={d.draft.issueKeys} />
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <Badge variant="outline">{CHANNEL_LABELS[d.draft.kind]}</Badge>

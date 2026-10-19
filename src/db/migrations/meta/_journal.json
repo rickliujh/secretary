@@ -141,6 +141,13 @@
       "when": 1792409149547,
       "tag": "0019_cynical_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792413631053,
+      "tag": "0020_overjoyed_shinko_yamashiro",
+      "breakpoints": true
     }
   ]
 }

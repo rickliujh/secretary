@@ -376,7 +376,8 @@ export const workItemDetail = (issueKey: string, today = localDate()) =>
         id: item.id,
         name: item.name,
         status: item.status,
-        current: item.current,
+        // Current for the day it was set (D62), as Today and the Inbox read it.
+        current: item.current && (!item.currentOn || item.currentOn >= today),
         needsLook: item.needsLook,
         stateUpdatedAt: item.stateUpdatedAt,
         noteEdited: !!item.noteEditedAt,
@@ -692,14 +693,22 @@ export const mergeItems = (fromId: string, intoId: string, by: "user" | "answer"
     yield* correctionEvent(intoId, `Merged "${from.name}" into this item`);
   });
 
-/** The item the user is on: at most one; null clears it. */
-export const setCurrent = (id: string | null) =>
+/**
+ * The item the user is on: at most one; null clears it. It is current for the
+ * local day it was set (D62): the first pass of the next day clears it.
+ */
+export const setCurrent = (id: string | null, today = localDate()) =>
   Effect.gen(function* () {
     yield* query((d) =>
-      d.update(workItems).set({ current: false }).where(eq(workItems.current, true)),
+      d
+        .update(workItems)
+        .set({ current: false, currentOn: null })
+        .where(eq(workItems.current, true)),
     );
     if (id)
-      yield* query((d) => d.update(workItems).set({ current: true }).where(eq(workItems.id, id)));
+      yield* query((d) =>
+        d.update(workItems).set({ current: true, currentOn: today }).where(eq(workItems.id, id)),
+      );
   });
 
 /**

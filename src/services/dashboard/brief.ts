@@ -2,10 +2,10 @@
  * Daily brief (FR-5.4): facts from code, prose from one `daily_brief` call,
  * cached in `sync_state` until the facts change.
  */
-import { and, count, eq, gt } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { Effect } from "effect";
 import { z } from "zod";
-import { jiraComments, jiraIssues, proposals } from "@/db/schema";
+import { jiraComments, jiraIssues } from "@/db/schema";
 import { localDate } from "@/lib/dates";
 import { readJson } from "@/lib/json";
 import {
@@ -17,6 +17,7 @@ import {
   validateBrief,
 } from "@/prompts/brief";
 import { query } from "@/services/db";
+import { pendingCount } from "@/services/inbox/queries";
 import { Llm } from "@/services/llm";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, setState } from "@/services/sync/state";
@@ -105,9 +106,8 @@ const collectFacts = (
           )).map((r) => r.key),
         )
       : new Set<string>();
-    const pending = yield* query((d) =>
-      d.select({ n: count() }).from(proposals).where(eq(proposals.status, "pending")).get(),
-    );
+    // Counted as the Inbox badge counts them: a parked thread's wait until it is back (D62).
+    const pending = yield* pendingCount;
     const facts: BriefFacts = {
       today,
       since,
@@ -151,7 +151,7 @@ const collectFacts = (
         summary: w.issue.summary,
         why: w.reasons[0] ?? "",
       })),
-      pendingProposals: Number(pending?.n ?? 0),
+      pendingProposals: pending,
       // The work model's view (D61 Reads); none while it is off.
       ...(withWork ? { work: yield* briefWork(today) } : {}),
     };

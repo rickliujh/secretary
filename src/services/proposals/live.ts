@@ -25,6 +25,7 @@ import { Sync } from "@/services/sync";
 import { deletedKeys } from "@/services/sync/deleted";
 import { getState, SYNC_KEYS } from "@/services/sync/state";
 import { recordEvent } from "@/services/work/events";
+import { takeUp } from "@/services/work/park";
 import { correctionAfter, foundEdits, waitingFactsOf } from "@/services/work/playbooks/waiting";
 import { bundleRecordOf, type SituationRecord, situationOf } from "@/services/work/schema";
 import {
@@ -212,10 +213,13 @@ const make = Effect.gen(function* () {
           .where(and(eq(proposals.inboxItemId, inboxItemId), inArray(proposals.status, unsettled)))
           .all(),
       );
-      if (open.length === 0)
+      if (open.length === 0) {
+        // The last decision in a parked thread takes it up first (D62).
+        yield* withDb(takeUp(inboxItemId, "decided"));
         yield* q((d) =>
           d.update(inboxItems).set({ status: "filed" }).where(eq(inboxItems.id, inboxItemId)),
         );
+      }
     });
 
   /** An edit of a proposal, validated as a payload of the same kind. */
