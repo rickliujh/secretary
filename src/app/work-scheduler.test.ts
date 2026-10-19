@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { PassScheduler, type Timers } from "./work-scheduler";
+import { DailyTrigger, minutesOf, PassScheduler, type Timers } from "./work-scheduler";
 
 /** Timers on a clock the test moves by hand. */
-function fakeTimers() {
-  let now = 0;
+function fakeTimers(start = 0) {
+  let now = start;
   let next = 1;
   const pending = new Map<number, { at: number; f: () => void }>();
   const timers: Timers = {
@@ -77,5 +77,66 @@ describe("PassScheduler", () => {
     release();
     expect(most).toBe(1);
     expect(count).toBe(2);
+  });
+});
+
+describe("DailyTrigger (the end-of-day pass at a set time, D63)", () => {
+  const MIN = 60_000;
+  const at = (day: number, h: number, m: number) => new Date(2026, 9, day, h, m).getTime();
+
+  test("fires once a day when the clock passes the time while the app is open", async () => {
+    const { timers, advance } = fakeTimers(at(19, 17, 0));
+    const runs: number[] = [];
+    const t = new DailyTrigger(async () => void runs.push(timers.now()), { timers });
+    t.start("17:30");
+    await advance(29 * MIN);
+    expect(runs).toEqual([]);
+    await advance(2 * MIN);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toBeGreaterThanOrEqual(at(19, 17, 30));
+    // Restarting the same day (a settings save) does not run it again.
+    t.start("17:30");
+    await advance(60 * MIN);
+    expect(runs).toHaveLength(1);
+    // The next day, at the same time, once more.
+    await advance(at(20, 17, 31) - timers.now());
+    expect(runs).toHaveLength(2);
+    t.stop();
+  });
+
+  test("an app opened after the time does not run it late that day", async () => {
+    const { timers, advance } = fakeTimers(at(19, 18, 0));
+    let runs = 0;
+    const t = new DailyTrigger(
+      async () => {
+        runs++;
+      },
+      { timers },
+    );
+    t.start("17:30");
+    await advance(3 * 60 * MIN);
+    expect(runs).toBe(0);
+    await advance(at(20, 17, 31) - timers.now());
+    expect(runs).toBe(1);
+    t.stop();
+  });
+
+  test("stopped, it does nothing; a bad time never fires", async () => {
+    const { timers, advance } = fakeTimers(at(19, 17, 0));
+    let runs = 0;
+    const t = new DailyTrigger(
+      async () => {
+        runs++;
+      },
+      { timers },
+    );
+    t.start("17:30");
+    t.stop();
+    await advance(60 * MIN);
+    t.start("25:00");
+    await advance(24 * 60 * MIN);
+    expect(runs).toBe(0);
+    expect(minutesOf("17:30")).toBe(1050);
+    expect(minutesOf("7:30")).toBeNull();
   });
 });
