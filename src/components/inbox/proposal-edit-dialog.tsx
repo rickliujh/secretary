@@ -48,6 +48,7 @@ export function ProposalEditDialog({
   onApprove,
   sprint,
   busy,
+  submitLabel = "Approve with changes",
 }: {
   payload: ProposalPayload;
   lookups: Lookups;
@@ -59,6 +60,8 @@ export function ProposalEditDialog({
   sprint?: ReactNode;
   /** A save of the proposal is running; approving waits for it. */
   busy?: boolean;
+  /** "Save changes" for a step of an outcome card, which is approved on the card (Phase 25). */
+  submitLabel?: string;
 }) {
   const form = useForm<Record<string, string>>({ defaultValues: toFormValues(payload) });
   const [errors, setErrors] = useState<string[]>([]);
@@ -205,7 +208,7 @@ export function ProposalEditDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={busy}>
-              Approve with changes
+              {submitLabel}
             </Button>
           </DialogFooter>
         </form>

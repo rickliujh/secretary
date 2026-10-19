@@ -33,7 +33,9 @@ export function stalePassDue(staleAt: string | null | undefined, now: Date): boo
  * waits stay out.
  */
 export function sweepItems(t: Today, today: string, opts: { stale: boolean }): SweepItem[] {
-  const tickets = t.yourMove.filter((r): r is TicketRow => r.kind !== "thread");
+  const tickets = t.yourMove.filter(
+    (r): r is TicketRow => r.kind !== "thread" && r.kind !== "outcome",
+  );
   const waits = t.theirMove.filter((r): r is WaitRow => r.kind === "wait");
   const asks = tickets.filter((r) => r.kind === "ask");
   const items: SweepItem[] = [

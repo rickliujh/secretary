@@ -784,6 +784,28 @@ const make = Effect.gen(function* () {
         p.summary ?? describeWaitUpdate({ ...p, issueKey: dep.issueKey, label: dep.label })
       ).trim();
       const nextFollowupAt = p.action === "resolve" ? null : nextFollowupAfter(p);
+      // Only the next follow-up date (an outcome card's plan, Phase 25): nothing was
+      // said or sent, so no timeline entry; sending the chase draft logs the follow-up.
+      if (p.action === "reschedule" && !p.logged && !p.expectedAt && p.nextFollowupAt) {
+        yield* local(
+          setDates(dep.id, { nextFollowupAt: p.nextFollowupAt }, { mirror: false, event: false }),
+        );
+        yield* audit(proposalId, "update_dependency", dep.id, p, { followupId: null });
+        const planned = yield* q((d) =>
+          d.select().from(dependencies).where(eq(dependencies.id, dep.id)).get(),
+        );
+        return {
+          message: `Next follow-up on ${what}: ${p.nextFollowupAt}`,
+          ...ids,
+          undo: {
+            kind: "update_dependency",
+            dependencyId: dep.id,
+            before,
+            after: planned ? waitState(planned) : null,
+            followupId: null,
+          },
+        } satisfies ProposalResult;
+      }
       // These steps share no transaction, so a retry after a later step failed
       // finds the entry this proposal already wrote (same text, written since the
       // proposal was made) and only sets the dates again, not a second entry.
@@ -1211,7 +1233,9 @@ const make = Effect.gen(function* () {
             recipientPersonId: payload.recipientPersonId,
             recipientTeamId: payload.recipientTeamId,
             issueKeys: payload.issueKeys,
+            dependencyId: payload.dependencyId,
             notesMd: payload.notes,
+            quoteMd: payload.quote,
             bodyMd: "",
             status: "draft" as const,
             createdAt: nowIso(),

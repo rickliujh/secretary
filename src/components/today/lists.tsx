@@ -3,7 +3,7 @@
  * actions; a list longer than `SHOWN` folds the rest behind "Show all".
  */
 import { Link } from "@tanstack/react-router";
-import { CheckCheck, Clock, MessagesSquare, Pin, Send, Star } from "lucide-react";
+import { CheckCheck, Clock, ListChecks, MessagesSquare, Pin, Send, Star } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { FollowupDialog } from "@/components/dependencies/followup-dialog";
 import { useChaseDraft } from "@/components/drafts/use-drafts";
@@ -29,6 +29,7 @@ import { resolveWait, snoozeTicket, snoozeWait } from "@/services/dashboard/acti
 import type { DashIssue } from "@/services/dashboard/sections";
 import {
   type BlockedRow,
+  type OutcomeRow,
   type SprintRow,
   type ThreadRow,
   type TicketRow,
@@ -297,20 +298,64 @@ function ThreadItem({ row }: { row: ThreadRow }) {
   );
 }
 
+/** An outcome card (Phase 25): its title, the item, how many steps; opened in the Inbox. */
+function OutcomeItem({ row }: { row: OutcomeRow }) {
+  const o = row.outcome;
+  return (
+    <Row
+      workItem={row.workItem}
+      head={
+        <>
+          <ListChecks className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <Link
+            to="/inbox"
+            search={{ item: o.id }}
+            className="min-w-0 truncate underline-offset-2 hover:underline"
+            title={o.title}
+          >
+            {o.title}
+          </Link>
+        </>
+      }
+      actions={
+        <Button asChild variant="ghost" size="sm" className="h-7">
+          <Link to="/inbox" search={{ item: o.id }}>
+            Review
+          </Link>
+        </Button>
+      }
+      why={
+        <Why>
+          {row.reason}
+          {!row.workItem && o.itemName && `, ${o.itemName}`}
+        </Why>
+      }
+    />
+  );
+}
+
 export function YourMove({ today }: { today: Today }) {
   return (
     <ListCard
       title="Your move"
       count={today.yourMove.length}
-      description="Woken tickets, small asks, comments and Inbox decisions."
+      description="Follow-ups to approve, woken tickets, small asks, comments and Inbox decisions."
     >
       <Rows
         rows={today.yourMove}
         empty="Nothing waits on you."
-        rowKey={(r) => (r.kind === "thread" ? `t:${r.thread.id}` : r.issue.key)}
+        rowKey={(r) =>
+          r.kind === "thread"
+            ? `t:${r.thread.id}`
+            : r.kind === "outcome"
+              ? `o:${r.outcome.id}`
+              : r.issue.key
+        }
         render={(r) =>
           r.kind === "thread" ? (
             <ThreadItem row={r} />
+          ) : r.kind === "outcome" ? (
+            <OutcomeItem row={r} />
           ) : (
             <TicketItem row={r} sprintEnd={today.sprintEnd} />
           )
