@@ -83,6 +83,8 @@ describe("Settings schema", () => {
           linkFoundTickets: true,
           draftRequests: true,
         },
+        suggestions: true,
+        parkInput: true,
       },
       network: {
         proxyMode: "system",
