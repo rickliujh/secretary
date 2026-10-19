@@ -18,6 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
   type AppSettings,
+  DAY_END_TIME,
+  DEFAULT_DAY_END_AT,
   INSTRUCTION_NAMES,
   type InstructionName,
   RULE_NAMES,
@@ -203,15 +205,101 @@ function WhereYouAre() {
   );
 }
 
+const DayEndForm = z.object({
+  enabled: z.boolean(),
+  at: z.string().trim().regex(DAY_END_TIME, "A time such as 17:30"),
+});
+type DayEndValues = z.infer<typeof DayEndForm>;
+
+/**
+ * The end-of-day pass at a set time (FR-19.9, D63): a switch and a local
+ * time. It runs only while the app is open then, once a day; Today's "End of
+ * day" button and the chat run it at any time.
+ */
+function DayEndCard() {
+  const { data: settings } = useSettings();
+  const update = useUpdateSettings();
+  const form = useForm<DayEndValues>({
+    resolver: zodResolver(DayEndForm),
+    defaultValues: { enabled: false, at: DEFAULT_DAY_END_AT },
+  });
+  useEffect(() => {
+    if (settings) form.reset(settings.secretary.dayEnd);
+  }, [settings, form]);
+  const off = settings?.work.enabled === false;
+  const error = form.formState.errors.at;
+  const save = form.handleSubmit((v) =>
+    update.mutate(
+      (s) => ({ ...s, secretary: { ...s.secretary, dayEnd: { enabled: v.enabled, at: v.at } } }),
+      { onSuccess: () => toast.success("End of day saved") },
+    ),
+  );
+  return (
+    <Card>
+      <form onSubmit={save}>
+        <CardHeader>
+          <CardTitle>End of day</CardTitle>
+          <CardDescription>
+            A page in the Inbox with what changed on each work item today, what is due tomorrow, and
+            the questions held back during the day. Code writes it; no model is asked and nothing
+            changes in Jira. Run it from Today or ask the chat to wrap up your day, or have it run
+            at a set time while the app is open.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FieldGroup>
+            <Controller
+              control={form.control}
+              name="enabled"
+              render={({ field }) => (
+                <Field orientation="horizontal">
+                  <Switch
+                    id="day-end-enabled"
+                    checked={field.value}
+                    disabled={off}
+                    onCheckedChange={field.onChange}
+                  />
+                  <FieldLabel htmlFor="day-end-enabled">Run it every day at a set time</FieldLabel>
+                </Field>
+              )}
+            />
+            <Field data-invalid={!!error}>
+              <FieldLabel htmlFor="day-end-at">Time</FieldLabel>
+              <Input
+                id="day-end-at"
+                type="time"
+                className="w-32"
+                disabled={off}
+                {...form.register("at")}
+              />
+              <FieldDescription>
+                If the app is closed then, it does not run later that day.
+              </FieldDescription>
+              <FieldError errors={[error]} />
+            </Field>
+          </FieldGroup>
+        </CardContent>
+        <CardFooter className="mt-4">
+          <Button type="submit" disabled={update.isPending || off}>
+            Save
+          </Button>
+        </CardFooter>
+      </form>
+    </Card>
+  );
+}
+
 /**
  * Settings > Secretary (D61): the work model's switch and budgets, where you
- * are (D62), the follow-up rules, and the standing instructions below them.
+ * are (D62), the end of day (D63), the follow-up rules, and the standing
+ * instructions below them.
  */
 export function SecretarySection() {
   return (
     <div className="flex flex-col gap-6">
       <WorkCard />
       <WhereYouAre />
+      <DayEndCard />
       <RuleSwitches />
       <InstructionSwitches />
     </div>

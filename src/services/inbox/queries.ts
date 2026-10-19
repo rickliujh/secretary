@@ -12,6 +12,12 @@ import {
 import { localRevokeBlock } from "@/services/proposals/revoke";
 import { localRevokeData } from "@/services/proposals/revoke-facts";
 import { type ProposalPayload, parsePayload } from "@/services/proposals/schema";
+import {
+  type DayEndQuestion,
+  type DayEndRecord,
+  dayEndOf,
+  dayEndQuestions,
+} from "@/services/work/dayend-query";
 import { isReturned, returnedOn, type ThreadAbout, threadsAbout } from "@/services/work/park";
 import { bundleRecordOf, type SituationRecord } from "@/services/work/schema";
 
@@ -262,12 +268,18 @@ export const inboxDetail = (id: string) =>
       const r = bundleRecordOf(b.record);
       if (r) records[b.id] = r;
     }
+    // The day's end-of-day page (D63): its questions live in their work threads.
+    const record = item.source === "secretary" ? dayEndOf(item.triage) : null;
+    const dayEnd: { record: DayEndRecord; questions: DayEndQuestion[] } | null = record
+      ? { record, questions: yield* dayEndQuestions(record.questionIds) }
+      : null;
     return {
       item: { ...item, error: (item.triage as { error?: string } | null)?.error ?? null },
       items,
       proposals: props,
       messages: messages.map(toMessage),
       bundles: records,
+      dayEnd,
     };
   });
 

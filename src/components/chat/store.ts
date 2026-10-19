@@ -32,6 +32,7 @@ const transport = new SecretaryTransport(
     requestWorkPass();
     void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
   },
+  () => void queryClient.invalidateQueries({ queryKey: queryKeys.inbox }),
 );
 const chats = new Map<string, Chat<UIMessage>>();
 

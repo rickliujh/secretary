@@ -9,7 +9,7 @@ import { macOverlay, ownWindowButtons } from "@/app/platform";
 import { useFollowupReminders } from "@/app/reminders";
 import { useAutoCleanup, useStorageWarning } from "@/app/storage";
 import { useSyncScheduler } from "@/app/sync";
-import { useWorkPass } from "@/app/work";
+import { useDayEnd, useWorkPass } from "@/app/work";
 import { AppSidebar } from "@/components/app-sidebar";
 import { CaptureDialog } from "@/components/capture/capture-dialog";
 import { CommandPalette } from "@/components/command-palette";
@@ -37,6 +37,7 @@ function Background() {
   useSyncScheduler();
   useFollowupReminders();
   useWorkPass();
+  useDayEnd();
   useAutoCleanup();
   useDeleteWordKey();
   useStorageWarning();

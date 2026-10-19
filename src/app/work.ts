@@ -2,14 +2,18 @@
  * The work pass in the webview (D61): requested after a sync, a triage, an
  * approval or a revoke, run at most once a minute on the app's own runtime. No
  * extra process: it runs while the app is open, like sync and reminders.
+ *
+ * The end-of-day pass (D63) runs here too: from Today's button, and at the
+ * time Settings > Secretary sets, once a local day, only while the app is open.
  */
 import { useEffect } from "react";
 import { logger } from "@/lib/log";
+import { type DayEndResult, runDayEnd } from "@/services/work/dayend-query";
 import { runWorkPass } from "@/services/work/pass";
 import { useSettings } from "./hooks";
 import { queryClient, queryKeys } from "./query-client";
 import { run } from "./runtime";
-import { PassScheduler } from "./work-scheduler";
+import { DailyTrigger, PassScheduler } from "./work-scheduler";
 
 let enabled = false;
 
@@ -65,4 +69,51 @@ export function useWorkPass() {
     scheduler.request();
     return () => scheduler.cancel();
   }, [on, loaded]);
+}
+
+let dayEndRunning: Promise<DayEndResult> | null = null;
+
+/**
+ * Runs the end-of-day pass now (Today's button, or the set time): one run at a
+ * time; a second ask while one runs gets its result.
+ */
+export function runDayEndNow(trigger: "button" | "time" = "button"): Promise<DayEndResult> {
+  if (dayEndRunning) return dayEndRunning;
+  const running = run(runDayEnd({ trigger })).then((r) => {
+    if (!r.skipped) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
+    }
+    return r;
+  });
+  dayEndRunning = running;
+  void running
+    .catch(() => undefined)
+    .finally(() => {
+      if (dayEndRunning === running) dayEndRunning = null;
+    });
+  return running;
+}
+
+const dayEndTrigger = new DailyTrigger(async () => {
+  try {
+    await runDayEndNow("time");
+  } catch (e) {
+    logger.warn("End-of-day pass failed", e);
+  }
+});
+
+/**
+ * Keeps the timed end-of-day pass in step with Settings > Secretary; mounted
+ * once at the root. Off while the work model is off.
+ */
+export function useDayEnd() {
+  const { data: settings } = useSettings();
+  const on = (settings?.work.enabled ?? false) && (settings?.secretary.dayEnd.enabled ?? false);
+  const at = settings?.secretary.dayEnd.at ?? "";
+  useEffect(() => {
+    if (!on) return;
+    dayEndTrigger.start(at);
+    return () => dayEndTrigger.stop();
+  }, [on, at]);
 }
