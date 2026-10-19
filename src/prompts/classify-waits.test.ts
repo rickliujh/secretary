@@ -124,6 +124,7 @@ describe("validating and mapping update_dependency", () => {
       channel: "teams",
       issueKey: "PAY-2",
       label: "Q3 numbers from finance",
+      logged: true,
     });
     if (!m) throw new Error("no proposal");
     expect(fromPayload(m.payload)).toEqual({
