@@ -34,6 +34,7 @@ import { awayLabel } from "@/services/directory/away";
 import { deletePerson, getPerson } from "@/services/directory/queries";
 import type { Profile } from "@/services/directory/schema";
 import { ContextNotes } from "./context-notes";
+import { JiraProjects } from "./jira-projects";
 import { PersonDialog } from "./person-dialog";
 import { useDirectoryMutation } from "./use-directory";
 
@@ -180,6 +181,13 @@ export function PersonSheet({
                     )}
                   </dd>
                 </dl>
+              </Section>
+              <Section title="Jira projects">
+                <JiraProjects
+                  subject="person"
+                  id={d.person.id}
+                  entries={d.person.jiraProjects ?? []}
+                />
               </Section>
               <Section title="Communication profile">
                 <ProfileBadges profile={d.person.profile as Profile} />

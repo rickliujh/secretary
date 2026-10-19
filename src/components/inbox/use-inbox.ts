@@ -234,12 +234,16 @@ export function useDecisions() {
         Effect.zipRight(afterWrites({ ids: i.ids }), p.track(i.ids, i.edits)),
     ),
   );
-  /** An outcome card (Phase 25): the steps the user kept, in order, after their saved edits. */
+  /**
+   * An outcome card (Phase 25) or a playbook bundle in a thread (Phase 26): the
+   * steps the user kept, in order, after their saved edits; `found` is the
+   * ticket picked among those the search found (null: none of them).
+   */
   const approveBundle = useDecisionMutation(
-    withProposals((p, i: { bundleId: string; keep: readonly string[] }) =>
+    withProposals((p, i: { bundleId: string; keep: readonly string[]; found?: string | null }) =>
       Effect.zipRight(
-        afterWrites({ inboxItemId: i.bundleId }),
-        p.approveBundle(i.bundleId, i.keep),
+        afterWrites({ ids: i.keep }),
+        p.approveBundle(i.bundleId, i.keep, {}, i.found === undefined ? {} : { found: i.found }),
       ),
     ),
   );

@@ -72,11 +72,19 @@ export interface ProposalsShape {
    * when a required step fails. Steps left out are rejected and recorded as
    * corrections (`step_left_out`); leaving out a required step leaves out what
    * hangs on it. A card with no steps is filed. Not a rejection for the quiet list.
+   *
+   * Also a playbook's bundle inside a thread (Phase 26), whose id is the
+   * proposal it expanded. `found` is the user's pick among the tickets the
+   * "waiting on someone" search found (null: none of them; left out: code's
+   * pre-selection): it sets the link step's blocker, the wait's reference and
+   * the comment's "see KEY"; with nothing picked the link step is skipped
+   * without a correction.
    */
   readonly approveBundle: (
     bundleId: string,
     keep: readonly string[],
     edits?: Readonly<Record<string, ProposalPayload>>,
+    opts?: { found?: string | null },
   ) => Effect.Effect<DecisionResult[], ProposalError | DbError>;
   /**
    * "Done anyway" on an outcome card a failed step keeps open (Phase 25): files

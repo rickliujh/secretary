@@ -143,6 +143,18 @@ export const issueNotes = sqliteTable(
 // Organisational context
 // ---------------------------------------------------------------------------
 
+/**
+ * A Jira project a contact or team works in (FR-19.7, Phase 26): written by
+ * the user, or inferred after a sync from the assignees of synced tickets
+ * (a team's are its members'). Inferred entries are replaced at each sync.
+ */
+export type JiraProjectEntry = {
+  key: string;
+  by: "user" | "sync";
+  /** An inferred entry the user removed: kept so a sync does not add it back. */
+  off?: boolean;
+};
+
 export const teams = sqliteTable("teams", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -152,6 +164,11 @@ export const teams = sqliteTable("teams", {
   escalationPath: text("escalation_path"),
   confluenceUrls: text("confluence_urls", { mode: "json" }).$type<string[]>().notNull().default([]),
   notesMd: text("notes_md"),
+  /** Where the playbooks look for the team's tickets (Phase 26). */
+  jiraProjects: text("jira_projects", { mode: "json" })
+    .$type<JiraProjectEntry[]>()
+    .notNull()
+    .default([]),
 });
 
 export type CommunicationProfile = {
@@ -181,6 +198,11 @@ export const people = sqliteTable(
      * ignored, not cleared.
      */
     awayUntil: text("away_until"),
+    /** Where the playbooks look for their tickets (Phase 26); else their team's. */
+    jiraProjects: text("jira_projects", { mode: "json" })
+      .$type<JiraProjectEntry[]>()
+      .notNull()
+      .default([]),
   },
   (t) => [
     index("people_team_idx").on(t.teamId),
@@ -232,12 +254,23 @@ export const dependencies = sqliteTable(
     mirrorRemoteLinkId: text("mirror_remote_link_id"),
     /** Local date (YYYY-MM-DD) of the last follow-up reminder, so each fires once a day. */
     notifiedOn: text("notified_on"),
+    /**
+     * What the playbooks remember about the wait (Phase 26): `blocked`, the
+     * Blocked-like status a playbook moved its ticket to and the one it left,
+     * so resolving the wait can move it back.
+     */
+    data: text("data", { mode: "json" }).$type<WaitData>(),
   },
   (t) => [
     index("dependencies_issue_idx").on(t.issueKey),
     index("dependencies_status_idx").on(t.status),
   ],
 );
+
+/** `dependencies.data` (Phase 26). */
+export type WaitData = {
+  blocked?: { issueKey: string; from: string; to: string };
+};
 
 export const communications = sqliteTable(
   "communications",
@@ -428,6 +461,26 @@ export const proposals = sqliteTable(
     index("proposals_inbox_idx").on(t.inboxItemId),
     index("proposals_status_idx").on(t.status),
   ],
+);
+
+/**
+ * A playbook bundle inside an input thread (FR-19.7, Phase 26): the
+ * "waiting on someone" or "wait resolved" chores a proposal of the thread
+ * expanded into. `id` is the bundle id, the id of the proposal it expanded;
+ * `record` the situation record an outcome card keeps in its triage.
+ */
+export const bundles = sqliteTable(
+  "bundles",
+  {
+    id: text("id").primaryKey(),
+    inboxItemId: text("inbox_item_id")
+      .notNull()
+      .references(() => inboxItems.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    record: text("record", { mode: "json" }).$type<unknown>().notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("bundles_inbox_idx").on(t.inboxItemId)],
 );
 
 export const actionsLog = sqliteTable(

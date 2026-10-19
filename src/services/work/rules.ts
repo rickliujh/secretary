@@ -10,6 +10,8 @@
  * Drafts page writes later. A situation's key fingerprints the facts it used,
  * so the same situation is offered once and a changed fact makes a new one.
  */
+
+import type { WaitData } from "@/db/schema";
 import { addBusinessDays, localDateOf } from "@/lib/dates";
 import {
   chaseNotes,
@@ -24,7 +26,14 @@ import {
 } from "@/services/proposals/schema";
 import { type AppSettings, RULE_NAMES, type RuleName } from "@/services/settings/schema";
 import type { FactTicket, ItemFacts } from "./facts";
-import { eventData, type Situation, type StepDraft, type WorkState } from "./schema";
+import {
+  eventData,
+  type PlaybookName,
+  type Situation,
+  type SituationKind,
+  type StepDraft,
+  type WorkState,
+} from "./schema";
 
 export { RULE_NAMES, type RuleName };
 
@@ -50,8 +59,33 @@ export const RULE_LABELS: Record<RuleName, { name: string; offers: string }> = {
   },
   wait_unanswered: {
     name: "a wait went unanswered",
-    offers: "Drafts a chase once the follow-up date comes, and sets the next one.",
+    offers:
+      "Drafts a chase once the follow-up date comes, sets the next one, and says on your ticket that you still wait.",
   },
+  ticket_done: {
+    name: "you finished a ticket",
+    offers:
+      "Resolves what it still waited on, notes on it who asked and when, and drafts a note to them for a small ask.",
+  },
+};
+
+/** The playbooks that are no rule (Phase 26), as cards and bundles name them. */
+export const PLAYBOOK_LABELS: Record<PlaybookName, { name: string; offers: string }> = {
+  waiting_on_someone: {
+    name: "you are waiting on someone",
+    offers:
+      "Tracks the wait, links their ticket, says so on yours, and prepares the request, as your standing instructions say.",
+  },
+  wait_resolved: {
+    name: "a wait is over",
+    offers: "Resolves the wait, says so on the ticket, and moves it out of Blocked.",
+  },
+};
+
+/** The label of any card or bundle: a rule's or a playbook's. */
+export const SITUATION_LABELS: Record<SituationKind, { name: string; offers: string }> = {
+  ...RULE_LABELS,
+  ...PLAYBOOK_LABELS,
 };
 
 /** A work event as the rules read it. */
@@ -84,7 +118,12 @@ export type RuleWait = {
   nextFollowupAt: string | null;
   lastFollowupAt: string | null;
   ownerAway: OwnerAway | null;
+  /** What the playbooks remember (Phase 26): the status a playbook moved its ticket from. */
+  data?: WaitData | null;
 };
+
+/** Who asked for a ticket (FR-10.4): a small ask's requester, by ticket key. */
+export type RuleRequester = { personId: string; name: string; askedOn: string | null };
 
 /** What the last run saw for an item: the dates a move is measured against, and the last event read. */
 export type RuleMemory = {
@@ -120,6 +159,13 @@ export type RuleInput = {
   settings: Pick<AppSettings, "secretary" | "dependencies">;
   /** Rules dismissed twice on this item since the user last asked again (`quietRules`). */
   quiet: ReadonlySet<RuleName>;
+  /** Requesters on record (Phase 26, `ticket_done`), by ticket key. */
+  requesters?: Readonly<Record<string, RuleRequester>>;
+  /**
+   * Waits a "wait resolved" bundle resolves or resolved (Phase 26): it already
+   * comments and moves the ticket back, so `blocker_closed` does not again.
+   */
+  handledWaits?: readonly { issueKey: string; label: string; externalRef: string | null }[];
 };
 
 // ---------------------------------------------------------------------------
@@ -138,7 +184,7 @@ export function fingerprint(value: unknown): string {
 }
 
 /** `<rule>:<work_item_id>:<fingerprint of the facts>` (D61). */
-export const situationKey = (rule: RuleName, itemId: string, facts: unknown) =>
+export const situationKey = (rule: SituationKind, itemId: string, facts: unknown) =>
   `${rule}:${itemId}:${fingerprint(facts)}`;
 
 /** "24 Oct" for a YYYY-MM-DD date. */
@@ -224,6 +270,7 @@ const step = (payload: StoredProposalPayload, label: string, required = false): 
   payload: payload as ProposalPayload,
   label,
   required,
+  choice: false,
 });
 
 const channelOf = (input: RuleInput, personId: string | null) =>
@@ -444,7 +491,12 @@ export function blockerClosed(input: RuleInput): Situation[] {
   const out: Situation[] = [];
   for (const [blocker, event] of done) {
     const b = byKey.get(blocker);
-    const primaries = openPrimary(input.facts).filter((t) => t.key !== blocker);
+    // A ticket whose wait on this blocker a "wait resolved" bundle took care of is done.
+    const handled = (t: FactTicket) =>
+      (input.handledWaits ?? []).some(
+        (h) => h.issueKey === t.key && mentions(`${h.label} ${h.externalRef ?? ""}`, blocker),
+      );
+    const primaries = openPrimary(input.facts).filter((t) => t.key !== blocker && !handled(t));
     let waiting = primaries.filter((t) => input.blockedBy[t.key]?.includes(blocker));
     if (waiting.length === 0 && b?.role === "related")
       waiting = primaries.filter((t) => BLOCKED_STATUS.test(t.status ?? ""));
@@ -452,8 +504,17 @@ export function blockerClosed(input: RuleInput): Situation[] {
     const steps: StepDraft[] = [];
     for (const t of waiting) {
       if (t.status && BLOCKED_STATUS.test(t.status)) {
+        // A playbook that moved it to Blocked remembers where from (Phase 26).
+        const remembered = input.waits.find(
+          (w) =>
+            w.issueKey === t.key &&
+            w.data?.blocked?.issueKey === t.key &&
+            w.data.blocked.to.toLowerCase() === (t.status ?? "").toLowerCase(),
+        )?.data?.blocked?.from;
         const to =
-          statusBefore(input, t) ?? inProgressStatus(input.statuses[projectOf(t.key)] ?? []);
+          remembered ??
+          statusBefore(input, t) ??
+          inProgressStatus(input.statuses[projectOf(t.key)] ?? []);
         if (to)
           steps.push(
             step(
@@ -768,6 +829,27 @@ export function waitUnanswered(input: RuleInput): Situation[] {
       input.pending,
     );
     if (steps.length === 0) continue;
+    // The chase_due playbook (Phase 26): say on the ticket that it still waits, when
+    // the standing instruction says so and nothing was said there within the interval.
+    if (input.settings.secretary.instructions.commentWaits) {
+      const said = lastCommentOn(input, w.issueKey);
+      const stale =
+        !said ||
+        addBusinessDays(localDateOf(said), input.settings.dependencies.followupDays) <= input.today;
+      const body = stillWaitingComment(w);
+      if (stale)
+        steps.push(
+          ...keepSteps(
+            [
+              step(
+                { kind: "add_comment", target: w.issueKey, bodyMd: body },
+                `Comment on ${w.issueKey}: "${body}"`,
+              ),
+            ],
+            input.pending,
+          ),
+        );
+    }
     const due = t.followupOn ?? w.nextFollowupAt ?? input.today;
     out.push({
       rule: "wait_unanswered",
@@ -786,6 +868,130 @@ export function waitUnanswered(input: RuleInput): Situation[] {
   return out;
 }
 
+/** "Still waiting on Platform for the cert, expected 24 Oct." */
+export const stillWaitingComment = (w: Pick<RuleWait, "ownerName" | "label" | "expectedAt">) =>
+  `Still waiting on ${w.ownerName} for ${w.label}${w.expectedAt ? `, expected ${dayLabel(w.expectedAt)}` : ""}.`;
+
+/** When the user last commented on a ticket from the app (an approved comment or their own edit). */
+function lastCommentOn(input: RuleInput, key: string): string | null {
+  return (
+    input.history
+      .filter((e) => {
+        if (e.issueKey !== key) return false;
+        const d = eventData(e.data) as { proposalKind?: unknown; field?: unknown };
+        return (
+          (e.kind === "proposal_executed" && d.proposalKind === "add_comment") ||
+          (e.kind === "ticket_edited" && d.field === "comment")
+        );
+      })
+      .map((e) => e.at)
+      .sort()
+      .at(-1) ?? null
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ticket_done (Phase 26)
+// ---------------------------------------------------------------------------
+
+/** "Done; Dana Lee asked for this on 2 Oct." */
+export const doneComment = (r: RuleRequester) =>
+  `Done; ${r.name} asked for this${r.askedOn ? ` on ${dayLabel(r.askedOn)}` : ""}.`;
+
+/**
+ * One of the item's primary tickets turned done by the user: from the ticket
+ * view, by an approved move (the user saying so in chat or a paste is
+ * classify's transition, approved), or in Jira when the change names them
+ * (a sync change by an unknown author does not count). Steps: resolve each wait still open on
+ * it; a closing note on it naming who asked and when, when a requester is on
+ * record and `commentWaits` is on; a note to the requester when it is a small
+ * ask (a requester on record, FR-10.4). Tickets it blocked wake at the next
+ * blocker check (D45), so that needs no step.
+ */
+export function ticketDone(input: RuleInput): Situation[] {
+  const byKey = new Map(input.facts.tickets.map((t) => [t.key, t]));
+  const done = new Map<string, RuleEvent>();
+  for (const e of input.newEvents) {
+    if (!e.issueKey) continue;
+    const t = byKey.get(e.issueKey);
+    if (!t || t.unknown || t.role !== "primary" || t.statusCategory !== "done") continue;
+    // Done by the user: their edit or approval ("me"), or a change Jira says they made.
+    const user = input.me.username?.toLowerCase();
+    if (e.actor !== "me" && !(user && e.actor.toLowerCase() === `jira:${user}`)) continue;
+    const d = eventData(e.data) as ReturnType<typeof eventData> & { proposalKind?: unknown };
+    const moved =
+      ((e.kind === "jira_change" || e.kind === "ticket_edited") && closes(d, t.status)) ||
+      (e.kind === "proposal_executed" && d.proposalKind === "transition_issue");
+    if (moved && !done.has(e.issueKey)) done.set(e.issueKey, e);
+  }
+  const out: Situation[] = [];
+  for (const [key, event] of done) {
+    const t = byKey.get(key);
+    const steps: StepDraft[] = [];
+    const open = input.waits.filter((w) => w.issueKey === key && w.status !== "resolved");
+    for (const w of open)
+      steps.push(
+        step(
+          {
+            kind: "update_dependency",
+            dependencyId: w.id,
+            action: "resolve",
+            summary: `${key} is done`,
+            expectedAt: null,
+            nextFollowupAt: null,
+            channel: "other",
+            issueKey: w.issueKey,
+            label: w.label,
+          },
+          `Resolve the wait on ${w.ownerName} for "${w.label}"`,
+        ),
+      );
+    const requester = input.requesters?.[key];
+    if (requester && input.settings.secretary.instructions.commentWaits) {
+      const body = doneComment(requester);
+      steps.push(
+        step({ kind: "add_comment", target: key, bodyMd: body }, `Comment on ${key}: "${body}"`),
+      );
+    }
+    const contact = requester ? input.contacts.get(requester.personId) : undefined;
+    if (requester && contact)
+      steps.push(
+        step(
+          {
+            kind: "draft_message",
+            channel: contact.channel,
+            intent: "status_update",
+            recipientPersonId: contact.id,
+            recipientTeamId: null,
+            issueKeys: [key],
+            notes: `Tell ${contact.name} that ${key}${t?.summary ? ` "${t.summary}"` : ""} is done.`,
+            dependencyId: null,
+            quote: null,
+          },
+          `Tell ${contact.name} it is done`,
+        ),
+      );
+    const kept = keepSteps(steps, input.pending);
+    if (kept.length === 0) continue;
+    out.push({
+      rule: "ticket_done",
+      key: situationKey("ticket_done", input.item.id, { key, event: event.id }),
+      title: `${key} is done: tidy up`,
+      why: `${key}${t?.summary ? ` "${t.summary}"` : ""} moved to ${t?.status ?? "done"}${
+        open.length ? `; ${open.length} wait${open.length === 1 ? "" : "s"} still open on it` : ""
+      }${requester ? `; ${requester.name} asked for it` : ""}.`,
+      keys: [key],
+      waits: kept.flatMap((s) =>
+        s.payload.kind === "update_dependency" ? [s.payload.dependencyId] : [],
+      ),
+      comments: [],
+      facts: { key, event: event.id },
+      steps: kept,
+    });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // All rules
 // ---------------------------------------------------------------------------
@@ -796,6 +1002,7 @@ const RULES: Record<RuleName, (input: RuleInput) => Situation[]> = {
   commitment_due: commitmentDue,
   teammate_touched: teammateTouched,
   wait_unanswered: waitUnanswered,
+  ticket_done: ticketDone,
 };
 
 /** Every situation of one item, in the rules' priority order; switched-off and quiet rules give none. */

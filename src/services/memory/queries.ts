@@ -61,7 +61,9 @@ export const listMemories = Effect.gen(function* () {
                   ? "a requested change"
                   : m.subjectType === "work_item"
                     ? "a work item"
-                    : null,
+                    : m.subjectType === "playbook"
+                      ? "a standing instruction"
+                      : null,
       source: m.source,
       sourceInboxItemId: m.sourceInboxItemId,
       confirmed: m.confirmed,

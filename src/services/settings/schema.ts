@@ -183,10 +183,39 @@ export const RULE_NAMES = [
   "commitment_due",
   "teammate_touched",
   "wait_unanswered",
+  /** Phase 26: the user's own ticket turned done (the `ticket_done` playbook). */
+  "ticket_done",
 ] as const;
 export type RuleName = (typeof RULE_NAMES)[number];
 
-/** Settings > Secretary beyond the work model: the rules' switches (standing instructions come later). */
+/**
+ * Standing instructions (FR-19.7, D61, Phase 26): switches the playbooks read
+ * when they expand a situation into its chores.
+ */
+export const INSTRUCTION_NAMES = [
+  "mirrorWaits",
+  "blockedStatus",
+  "commentWaits",
+  "linkFoundTickets",
+  "draftRequests",
+] as const;
+export type InstructionName = (typeof INSTRUCTION_NAMES)[number];
+
+export const InstructionsSchema = z.object({
+  /** Mirror every new wait into Jira as a remote link on the ticket (D18). */
+  mirrorWaits: z.boolean().default(true),
+  /** Move my ticket to a Blocked-like status while it waits on someone. */
+  blockedStatus: z.boolean().default(false),
+  /** Say on my ticket who I am waiting on and when. */
+  commentWaits: z.boolean().default(true),
+  /** Link their ticket as a blocker when one is found. */
+  linkFoundTickets: z.boolean().default(true),
+  /** Prepare the request message when the ask has not gone out. */
+  draftRequests: z.boolean().default(true),
+});
+export type Instructions = z.infer<typeof InstructionsSchema>;
+
+/** Settings > Secretary beyond the work model: the rules' switches and the standing instructions. */
 export const SecretarySettingsSchema = z.object({
   rules: z
     .object({
@@ -195,8 +224,10 @@ export const SecretarySettingsSchema = z.object({
       commitment_due: z.boolean().default(true),
       teammate_touched: z.boolean().default(true),
       wait_unanswered: z.boolean().default(true),
+      ticket_done: z.boolean().default(true),
     })
     .prefault({}),
+  instructions: InstructionsSchema.prefault({}),
 });
 export type SecretarySettings = z.infer<typeof SecretarySettingsSchema>;
 

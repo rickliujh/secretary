@@ -18,10 +18,13 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
   type AppSettings,
+  INSTRUCTION_NAMES,
+  type InstructionName,
   RULE_NAMES,
   type RuleName,
   WorkSettingsSchema,
 } from "@/services/settings/schema";
+import { INSTRUCTION_LABELS } from "@/services/work/playbooks/instructions";
 import { RULE_LABELS } from "@/services/work/rules";
 
 const whole = (schema: z.ZodNumber, message: string) =>
@@ -94,12 +97,66 @@ function RuleSwitches() {
   );
 }
 
-/** Settings > Secretary (D61): the work model's switch and budgets, and the follow-up rules. */
+/**
+ * Standing instructions (FR-19.7, Phase 26): switches the playbooks read when
+ * they turn a situation into its chores. A switch saves at once.
+ */
+function InstructionSwitches() {
+  const { data: settings } = useSettings();
+  const update = useUpdateSettings();
+  const instructions = settings?.secretary.instructions;
+  const set = (name: InstructionName, on: boolean) =>
+    update.mutate((s) => ({
+      ...s,
+      secretary: {
+        ...s.secretary,
+        instructions: { ...s.secretary.instructions, [name]: on },
+      },
+    }));
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Standing instructions</CardTitle>
+        <CardDescription>
+          What the secretary does on its own initiative when you wait on someone, a wait ends, a
+          chase is due or you finish a ticket. Each chore is a step on the card you approve; leave
+          the same step out twice and it offers to make that the rule here.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FieldGroup>
+          {INSTRUCTION_NAMES.map((name) => (
+            <Field key={name} orientation="horizontal">
+              <Switch
+                id={`instruction-${name}`}
+                checked={instructions?.[name] ?? false}
+                disabled={!instructions || update.isPending || settings?.work.enabled === false}
+                onCheckedChange={(on) => set(name, on)}
+              />
+              <div className="flex flex-col gap-0.5">
+                <FieldLabel htmlFor={`instruction-${name}`}>
+                  {INSTRUCTION_LABELS[name].name}
+                </FieldLabel>
+                <FieldDescription>{INSTRUCTION_LABELS[name].line}</FieldDescription>
+              </div>
+            </Field>
+          ))}
+        </FieldGroup>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Settings > Secretary (D61): the work model's switch and budgets, the
+ * follow-up rules, and the standing instructions below them.
+ */
 export function SecretarySection() {
   return (
     <div className="flex flex-col gap-6">
       <WorkCard />
       <RuleSwitches />
+      <InstructionSwitches />
     </div>
   );
 }
