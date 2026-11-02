@@ -2397,3 +2397,33 @@ Known limits
   settings card and the timed trigger are covered by typecheck, build and
   the tests only.
 - The live eval was not run; the chat prompt gained one line for `day_end`.
+
+## Ticket shape rules in classify (2026-11-02)
+
+Built
+- `classify_item` prompt version 16 (D64): each distinct piece of work the
+  input names gets its own ticket; an epic the input asks for and the steps
+  it names are the epic plus one Story or Task per step with `epic` set to
+  the epic's `$new` ref; a description says what the ticket is about for
+  the people who read it in Jira, never the user's instructions and never
+  work that gets its own ticket. The "fewest actions" rule says "without
+  folding separate work into one ticket"; the `description` field's schema
+  text carries the same guidance. Snapshots before 16 replay as they ran.
+- Eval case "an epic with its first step gets a story under it": two
+  creates joined by the ref, no comment, no question.
+- No code change outside the prompt: the `$new` ref on `epic` and its
+  resolution in the Executor already existed.
+- The rule sits with the directory rules near the end of the system
+  prompt. At the top it made GLM 5.3 Flash ask off-topic questions on
+  the contacts cases (3 of 7 runs); moved, 0 of 6, as on the old prompt.
+- Live eval on GLM 5.3 Flash: 36/41 (earlier full runs on the stack: 31 to
+  33 of 40). The new case passed 6 of 7 single runs; the one miss was an
+  empty answer after a repair. The five misses are the usual variance set
+  (points, sprint by quarter, a paste inside a reply, the new-team case,
+  which also misses on the previous branch).
+
+Why
+- "Create an epic for the migration, the first step is to figure out the
+  process" came back as one Epic whose description was the user's sentence.
+  The prompt rewarded one ticket and said nothing about what a description
+  holds or how an epic and its steps relate.
