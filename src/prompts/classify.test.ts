@@ -799,3 +799,36 @@ describe("across threads (FR-14.6, prompt version 11)", () => {
     expect(errors.join(" ")).not.toContain("not one of the candidate issues");
   });
 });
+
+describe("ticket shape rules (prompt version 16, D64)", () => {
+  const SHAPE_RULE = "each distinct piece of work it names is its own ticket";
+  const DESCRIPTION_RULE = "what the ticket is about, for the people who read it in Jira";
+
+  test("the prompt says a container and its work are separate tickets", () => {
+    const { system } = buildClassifyPrompt(snapshot);
+    expect(system).toContain(
+      "Prefer the fewest actions that fully capture the item, without folding separate work into one ticket.",
+    );
+    expect(system).toContain(SHAPE_RULE);
+    expect(system).toContain("whose epic field is the new epic's ref");
+    expect(system).toContain(DESCRIPTION_RULE);
+  });
+
+  test("the description field says what it holds", () => {
+    const json = JSON.stringify(z.toJSONSchema(buildItemSchema(snapshot)));
+    expect(json).toContain(`Markdown: ${DESCRIPTION_RULE}`);
+  });
+
+  test("snapshots before version 16 replay as they ran", () => {
+    const old = { ...snapshot, promptVersion: 15 };
+    const { system } = buildClassifyPrompt(old);
+    expect(system).toContain(
+      "Prefer the fewest actions that fully capture the item. Do not duplicate actions.",
+    );
+    expect(system).not.toContain(SHAPE_RULE);
+    expect(system).not.toContain(DESCRIPTION_RULE);
+    const json = JSON.stringify(z.toJSONSchema(buildItemSchema(old)));
+    expect(json).toContain('"description":"Markdown. Used by create_issue."');
+    expect(json).not.toContain(DESCRIPTION_RULE);
+  });
+});
