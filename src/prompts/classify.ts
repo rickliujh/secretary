@@ -52,11 +52,13 @@ import {
 import { renderWorkBlock, type WorkItemSnapshot } from "./work-block";
 
 /**
- * Recorded with each classified item. 15 adds the work block (FR-19.5, D61);
- * 14 new contacts and teams (FR-18, D60); 13 pastes inside instructions as
- * «...» (D56); 11 is the revoke thread context (FR-14.6) and 12 story points (D55).
+ * Recorded with each classified item. 16 adds the ticket shape rules (one
+ * ticket per piece of work, what a description holds; D64); 15 the work block
+ * (FR-19.5, D61); 14 new contacts and teams (FR-18, D60); 13 pastes inside
+ * instructions as «...» (D56); 11 is the revoke thread context (FR-14.6) and
+ * 12 story points (D55).
  */
-export const CLASSIFY_PROMPT_VERSION = 15;
+export const CLASSIFY_PROMPT_VERSION = 16;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 /** Placeholders for contacts and teams created in the same answer (prompt version 14, D60). */
 /** How many new contacts, and teams, one answer may create. */
@@ -96,6 +98,8 @@ export const NO_TEAM = "no_team";
 const offersDirectory = (s: ItemSnapshot) => s.promptVersion >= 14;
 /** The work block is shown from prompt version 15 (D61 Reads), when it holds an item. */
 const hasWork = (s: ItemSnapshot) => s.promptVersion >= 15 && !!s.work?.length;
+/** The ticket shape rules (D64): one ticket per piece of work, what a description holds. */
+const shapesTickets = (s: ItemSnapshot) => s.promptVersion >= 16;
 
 export type CandidateIssue = {
   key: string;
@@ -520,7 +524,13 @@ export function buildItemSchema(s: ItemSnapshot) {
       uses("create_issue"),
     ),
     summary: nullableText(`Issue title. ${uses("create_issue", "update_issue")}`),
-    description: nullableText(`Markdown. ${uses("create_issue")}`),
+    description: nullableText(
+      `Markdown${
+        shapesTickets(s)
+          ? ": what the ticket is about, for the people who read it in Jira; never the user's instructions to you, and never work that gets its own ticket"
+          : ""
+      }. ${uses("create_issue")}`,
+    ),
     parent: nullableEnum([...nonEpics, ...NEW_REFS]).describe(
       `Only for a Sub-task. ${uses("create_issue")}`,
     ),
@@ -1680,7 +1690,7 @@ export function buildClassifyPrompt(s: ItemSnapshot) {
 ${HARD_RULES}
 - Today is ${s.today}. Resolve relative dates ("Friday", "next week") to YYYY-MM-DD.
 - Write summaries, comments and notes in ${s.outputLanguage}.
-- Prefer the fewest actions that fully capture the item. Do not duplicate actions.
+- Prefer the fewest actions that fully capture the item${shapesTickets(s) ? ", without folding separate work into one ticket" : ""}. Do not duplicate actions.
 - Every proposal has the same fields. Choose its kind, fill the fields that kind needs, and leave the rest empty ("", "${NONE}" or []).
 - When the input asks to cancel, close, drop or stop a ticket, propose a transition_issue to the project's status for that: a cancel-like status (Cancelled, Won't Do, Rejected, Obsolete) if the project lists one, otherwise its done or closed status. A comment alone does not close a ticket.
 - When you move an issue to a closing status (cancelled, won't do, rejected, duplicate, obsolete, done or closed) for a reason in the input, also add an add_comment on the same issue that says why, in one or two sentences drawn from the input, so people reading the ticket know. When the closing status is a done status but the work was not done, the comment says the ticket was closed without being done. A cancellation always gets that comment.
@@ -1737,6 +1747,11 @@ ${
           ? " A current proposal with pointsCleared true had its points removed by the user: keep storyPoints empty for it unless their newest instruction gives a number."
           : ""
       }
+`
+    : ""
+}${
+  shapesTickets(s)
+    ? `- When the input asks for new tickets, each distinct piece of work it names is its own ticket, never a line in another ticket's description. An epic and the work under it are separate tickets: "create an epic for X, the first step is Y" is one create_issue for the epic and one for Y (a Story or Task from the project's issue types) whose epic field is the new epic's ref. A description says what the ticket is about, for the people who read it in Jira; it never repeats the user's instructions to you.
 `
     : ""
 }- Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
