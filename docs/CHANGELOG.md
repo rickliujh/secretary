@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.0 (2026-11-03)
+
+Everything after v0.1.0 below: the ticket Edit dialog with points, sprint, epic
+and labels; new contacts and teams from intake and chat; the work model (work
+items with their events, state and questions; intake and chat reading the work
+state; consequence rules and outcome cards; playbooks and standing instructions;
+suggestions where you are; the end-of-day pass); ticket shape rules in classify;
+the daily note, in sync with Obsidian, read as one conversation per topic, with
+marks and hover cards on its lines; proposal labels that name the issue type.
+Migrations 0015 to 0021. Bundles are unsigned; macOS and Windows warn on first
+open.
+
 ## v0.1.0 (2026-10-15)
 
 Everything after v0.0.1 below: report page and styles, data sources (Obsidian),
