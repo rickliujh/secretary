@@ -10,17 +10,30 @@
  */
 import { Effect } from "effect";
 import { Settings, settingsOrDefault } from "@/services/settings";
+import type { AppSettings, DataSource } from "@/services/settings/schema";
 import { NoteError, NoteFile, type NoteFileRead, type SyncStatus } from ".";
 import { mergeNote } from "./merge";
 import { loadRow, saveSynced } from "./queries";
 
-/** The data source the note syncs with: named in Settings and enabled; else null. */
-export const noteVault = Effect.gen(function* () {
-  const settings = yield* settingsOrDefault(yield* Settings);
+/** The `vaultSourceId` value that turns the sync off; "" means automatic. */
+export const NOTE_VAULT_NONE = "none";
+
+/**
+ * The data source the note syncs with (D65): "" (the default) is the first
+ * enabled Obsidian source, so a connected vault syncs without a second setting;
+ * `NOTE_VAULT_NONE` is no sync; anything else names a source, used while it is
+ * enabled.
+ */
+export function pickNoteVault(settings: AppSettings): DataSource | null {
   const id = settings.secretary.dailyNote.vaultSourceId;
-  if (!id) return null;
-  return settings.dataSources.find((d) => d.id === id && d.enabled) ?? null;
-});
+  if (id === NOTE_VAULT_NONE) return null;
+  const enabled = settings.dataSources.filter((d) => d.enabled);
+  if (!id) return enabled[0] ?? null;
+  return enabled.find((d) => d.id === id) ?? null;
+}
+
+/** The data source the note syncs with, from Settings; null when off. */
+export const noteVault = Effect.map(Effect.flatMap(Settings, settingsOrDefault), pickNoteVault);
 
 /** Merges today's page with the vault's daily note; "off" without a chosen vault. */
 export const syncNote = (date: string, launch = false) =>

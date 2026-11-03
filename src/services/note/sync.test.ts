@@ -174,8 +174,10 @@ describe("sync with the vault's daily note (D65)", () => {
     expect(t.noteFile.files.get("Work")).toBe("zero\none\npage\n");
   });
 
-  test("not synced without a chosen vault; an unreachable vault is an error status", async () => {
-    const off = setup("x\n", "");
+  test('the first enabled vault by default, none with "none"; an unreachable vault is an error status', async () => {
+    const auto = setup("x\n", "");
+    expect(await auto.run((n) => n.sync())).toMatchObject({ state: "synced", vault: "Work notes" });
+    const off = setup("x\n", "none");
     expect(await off.run((n) => n.sync())).toEqual({ state: "off" });
     const down = setup("x\n");
     down.noteFile.state.down = true;

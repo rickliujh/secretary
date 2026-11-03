@@ -298,6 +298,8 @@ function DayEndCard() {
 
 /** Select value for "Not synced"; the setting stores "". */
 const NOT_SYNCED = "none";
+/** The select's value for the stored "" (a Radix item cannot have an empty value). */
+const AUTO = "auto";
 
 const NoteForm = z.object({
   enabled: z.boolean(),
@@ -375,16 +377,21 @@ function DailyNoteCard() {
                   <FieldLabel htmlFor="note-vault">Obsidian vault</FieldLabel>
                   <Select
                     value={
-                      field.value && vaults.some((v) => v.id === field.value)
-                        ? field.value
-                        : NOT_SYNCED
+                      field.value === NOT_SYNCED
+                        ? NOT_SYNCED
+                        : field.value && vaults.some((v) => v.id === field.value)
+                          ? field.value
+                          : AUTO
                     }
-                    onValueChange={(v) => field.onChange(v === NOT_SYNCED ? "" : v)}
+                    onValueChange={(v) => field.onChange(v === AUTO ? "" : v)}
                   >
                     <SelectTrigger id="note-vault" className="w-64">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value={AUTO}>
+                        {vaults[0] ? `Automatic (${vaults[0].name})` : "Automatic (no vault yet)"}
+                      </SelectItem>
                       <SelectItem value={NOT_SYNCED}>Not synced</SelectItem>
                       {vaults.map((v) => (
                         <SelectItem key={v.id} value={v.id}>
@@ -395,8 +402,8 @@ function DailyNoteCard() {
                   </Select>
                   <FieldDescription>
                     {vaults.length
-                      ? "Its daily note becomes the note. Choosing one later merges what the page holds into it."
-                      : "Add an Obsidian vault in Settings > Data sources to sync with it."}
+                      ? "Its daily note becomes the note. Automatic follows the first connected vault; a vault chosen later merges what the page holds into it."
+                      : "Automatic syncs with the first Obsidian vault you add in Settings > Data sources."}
                   </FieldDescription>
                 </Field>
               )}

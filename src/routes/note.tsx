@@ -22,6 +22,7 @@ import { DailyNote, type SyncStatus } from "@/services/note";
 import { blocksOf, threadSummaries } from "@/services/note/cards";
 import { dayBefore } from "@/services/note/queries";
 import { describeRead } from "@/services/note/read";
+import { pickNoteVault } from "@/services/note/sync";
 
 export const Route = createFileRoute("/note")({
   validateSearch: z.object({
@@ -69,7 +70,7 @@ function NotePage() {
   const editable = date === today;
   const { data: settings } = useSettings();
   const cfg = settings?.secretary.dailyNote;
-  const vault = settings?.dataSources.find((d) => d.id === cfg?.vaultSourceId && d.enabled) ?? null;
+  const vault = settings ? pickNoteVault(settings) : null;
   // A page left open past midnight moves to the new day (on focus or the next poll).
   const [, setDay] = useState(today);
   const editor = useNoteEditor(date, editable, !!vault, () => setDay(localDate()));

@@ -254,13 +254,14 @@ export const SecretarySettingsSchema = z.object({
   /**
    * The daily note (FR-20, D65, Phase 29): one free-form note a day that the
    * secretary reads at each work pass, shortly after typing stops, and on
-   * request. With `vaultSourceId` naming an enabled Obsidian source, the
-   * vault's own daily note is the file of record.
+   * request. The vault's own daily note is the file of record: by default the
+   * first enabled Obsidian source, or the one `vaultSourceId` names; "none"
+   * turns the sync off.
    */
   dailyNote: z
     .object({
       enabled: z.boolean().default(true),
-      /** The data source synced with; "" when not synced. */
+      /** The data source synced with: "" automatic (the first enabled), "none" off, else its id. */
       vaultSourceId: z.string().default(""),
       /** Blocks under a heading with this text are never sent to a model. */
       privateHeading: z.string().trim().min(1).max(80).default("Private"),
