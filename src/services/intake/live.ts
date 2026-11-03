@@ -68,6 +68,7 @@ import {
 import {
   Intake,
   IntakeError,
+  ownWordsSource,
   type ReplyInput,
   type Source,
   type TriageInput,
@@ -303,6 +304,9 @@ const make = Effect.gen(function* () {
       // The chat wrote the first message for the user (propose_actions): not their words.
       const first = UserContentSchema.safeParse(userMessages[0]?.content);
       const chatAuthored = first.success && first.data.author === "chat";
+      // A note block that quotes someone with ">" has that quote as its input (D65).
+      const firstPasted =
+        first.success && hasInput(first.data.parts, !!first.data.inline) && !!first.data.inline;
       return {
         item,
         messages,
@@ -318,6 +322,7 @@ const make = Effect.gen(function* () {
         pendingByIdx,
         questionsByIdx,
         chatAuthored,
+        firstPasted,
       };
     });
   type Thread = Effect.Effect.Success<ReturnType<typeof loadThread>>;
@@ -805,8 +810,13 @@ const make = Effect.gen(function* () {
     today: today ?? localDate(),
   });
 
-  /** The thread's first input is the user's own typed words: not pasted, not the chat's (D55). */
-  const typedByUser = (thread: Thread) => thread.item.source === "typed" && !thread.chatAuthored;
+  /**
+   * The thread's first input is the user's own words: typed, not pasted, not
+   * the chat's (D55); or a block of their daily note that quotes no one (D65).
+   */
+  const typedByUser = (thread: Thread) =>
+    (thread.item.source === "typed" && !thread.chatAuthored) ||
+    (thread.item.source === "note" && !thread.firstPasted);
 
   /** The first turn: split the input and classify every item with the instruction sent with it. */
   const runFirst = (inboxItemId: string, today: string | undefined, progress: Progress) =>
@@ -947,7 +957,7 @@ const make = Effect.gen(function* () {
         // New input joins the thread as new items, instructed by this message only.
         // Pasted text is never the user's own words, whatever source it was given.
         const named = content.source ?? thread.item.source;
-        const source = named === "typed" ? "other" : named;
+        const source = ownWordsSource(named) ? "other" : named;
         const cleaned = cleanInput(input) || input.trim();
         const quotes = yield* segment(cleaned, source, progress);
         const start = Math.max(-1, ...thread.current.keys()) + 1;
@@ -981,7 +991,15 @@ const make = Effect.gen(function* () {
       const typed = parts ? !hasInput(parts, true) : input.source === "typed";
       const text = split ? split.input : (input.text ?? "");
       // Pasted input is never the user's own words (D55): "typed" given with a paste is "other".
-      const source: Source = typed ? "typed" : input.source === "typed" ? "other" : input.source;
+      // A daily note block stays "note" (D65); a ">" quote in it is its pasted input.
+      const note = input.source === "note";
+      const source: Source = note
+        ? "note"
+        : typed
+          ? "typed"
+          : input.source === "typed"
+            ? "other"
+            : input.source;
       if (!text.trim())
         return yield* new IntakeError({ kind: "empty", message: "Paste or type something first." });
       const inboxItemId = newId();
@@ -1008,6 +1026,7 @@ const make = Effect.gen(function* () {
               : { parts: partsOf(text, input.instruction ?? null, typed) }),
             source,
             ...(input.author ? { author: input.author } : {}),
+            ...(note && input.noteDate ? { noteDate: input.noteDate } : {}),
           },
           createdAt: now,
         }),
@@ -1059,7 +1078,7 @@ const make = Effect.gen(function* () {
       // Pasted text is never "typed": only the user's own words state points without
       // a cue (D55 answers), so a paste that would be "typed" is "other".
       const named = input.source ?? (thread.item.source as Source);
-      const replySource: Source = text && named === "typed" ? "other" : named;
+      const replySource: Source = text && ownWordsSource(named) ? "other" : named;
       const now = nowIso();
       const messageId = newId();
       yield* q((d) =>

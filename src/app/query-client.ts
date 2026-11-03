@@ -116,4 +116,8 @@ export const queryKeys = {
   sources: ["sources"] as const,
   /** The last recap report (D37). */
   report: ["report"] as const,
+  /** The daily note (D65): a day's note, and what the last reading did. */
+  note: ["note"] as const,
+  noteDay: (date: string) => ["note", "day", date] as const,
+  noteLastRead: ["note", "last-read"] as const,
 };

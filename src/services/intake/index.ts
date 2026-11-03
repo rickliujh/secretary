@@ -3,7 +3,8 @@ import type { DbError } from "@/services/db";
 import type { LlmError } from "@/services/llm";
 import type { MessagePart } from "./thread";
 
-export const SOURCES = ["teams", "email", "meeting", "typed", "other"] as const;
+/** `note`: a block of the daily note the secretary read (D65): the user's own words. */
+export const SOURCES = ["teams", "email", "meeting", "typed", "other", "note"] as const;
 export type Source = (typeof SOURCES)[number];
 
 export class IntakeError extends Data.TaggedError("IntakeError")<{
@@ -30,10 +31,19 @@ export type TriageInput = {
    * their own words, so numbers in it need a points cue (D55).
    */
   author?: "chat";
+  /**
+   * With `source: "note"` (D65): the day of the daily note the block is from.
+   * The note's own lines are the user's words, like typed input; lines it
+   * quotes with `>` come as pasted parts and stay untrusted.
+   */
+  noteDate?: string;
   /** Local date as YYYY-MM-DD; defaults to today. */
   today?: string;
   onProgress?: (message: string) => void;
 };
+
+/** True for input that is the user's own words: typed, or written in their daily note (D65). */
+export const ownWordsSource = (source: string) => source === "typed" || source === "note";
 
 export type ReplyInput = {
   inboxItemId: string;

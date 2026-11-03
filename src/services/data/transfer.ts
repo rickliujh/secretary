@@ -13,6 +13,8 @@ import {
   chatConversations,
   communications,
   contextNotes,
+  dailyNoteBlocks,
+  dailyNotes,
   deletedIssues,
   dependencies,
   followups,
@@ -63,6 +65,9 @@ const EXPORTED_TABLES = [
   workItems,
   workItemIssues,
   workEvents,
+  // The daily note (D65): its blocks point at threads and work items.
+  dailyNotes,
+  dailyNoteBlocks,
 ] as const satisfies readonly SQLiteTable[];
 
 export class TransferError extends Data.TaggedError("TransferError")<{

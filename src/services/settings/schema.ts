@@ -251,6 +251,21 @@ export const SecretarySettingsSchema = z.object({
       at: z.string().regex(DAY_END_TIME, "A time such as 17:30").default(DEFAULT_DAY_END_AT),
     })
     .prefault({}),
+  /**
+   * The daily note (FR-20, D65, Phase 29): one free-form note a day that the
+   * secretary reads at each work pass, shortly after typing stops, and on
+   * request. With `vaultSourceId` naming an enabled Obsidian source, the
+   * vault's own daily note is the file of record.
+   */
+  dailyNote: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** The data source synced with; "" when not synced. */
+      vaultSourceId: z.string().default(""),
+      /** Blocks under a heading with this text are never sent to a model. */
+      privateHeading: z.string().trim().min(1).max(80).default("Private"),
+    })
+    .prefault({}),
 });
 export type SecretarySettings = z.infer<typeof SecretarySettingsSchema>;
 

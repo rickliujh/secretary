@@ -146,6 +146,8 @@ pub fn run() {
             secrets::secret_set,
             secrets::secret_delete,
             obsidian::obsidian_cli,
+            obsidian::daily_note_read,
+            obsidian::daily_note_write,
             capture::capture_status,
             capture::set_close_to_tray,
             capture::set_capture_shortcut,

@@ -11,23 +11,29 @@ import { logger } from "@/lib/log";
 import { type DayEndResult, runDayEnd } from "@/services/work/dayend-query";
 import { runWorkPass } from "@/services/work/pass";
 import { useSettings } from "./hooks";
+import { readNoteNow } from "./note";
 import { queryClient, queryKeys } from "./query-client";
 import { run } from "./runtime";
 import { DailyTrigger, PassScheduler } from "./work-scheduler";
 
 let enabled = false;
+/** The daily note is read at the end of each pass (D65), also while the work model is off. */
+let noteOn = false;
 
 const scheduler = new PassScheduler(async () => {
-  if (!enabled) return;
-  try {
-    const r = await run(runWorkPass());
-    if (r.created || r.attached || r.calls || r.asked || r.offered || r.returned) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+  if (enabled) {
+    try {
+      const r = await run(runWorkPass());
+      if (r.created || r.attached || r.calls || r.asked || r.offered || r.returned) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+      }
+    } catch (e) {
+      logger.warn("Work pass failed", e);
     }
-  } catch (e) {
-    logger.warn("Work pass failed", e);
   }
+  // After the pass's own work; what it makes is folded in by the next pass.
+  if (noteOn) await readNoteNow("pass").catch(() => undefined);
 });
 
 /**
@@ -49,7 +55,7 @@ async function returnParkedWhileOff() {
 
 /** Asks for a work pass; cheap to call often, it runs at most once a minute. */
 export function requestWorkPass() {
-  if (enabled) scheduler.request();
+  if (enabled || noteOn) scheduler.request();
 }
 
 /** Keeps the scheduler in step with Settings > Secretary; mounted once at the root. */
@@ -57,18 +63,20 @@ export function useWorkPass() {
   const { data: settings } = useSettings();
   const loaded = !!settings;
   const on = settings?.work.enabled ?? false;
+  const note = settings?.secretary.dailyNote.enabled ?? false;
   useEffect(() => {
     enabled = on;
-    if (!on) {
+    noteOn = note;
+    // Only once the settings say so: before they load, "off" is not known.
+    if (!on && loaded) void returnParkedWhileOff();
+    if (!on && !note) {
       scheduler.cancel();
-      // Only once the settings say so: before they load, "off" is not known.
-      if (loaded) void returnParkedWhileOff();
       return;
     }
     // A first pass shortly after launch picks up what changed while the app was closed.
     scheduler.request();
     return () => scheduler.cancel();
-  }, [on, loaded]);
+  }, [on, note, loaded]);
 }
 
 let dayEndRunning: Promise<DayEndResult> | null = null;

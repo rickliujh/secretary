@@ -6,9 +6,15 @@
 //! app is started first, detached, and the command runs once the socket answers. Only read-only subcommands and
 //! a fixed set of options are allowed; the check lives here, not in the webview.
 //! The command runs without a shell.
+//!
+//! The daily note (D65) is the one file the app writes: `daily_note_write`
+//! writes the vault's daily note, found through the read-only `vault info=path`
+//! and `daily:path`, only inside the vault, only a `.md` file, and only when
+//! the file still holds the text the caller last read (compare-and-swap). No
+//! writing CLI subcommand is allowed.
 
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -37,8 +43,13 @@ const SUBCOMMANDS: &[&str] = &[
     "files",
     "vaults",
     "version",
+    // The daily note (D65): where the vault is and where today's note is; both only read.
+    "vault",
+    "daily:path",
 ];
-const KEYS: &[&str] = &["query", "path", "file", "limit", "format", "folder", "ext"];
+const KEYS: &[&str] = &[
+    "query", "path", "file", "limit", "format", "folder", "ext", "info",
+];
 const FLAGS: &[&str] = &["total", "counts", "verbose", "case"];
 
 const HOW_TO_ENABLE: &str = "Turn on the command line interface in Obsidian 1.12.7 or later \
@@ -387,6 +398,407 @@ pub async fn obsidian_cli(
     })
     .await
     .map_err(|e| format!("the obsidian command failed: {e}"))?
+}
+
+// ---------------------------------------------------------------------------
+// The daily note (D65)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct DailyNoteRead {
+    pub path: String,
+    /// Null when the note does not exist yet.
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct DailyNoteWrite {
+    pub path: String,
+    /// True when the file no longer held the expected text; nothing was written.
+    pub conflict: bool,
+    /// On a conflict, the file's current text (null: it does not exist).
+    pub text: Option<String>,
+}
+
+/// One CLI answer as text; a failed command, an empty answer or an error line is an error.
+fn cli_answer(
+    run: &dyn Fn(&[String]) -> Result<CliOutput, String>,
+    args: Vec<String>,
+) -> Result<String, String> {
+    validate_args(&args)?;
+    let out = run(&args)?;
+    let text = out.stdout.trim();
+    let failed = out.code.is_some_and(|c| c != 0)
+        || text.is_empty()
+        || text.lines().count() != 1
+        || text.to_ascii_lowercase().starts_with("error");
+    if failed {
+        let head: String = text.chars().take(200).collect();
+        return Err(format!(
+            "Obsidian did not give the daily note's place ({}): {head}",
+            args.join(" ")
+        ));
+    }
+    Ok(text.to_string())
+}
+
+/// The vault's folder and the daily note's path in it, from the CLI.
+pub fn resolve_daily_note(
+    vault: &str,
+    run: &dyn Fn(&[String]) -> Result<CliOutput, String>,
+) -> Result<PathBuf, String> {
+    check_value("vault", vault)?;
+    let at = format!("vault={vault}");
+    let folder = cli_answer(run, vec![at.clone(), "vault".into(), "info=path".into()])?;
+    let rel = cli_answer(run, vec![at, "daily:path".into()])?;
+    note_path(Path::new(&folder), &rel)
+}
+
+/// The nearest folder of `path` that exists, `path` included.
+fn existing_ancestor(path: &Path) -> Option<&Path> {
+    path.ancestors().find(|p| p.exists())
+}
+
+/// The note's full path: a `.md` file inside the vault folder. A relative path
+/// may not climb out; whatever exists of it, resolved through links, must lie
+/// inside the resolved vault folder.
+pub fn note_path(vault: &Path, rel: &str) -> Result<PathBuf, String> {
+    let vault = vault
+        .canonicalize()
+        .map_err(|e| format!("the vault folder {} cannot be read: {e}", vault.display()))?;
+    let rel = Path::new(rel.trim());
+    let is_md = rel
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+    if !is_md {
+        return Err(format!(
+            "the daily note {} is not a .md file",
+            rel.display()
+        ));
+    }
+    let full = if rel.is_absolute() {
+        rel.to_path_buf()
+    } else {
+        if rel
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir))
+        {
+            return Err(format!(
+                "the daily note {} is outside the vault",
+                rel.display()
+            ));
+        }
+        vault.join(rel)
+    };
+    let outside = || format!("the daily note {} is outside the vault", full.display());
+    let base = existing_ancestor(&full).ok_or_else(outside)?;
+    let resolved = base.canonicalize().map_err(|_| outside())?;
+    if !resolved.starts_with(&vault) {
+        return Err(outside());
+    }
+    // What does not exist yet must not climb back out either.
+    if let Ok(rest) = full.strip_prefix(base) {
+        if rest
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir))
+        {
+            return Err(outside());
+        }
+    }
+    if full.exists() && !resolved.is_file() {
+        return Err(format!("the daily note {} is not a file", full.display()));
+    }
+    Ok(full)
+}
+
+/// The note's text; None when it does not exist.
+pub fn read_note(path: &Path) -> Result<Option<String>, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => String::from_utf8(bytes)
+            .map(Some)
+            .map_err(|_| format!("the daily note {} is not UTF-8 text", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!(
+            "the daily note {} cannot be read: {e}",
+            path.display()
+        )),
+    }
+}
+
+/// Writes `text` only when the file holds `expected` (None: it must not exist),
+/// through a temporary file in the same folder renamed over it. Returns the
+/// current text on a conflict, and None when written.
+pub fn write_note_cas(
+    path: &Path,
+    text: &str,
+    expected: Option<&str>,
+) -> Result<Option<Option<String>>, String> {
+    let current = read_note(path)?;
+    if current.as_deref() != expected {
+        return Ok(Some(current));
+    }
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("the daily note {} has no folder", path.display()))?;
+    std::fs::create_dir_all(dir)
+        .map_err(|e| format!("the folder {} cannot be made: {e}", dir.display()))?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp = dir.join(format!(
+        ".{name}.{}-{nanos}.secretary-tmp",
+        std::process::id()
+    ));
+    if let Err(e) = std::fs::write(&tmp, text) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("the daily note cannot be written: {e}"));
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("the daily note cannot be written: {e}"));
+    }
+    Ok(None)
+}
+
+/// Runs a CLI command for the daily note: finds the binary, starts Obsidian if needed.
+/// Whether a daily-note command may go on: with Obsidian closed it starts it
+/// only when the caller asked to `launch` (the page opening, Read now); the
+/// poll and the passes never start Obsidian.
+pub fn may_run(launch: bool, running: bool) -> Result<(), String> {
+    if running || launch {
+        Ok(())
+    } else {
+        Err("not_running: Obsidian is not running".into())
+    }
+}
+
+fn cli_runner(
+    cli_path: Option<String>,
+    launch: bool,
+) -> Result<impl Fn(&[String]) -> Result<CliOutput, String>, String> {
+    let bin = find_binary(cli_path.as_deref())?;
+    may_run(launch, obsidian_running())?;
+    ensure_running(&bin)?;
+    Ok(move |args: &[String]| run_blocking(&bin, args, TIMEOUT))
+}
+
+/// Reads the vault's daily note for today (D65).
+#[tauri::command]
+pub async fn daily_note_read(
+    vault: String,
+    cli_path: Option<String>,
+    launch: bool,
+) -> Result<DailyNoteRead, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let run = cli_runner(cli_path, launch)?;
+        let path = resolve_daily_note(&vault, &run)?;
+        let text = read_note(&path)?;
+        Ok(DailyNoteRead {
+            path: path.to_string_lossy().into_owned(),
+            text,
+        })
+    })
+    .await
+    .map_err(|e| format!("reading the daily note failed: {e}"))?
+}
+
+/// Writes the vault's daily note for today when it still holds `expected` (D65).
+#[tauri::command]
+pub async fn daily_note_write(
+    vault: String,
+    cli_path: Option<String>,
+    text: String,
+    expected: Option<String>,
+    launch: bool,
+) -> Result<DailyNoteWrite, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let run = cli_runner(cli_path, launch)?;
+        let path = resolve_daily_note(&vault, &run)?;
+        let conflict = write_note_cas(&path, &text, expected.as_deref())?;
+        Ok(DailyNoteWrite {
+            path: path.to_string_lossy().into_owned(),
+            conflict: conflict.is_some(),
+            text: conflict.flatten(),
+        })
+    })
+    .await
+    .map_err(|e| format!("writing the daily note failed: {e}"))?
+}
+
+#[cfg(test)]
+mod daily_note_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// A fresh folder under the system temp folder.
+    fn temp_dir(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("secretary-{name}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn fake_cli<'a>(
+        folder: String,
+        daily: &'static str,
+        seen: &'a RefCell<Vec<Vec<String>>>,
+    ) -> impl Fn(&[String]) -> Result<CliOutput, String> + 'a {
+        move |args: &[String]| {
+            seen.borrow_mut().push(args.to_vec());
+            let stdout = match args.get(1).map(String::as_str) {
+                Some("vault") => format!("{folder}\n"),
+                Some("daily:path") => format!("{daily}\n"),
+                _ => return Err("unexpected".into()),
+            };
+            Ok(CliOutput {
+                stdout,
+                code: Some(0),
+            })
+        }
+    }
+
+    #[test]
+    fn allowlist_takes_the_daily_note_lookups_only() {
+        let ok = |a: &[&str]| validate_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(ok(&["vault=Work", "vault", "info=path"]), Ok(()));
+        assert_eq!(ok(&["vault=Work", "daily:path"]), Ok(()));
+        for bad in [
+            &["vault=Work", "daily"][..],
+            &["vault=Work", "daily:append", "content=x"],
+            &["vault=Work", "daily:prepend", "content=x"],
+            &["vault=Work", "create", "path=x.md"],
+            &["vault=Work", "append", "path=x.md", "content=x"],
+            &["vault=Work", "vault", "content=x"],
+        ] {
+            assert!(ok(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn resolves_the_note_inside_the_vault() {
+        let vault = temp_dir("vault");
+        let seen = RefCell::new(Vec::new());
+        let run = fake_cli(
+            vault.to_string_lossy().into_owned(),
+            "Daily/2026-11-02.md",
+            &seen,
+        );
+        let path = resolve_daily_note("Work", &run).unwrap();
+        assert_eq!(
+            path,
+            vault
+                .canonicalize()
+                .unwrap()
+                .join("Daily")
+                .join("2026-11-02.md")
+        );
+        assert_eq!(
+            *seen.borrow(),
+            vec![
+                vec!["vault=Work".to_string(), "vault".into(), "info=path".into()],
+                vec!["vault=Work".to_string(), "daily:path".into()],
+            ]
+        );
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn refuses_paths_outside_the_vault_or_not_markdown() {
+        let root = temp_dir("outside");
+        let vault = root.join("vault");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::write(root.join("secret.md"), "x").unwrap();
+        assert!(note_path(&vault, "../secret.md").is_err());
+        assert!(note_path(&vault, "Daily/../../secret.md").is_err());
+        assert!(note_path(&vault, &root.join("secret.md").to_string_lossy()).is_err());
+        assert!(note_path(&vault, "Daily/2026-11-02.txt").is_err());
+        assert!(note_path(&vault, "Daily/2026-11-02").is_err());
+        assert!(note_path(&vault, "Daily/2026-11-02.md").is_ok());
+        let inside = vault.canonicalize().unwrap().join("note.md");
+        assert_eq!(note_path(&vault, &inside.to_string_lossy()), Ok(inside));
+        #[cfg(unix)]
+        {
+            // A link inside the vault to a folder outside it does not let a write out.
+            std::os::unix::fs::symlink(&root, vault.join("escape")).unwrap();
+            assert!(note_path(&vault, "escape/secret.md").is_err());
+            assert!(note_path(&vault, "escape/new/today.md").is_err());
+        }
+        std::fs::create_dir_all(vault.join("folder.md")).unwrap();
+        assert!(note_path(&vault, "folder.md").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn writes_only_over_the_expected_text() {
+        let vault = temp_dir("cas");
+        let path = vault.join("Daily").join("today.md");
+        // Missing: written only when the caller expects it missing; the folder is made.
+        assert_eq!(write_note_cas(&path, "a", Some("x")), Ok(Some(None)));
+        assert_eq!(read_note(&path), Ok(None));
+        assert_eq!(write_note_cas(&path, "first\n", None), Ok(None));
+        assert_eq!(read_note(&path), Ok(Some("first\n".into())));
+        // Present: a stale expectation gets the current text back, and nothing changes.
+        assert_eq!(
+            write_note_cas(&path, "other", None),
+            Ok(Some(Some("first\n".into())))
+        );
+        assert_eq!(
+            write_note_cas(&path, "other", Some("old")),
+            Ok(Some(Some("first\n".into())))
+        );
+        assert_eq!(read_note(&path), Ok(Some("first\n".into())));
+        assert_eq!(
+            write_note_cas(&path, "first\nsecond\n", Some("first\n")),
+            Ok(None)
+        );
+        assert_eq!(read_note(&path), Ok(Some("first\nsecond\n".into())));
+        // No temporary file is left behind.
+        let names: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("today.md")]);
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn starts_obsidian_only_when_asked() {
+        assert_eq!(may_run(false, true), Ok(()));
+        assert_eq!(may_run(true, true), Ok(()));
+        assert_eq!(may_run(true, false), Ok(()));
+        assert!(may_run(false, false)
+            .unwrap_err()
+            .starts_with("not_running:"));
+    }
+
+    #[test]
+    fn a_cli_error_is_no_path() {
+        let run = |_: &[String]| {
+            Ok(CliOutput {
+                stdout: "Error: vault not found\n".into(),
+                code: Some(0),
+            })
+        };
+        assert!(resolve_daily_note("Work", &run).is_err());
+        let failed = |_: &[String]| {
+            Ok(CliOutput {
+                stdout: "/x\n".into(),
+                code: Some(1),
+            })
+        };
+        assert!(resolve_daily_note("Work", &failed).is_err());
+        assert!(resolve_daily_note("a\nb", &failed).is_err());
+    }
 }
 
 /// Against a real, running Obsidian with its CLI on. Opt in:

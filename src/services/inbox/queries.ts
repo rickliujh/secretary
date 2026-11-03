@@ -166,6 +166,8 @@ export type ThreadMessage =
       answers: string | null;
       /** Set when a feature started the thread; such threads take no replies. */
       origin: "planner" | "rules" | null;
+      /** The daily note's day, when the message is a block of it (D65). */
+      noteDate: string | null;
     }
   | { id: string; role: "assistant"; createdAt: string; summary: string | null };
 
@@ -181,6 +183,7 @@ const toMessage = (m: typeof inboxMessages.$inferSelect): ThreadMessage => {
       source: c.success ? (c.data.source ?? null) : null,
       answers: c.success ? (c.data.answers ?? null) : null,
       origin: c.success ? (c.data.origin ?? null) : null,
+      noteDate: c.success ? (c.data.noteDate ?? null) : null,
     };
   }
   const c = AssistantContentSchema.safeParse(m.content);

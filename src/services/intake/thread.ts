@@ -37,8 +37,28 @@ export const UserContentSchema = z.object({
    * is not the user's own words (D55): its numbers need a points cue.
    */
   author: z.enum(["chat"]).optional(),
+  /** The daily note's day, when the message is a block of it (D65). */
+  noteDate: z.string().optional(),
 });
 export type UserContent = z.infer<typeof UserContentSchema>;
+
+/**
+ * A block of the daily note as message parts (D65): its own lines are typed
+ * (the user's words), lines quoted with `>` are pasted (someone else's, input
+ * and untrusted). Laid out inline, so `splitInline` reads them in place.
+ */
+export function noteParts(text: string): MessagePart[] {
+  const lines = text.split(/\r?\n/);
+  return mergeParts(
+    lines.map((line, i) => {
+      const quoted = /^\s*>\s?(.*)$/.exec(line);
+      const end = i < lines.length - 1 ? "\n" : "";
+      return quoted
+        ? { type: "pasted" as const, text: `${quoted[1] ?? ""}${end}` }
+        : { type: "typed" as const, text: `${line}${end}` };
+    }),
+  );
+}
 
 export const AssistantContentSchema = z.object({
   summary: z.string().nullable(),

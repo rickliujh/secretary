@@ -339,9 +339,12 @@ export const inboxItems = sqliteTable(
   "inbox_items",
   {
     id: text("id").primaryKey(),
-    /** `secretary`: an outcome card the consequence rules made (D61, Phase 25), not input. */
+    /**
+     * `secretary`: an outcome card the consequence rules made (D61, Phase 25), not input.
+     * `note`: a block of the daily note the secretary read (D65).
+     */
     source: text("source", {
-      enum: ["teams", "email", "meeting", "typed", "other", "secretary"],
+      enum: ["teams", "email", "meeting", "typed", "other", "secretary", "note"],
     }).notNull(),
     senderPersonId: text("sender_person_id").references(() => people.id, {
       onDelete: "set null",
@@ -601,6 +604,52 @@ export const workEvents = sqliteTable(
     index("work_events_pending_idx").on(t.attachedBy, t.applied),
     index("work_events_issue_idx").on(t.issueKey),
   ],
+);
+
+// ---------------------------------------------------------------------------
+// The daily note (FR-20, D65)
+// ---------------------------------------------------------------------------
+
+/**
+ * One free-form note per local day. With a vault chosen, the vault's daily
+ * note is the file of record and `base` is the text both sides last agreed on
+ * (the merge base); null when never synced.
+ */
+export const dailyNotes = sqliteTable("daily_notes", {
+  /** Local day, YYYY-MM-DD. */
+  date: text("date").primaryKey(),
+  body: text("body").notNull().default(""),
+  updatedAt: text("updated_at").notNull(),
+  base: text("base"),
+  syncedAt: text("synced_at"),
+  /** The data source it was last synced with. */
+  vaultSourceId: text("vault_source_id"),
+});
+
+/**
+ * What the secretary has read of a day's note, one row per block (D65): the
+ * same block is never sent twice, and a changed block can revise its thread.
+ */
+export const dailyNoteBlocks = sqliteTable(
+  "daily_note_blocks",
+  {
+    id: text("id").primaryKey(),
+    date: text("date").notNull(),
+    /** Hash of the normalised block text. */
+    hash: text("hash").notNull(),
+    text: text("text").notNull(),
+    /** The heading above the block, or null. */
+    section: text("section"),
+    position: integer("position").notNull(),
+    status: text("status", {
+      enum: ["skipped", "context", "acted", "revised", "private"],
+    }).notNull(),
+    inboxItemId: text("inbox_item_id").references(() => inboxItems.id, { onDelete: "set null" }),
+    workItemId: text("work_item_id").references(() => workItems.id, { onDelete: "set null" }),
+    seenAt: text("seen_at").notNull(),
+    handledAt: text("handled_at"),
+  },
+  (t) => [uniqueIndex("daily_note_blocks_date_hash_idx").on(t.date, t.hash)],
 );
 
 // ---------------------------------------------------------------------------
