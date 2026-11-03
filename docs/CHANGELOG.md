@@ -6,6 +6,11 @@
   page showed "Not synced" with a vault connected because the note had its own
   vault setting, off by default; "" now means automatic, "none" turns it off,
   and the Settings select shows "Automatic (vault name)" first.
+- A vault in a folder macOS protects (OneDrive, Dropbox, iCloud Drive, Desktop,
+  Documents) failed with "Operation not permitted (os error 1)". The sync line
+  now says that macOS refused the access and where to allow it (System Settings >
+  Privacy & Security > Files and Folders or Full Disk Access; the terminal app
+  when running from one).
 - The daily note page syncs with the vault's file about 2 s after each save and
   once more when the page is left, instead of only at the 30 s poll, on focus
   and at the passes. Typing on the page now shows in Obsidian within seconds.

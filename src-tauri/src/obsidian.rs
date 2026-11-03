@@ -454,6 +454,32 @@ pub fn resolve_daily_note(
     note_path(Path::new(&folder), &rel)
 }
 
+/// An I/O error as the sync line shows it. A permission refusal on macOS is the
+/// system's privacy gate on Desktop, Documents, Downloads, iCloud Drive and
+/// cloud folders such as OneDrive, Dropbox and Google Drive ("Operation not
+/// permitted", EPERM), which only the user can lift, so the text says where.
+pub fn io_reason(e: &std::io::Error) -> String {
+    permission_reason(e, std::env::consts::OS)
+}
+
+pub fn permission_reason(e: &std::io::Error, os: &str) -> String {
+    let denied = e.kind() == std::io::ErrorKind::PermissionDenied
+        || matches!(e.raw_os_error(), Some(1) | Some(13));
+    if denied && os == "macos" {
+        return format!(
+            "{e}. macOS did not let Secretary open it: in System Settings > Privacy & Security > \
+             Files and Folders (or Full Disk Access), allow Secretary for that folder; when the app \
+             runs from a terminal, allow the terminal app instead. Then use Read now"
+        );
+    }
+    if denied {
+        return format!(
+            "{e}. The app has no permission to open it; check the folder's permissions"
+        );
+    }
+    e.to_string()
+}
+
 /// The nearest folder of `path` that exists, `path` included.
 fn existing_ancestor(path: &Path) -> Option<&Path> {
     path.ancestors().find(|p| p.exists())
@@ -463,9 +489,13 @@ fn existing_ancestor(path: &Path) -> Option<&Path> {
 /// may not climb out; whatever exists of it, resolved through links, must lie
 /// inside the resolved vault folder.
 pub fn note_path(vault: &Path, rel: &str) -> Result<PathBuf, String> {
-    let vault = vault
-        .canonicalize()
-        .map_err(|e| format!("the vault folder {} cannot be read: {e}", vault.display()))?;
+    let vault = vault.canonicalize().map_err(|e| {
+        format!(
+            "the vault folder {} cannot be read: {}",
+            vault.display(),
+            io_reason(&e)
+        )
+    })?;
     let rel = Path::new(rel.trim());
     let is_md = rel
         .extension()
@@ -520,8 +550,9 @@ pub fn read_note(path: &Path) -> Result<Option<String>, String> {
             .map_err(|_| format!("the daily note {} is not UTF-8 text", path.display())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!(
-            "the daily note {} cannot be read: {e}",
-            path.display()
+            "the daily note {} cannot be read: {}",
+            path.display(),
+            io_reason(&e)
         )),
     }
 }
@@ -541,8 +572,13 @@ pub fn write_note_cas(
     let dir = path
         .parent()
         .ok_or_else(|| format!("the daily note {} has no folder", path.display()))?;
-    std::fs::create_dir_all(dir)
-        .map_err(|e| format!("the folder {} cannot be made: {e}", dir.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| {
+        format!(
+            "the folder {} cannot be made: {}",
+            dir.display(),
+            io_reason(&e)
+        )
+    })?;
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -557,11 +593,17 @@ pub fn write_note_cas(
     ));
     if let Err(e) = std::fs::write(&tmp, text) {
         let _ = std::fs::remove_file(&tmp);
-        return Err(format!("the daily note cannot be written: {e}"));
+        return Err(format!(
+            "the daily note cannot be written: {}",
+            io_reason(&e)
+        ));
     }
     if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
-        return Err(format!("the daily note cannot be written: {e}"));
+        return Err(format!(
+            "the daily note cannot be written: {}",
+            io_reason(&e)
+        ));
     }
     Ok(None)
 }
@@ -665,6 +707,19 @@ mod daily_note_tests {
                 code: Some(0),
             })
         }
+    }
+
+    #[test]
+    fn a_permission_refusal_on_macos_says_where_to_allow_it() {
+        let eperm = std::io::Error::from_raw_os_error(1);
+        let text = permission_reason(&eperm, "macos");
+        assert!(text.contains("Privacy & Security"), "{text}");
+        assert!(text.contains("Full Disk Access"), "{text}");
+        let linux = permission_reason(&eperm, "linux");
+        assert!(linux.contains("no permission"), "{linux}");
+        assert!(!linux.contains("Privacy"), "{linux}");
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(permission_reason(&missing, "macos"), missing.to_string());
     }
 
     #[test]
