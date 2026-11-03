@@ -24,6 +24,8 @@ import { mergeNote } from "@/services/note/merge";
 const SAVE_AFTER_MS = 500;
 const READ_AFTER_MS = 60_000;
 const POLL_MS = 30_000;
+/** A save reaches the vault's file this long after it, so typing shows in Obsidian within seconds. */
+const SYNC_AFTER_MS = 2_000;
 
 export function useNoteEditor(
   date: string,
@@ -44,6 +46,9 @@ export function useNoteEditor(
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncing = useRef(false);
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The latest `refresh`, for a sync scheduled from a save (declared before it). */
+  const refreshRef = useRef<(launch?: boolean) => Promise<void>>(async () => undefined);
   /** The day the text on screen belongs to, so leaving a day saves to that day. */
   const shownFor = useRef<{ date: string; editable: boolean } | null>(null);
 
@@ -76,6 +81,14 @@ export function useNoteEditor(
     const t = current.current;
     if (!owner?.editable || t === null || t === saved.current) return;
     const d = await run(Effect.flatMap(DailyNote, (n) => n.save(owner.date, t, saved.current)));
+    // What was saved goes to the vault's file shortly, not only at the next poll.
+    if (live.current.synced) {
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+      syncTimer.current = setTimeout(() => {
+        syncTimer.current = null;
+        void refreshRef.current(false);
+      }, SYNC_AFTER_MS);
+    }
     if (shownFor.current !== owner) return;
     // The stored note changed under the page: the merge is what was saved.
     if (adopt(d.body, t)) await flush();
@@ -127,6 +140,7 @@ export function useNoteEditor(
     },
     [flush, adopt, scheduleSave],
   );
+  refreshRef.current = refresh;
 
   // Load the day; leaving it saves what is unsaved.
   useEffect(() => {
@@ -146,7 +160,17 @@ export function useNoteEditor(
       .catch((e) => toastError(e));
     return () => {
       alive = false;
-      void flush().catch(() => undefined);
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+      syncTimer.current = null;
+      // Leaving the day: save what is unsaved, then let the vault's file catch up.
+      const wasSynced = live.current.synced && live.current.editable;
+      void flush()
+        .then(() =>
+          wasSynced
+            ? run(Effect.flatMap(DailyNote, (n) => n.sync({ launch: false }))).then(() => undefined)
+            : undefined,
+        )
+        .catch(() => undefined);
       if (readTimer.current) clearTimeout(readTimer.current);
       readTimer.current = null;
     };

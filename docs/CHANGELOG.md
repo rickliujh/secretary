@@ -1,5 +1,11 @@
 # Changelog
 
+## Note sync after typing (2026-11-03)
+
+- The daily note page syncs with the vault's file about 2 s after each save and
+  once more when the page is left, instead of only at the 30 s poll, on focus
+  and at the passes. Typing on the page now shows in Obsidian within seconds.
+
 ## v0.2.0 (2026-11-03)
 
 Everything after v0.1.0 below: the ticket Edit dialog with points, sprint, epic
