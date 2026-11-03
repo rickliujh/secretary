@@ -205,6 +205,26 @@ export const EVAL_CASES: EvalCase[] = [
     single: true,
   },
   {
+    // An epic and its first step are two tickets: the step is a story under the
+    // epic, not the epic's description (prompt version 16, D64).
+    name: "an epic with its first step gets a story under it",
+    source: "teams",
+    text: "We need to migrate the merchant SDK to the international plan. Create an epic for that; the first step is to work out the process and where to start.",
+    expect: {
+      required: [{ kind: "create_issue", fields: { issueType: "Epic", projectKey: "PAY" } }],
+      anyOf: [
+        [
+          { kind: "create_issue", target: "$new:1", fields: { issueType: "Story" } },
+          { kind: "create_issue", target: "$new:1", fields: { issueType: "Task" } },
+          { kind: "create_issue", target: "$new:2", fields: { issueType: "Story" } },
+          { kind: "create_issue", target: "$new:2", fields: { issueType: "Task" } },
+        ],
+      ],
+      forbiddenKinds: ["add_comment", "needs_clarification"],
+    },
+    single: true,
+  },
+  {
     name: "a rule for the future",
     source: "typed",
     text: "From now on, anything about refunds belongs under the billing migration epic PAY-1.",

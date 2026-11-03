@@ -80,8 +80,8 @@ const answer = (...proposals: Record<string, unknown>[]): ItemOutput => ({
 });
 
 describe("the work block", () => {
-  test("prompt version 15", () => {
-    expect(CLASSIFY_PROMPT_VERSION).toBe(15);
+  test("prompt version 15 or later", () => {
+    expect(CLASSIFY_PROMPT_VERSION).toBeGreaterThanOrEqual(15);
   });
 
   test("rendered as the user's work before the candidates, one paragraph per item", () => {
