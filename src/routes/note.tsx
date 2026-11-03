@@ -2,25 +2,36 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { BookOpenCheck, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { toastError } from "@/app/errors";
 import { useSettings } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
+import { useInvalidateAfterDecision } from "@/components/inbox/use-inbox";
+import { type NoteCardsData, threadOf } from "@/components/note/block-marks";
+import { MENU_SHORTCUT } from "@/components/note/block-strip";
+import { SlotStore } from "@/components/note/cards-extension";
+import { CardsLayer } from "@/components/note/cards-layer";
+import { NoteEditor } from "@/components/note/note-editor";
+import { ThreadSheet } from "@/components/note/thread-sheet";
 import { useNoteEditor } from "@/components/note/use-note";
 import { PageHeader } from "@/components/page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { isRealDate, localDate } from "@/lib/dates";
 import { relativeTime, shortDate } from "@/lib/time";
 import { DailyNote, type SyncStatus } from "@/services/note";
+import { blocksOf, stripWaits, threadSummaries } from "@/services/note/cards";
 import { dayBefore } from "@/services/note/queries";
 import { describeRead } from "@/services/note/read";
 
 export const Route = createFileRoute("/note")({
-  validateSearch: z.object({ date: z.string().optional() }),
+  validateSearch: z.object({
+    date: z.string().optional(),
+    /** A conversation of the note, open in the sheet (D67). */
+    thread: z.string().optional(),
+  }),
   component: NotePage,
 });
 
@@ -47,10 +58,13 @@ function syncLine(vaultName: string | null, status: SyncStatus | null): string {
  * user types. Earlier days are read-only. With a vault chosen in Settings >
  * Secretary, the vault's own daily note is the file of record. The secretary
  * reads what is new at each work pass, a minute after typing stops, and on
- * Read now; the line under the note says what the last reading did.
+ * Read now; the line under the note says what the last reading did. Each
+ * read block carries a mark in the margin, a block that led to a conversation
+ * a strip under it, and the conversation opens in a sheet on the page (D67).
+ * Showing the page makes no model call; only Ask and the readings do.
  */
 function NotePage() {
-  const { date: asked } = Route.useSearch();
+  const { date: asked, thread: openThread } = Route.useSearch();
   const navigate = useNavigate({ from: "/note" });
   const today = localDate();
   const date = asked && isRealDate(asked) && asked < today ? asked : today;
@@ -74,6 +88,66 @@ function NotePage() {
     onError: (e) => toastError(e),
   });
   const go = (d: string) => void navigate({ search: { date: d === today ? undefined : d } });
+
+  // What the reading did with the day's blocks, and what their threads hold (D67).
+  const blocks = useQuery({
+    queryKey: queryKeys.noteBlocks(date),
+    queryFn: ({ signal }) => run(blocksOf(date), signal),
+  });
+  const threadIds = useMemo(
+    () => [...new Set((blocks.data ?? []).map(threadOf).filter((id): id is string => !!id))].sort(),
+    [blocks.data],
+  );
+  const threads = useQuery({
+    queryKey: queryKeys.noteThreads(threadIds),
+    queryFn: ({ signal }) => run(threadSummaries(threadIds), signal),
+    enabled: threadIds.length > 0,
+    // A new thread on the page keeps the other strips while the summaries load.
+    placeholderData: (previous) => previous,
+  });
+  const privateHeading = cfg?.privateHeading ?? "Private";
+  const byThread = useMemo(
+    () => new Map((threads.data ?? []).map((t) => [t.id, t])),
+    [threads.data],
+  );
+  const cards = useMemo<NoteCardsData>(
+    () => ({
+      privateHeading,
+      rows: new Map((blocks.data ?? []).map((b) => [b.hash, b])),
+      waiting: new Set([...byThread.values()].filter(stripWaits).map((t) => t.id)),
+    }),
+    [privateHeading, blocks.data, byThread],
+  );
+  // The editor's nodes for marks and strips; the app's components go in by portal.
+  const [slots] = useState(() => new SlotStore());
+  const openSheet = useCallback(
+    (id: string | null) =>
+      void navigate({ search: (prev) => ({ ...prev, thread: id ?? undefined }) }),
+    [navigate],
+  );
+  const openThreadSheet = useCallback((id: string) => openSheet(id), [openSheet]);
+  const invalidate = useInvalidateAfterDecision();
+  const flush = useRef(editor.flush);
+  flush.current = editor.flush;
+  const ask = useMutation({
+    mutationFn: async (hash: string) => {
+      // The stored note is what Ask reads: save what is on screen first.
+      if (editable) await flush.current();
+      return run(Effect.flatMap(DailyNote, (n) => n.ask(date, hash)));
+    },
+    onSuccess: (r) => openSheet(r.inboxItemId),
+    onError: (e) => toastError(e),
+    onSettled: () => invalidate(),
+  });
+  // One Ask at a time: the menus offer none while one runs.
+  const askMutate = ask.mutate;
+  const askingHash = ask.isPending ? (ask.variables ?? null) : null;
+  const askBlock = useCallback(
+    (hash: string) => {
+      if (!askingHash) askMutate(hash);
+    },
+    [askMutate, askingHash],
+  );
 
   return (
     <div className="mx-auto flex h-full max-w-4xl flex-col gap-3">
@@ -142,9 +216,10 @@ function NotePage() {
       {editor.text === null ? (
         <Loader2 className="m-6 animate-spin text-muted-foreground" aria-label="Loading the note" />
       ) : (
-        <Textarea
-          aria-label={`Note for ${date}`}
-          className="min-h-[50vh] flex-1 font-mono"
+        <NoteEditor
+          key={date}
+          label={`Note for ${date}`}
+          className="flex-1"
           value={editor.text}
           readOnly={!editable}
           placeholder={
@@ -152,9 +227,23 @@ function NotePage() {
               ? "Write anything: what happened, what you promised, what you are waiting on. A line under a heading named Private is never read by a model."
               : "Nothing was written that day."
           }
-          onChange={(e) => editor.onChange(e.target.value)}
+          onChange={editor.onChange}
+          cards={cards}
+          slots={slots}
         />
       )}
+      <CardsLayer
+        slots={slots}
+        threads={byThread}
+        onOpen={openThreadSheet}
+        onAsk={askBlock}
+        askingHash={askingHash}
+      />
+      <p className="text-xs text-muted-foreground">
+        The mark beside a line says what the secretary did with it; {MENU_SHORTCUT} on a line opens
+        its menu.
+      </p>
+      <ThreadSheet id={openThread ?? null} onClose={() => openSheet(null)} />
       {editable && (
         <p className="text-sm text-muted-foreground">
           {!cfg?.enabled ? (

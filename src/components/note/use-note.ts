@@ -198,5 +198,7 @@ export function useNoteEditor(
     dismissConflict: () => setConflict(false),
     readNow,
     refresh,
+    /** Saves what is unsaved now, so the stored note is what the page shows (D67's Ask). */
+    flush,
   };
 }

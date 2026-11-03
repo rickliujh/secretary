@@ -27,6 +27,8 @@ const scheduler = new PassScheduler(async () => {
       if (r.created || r.attached || r.calls || r.asked || r.offered || r.returned) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
         void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+        // The note's strips say what its threads hold (D67).
+        void queryClient.invalidateQueries({ queryKey: queryKeys.note });
       }
     } catch (e) {
       logger.warn("Work pass failed", e);
@@ -47,6 +49,7 @@ async function returnParkedWhileOff() {
     if (r.returned) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
       void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.note });
     }
   } catch (e) {
     logger.warn("Returning parked threads failed", e);
@@ -91,6 +94,7 @@ export function runDayEndNow(trigger: "button" | "time" = "button"): Promise<Day
     if (!r.skipped) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
       void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.note });
     }
     return r;
   });

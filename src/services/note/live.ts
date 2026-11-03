@@ -11,6 +11,7 @@ import type { Intake } from "@/services/intake";
 import type { Llm } from "@/services/llm";
 import type { Settings } from "@/services/settings";
 import { DailyNote, type DayNote, NoteError, type NoteFile, type ReadTrigger } from ".";
+import { askBlock } from "./ask";
 import { mergeNote } from "./merge";
 import { loadLastRead, loadRow, saveBody } from "./queries";
 import { readNote } from "./read";
@@ -86,7 +87,19 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  return DailyNote.of({ load, save, append, sync, read, lastRead: withDb(loadLastRead) });
+  // One block is never sent by a reading and an Ask at once.
+  const ask = (date: string, hash: string) =>
+    reading.withPermits(1)(deps(withDb(askBlock(date, hash))));
+
+  return DailyNote.of({
+    load,
+    save,
+    append,
+    sync,
+    read,
+    lastRead: withDb(loadLastRead),
+    ask,
+  });
 });
 
 export const DailyNoteLive = Layer.effect(DailyNote, make);

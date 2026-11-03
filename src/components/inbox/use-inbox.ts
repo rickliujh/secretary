@@ -28,6 +28,8 @@ const DECISION_KEYS = [
   queryKeys.dependencies,
   queryKeys.drafts,
   queryKeys.memories,
+  // The note's marks and strips (D67) say what its threads hold.
+  queryKeys.note,
 ];
 
 /** What a saved edit changes: the thread and the sprint fits that count its creates. */

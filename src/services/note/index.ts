@@ -8,14 +8,18 @@
  */
 import { Context, Data, type Effect } from "effect";
 import type { DbError } from "@/services/db";
+import type { IntakeError } from "@/services/intake";
+import type { LlmError } from "@/services/llm";
 
 export class NoteError extends Data.TaggedError("NoteError")<{
   /**
    * read_only: an earlier day. unavailable: the vault's note could not be
    * read or written (the message says why). not_running: Obsidian is not
-   * running and the caller asked not to start it.
+   * running and the caller asked not to start it. not_found: Ask named a
+   * block that is no longer in the note. private: Ask named a private block,
+   * which is never sent (D67).
    */
-  readonly kind: "read_only" | "unavailable" | "not_running";
+  readonly kind: "read_only" | "unavailable" | "not_running" | "not_found" | "private";
   readonly message: string;
 }> {}
 
@@ -131,5 +135,14 @@ export interface DailyNoteShape {
   readonly read: (trigger: ReadTrigger) => Effect.Effect<ReadResult, DbError>;
   /** What the last reading did, if any. */
   readonly lastRead: Effect.Effect<ReadResult | null, DbError>;
+  /**
+   * "Ask the secretary about this" (D67): a conversation on the block of that
+   * day's stored note with this hash, routed as the reading routes a new block
+   * (D66); the block is recorded acted. Takes turns with the readings.
+   */
+  readonly ask: (
+    date: string,
+    hash: string,
+  ) => Effect.Effect<{ inboxItemId: string }, NoteError | IntakeError | LlmError | DbError>;
 }
 export class DailyNote extends Context.Tag("DailyNote")<DailyNote, DailyNoteShape>() {}

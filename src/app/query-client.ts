@@ -120,4 +120,8 @@ export const queryKeys = {
   note: ["note"] as const,
   noteDay: (date: string) => ["note", "day", date] as const,
   noteLastRead: ["note", "last-read"] as const,
+  /** A day's read blocks, for the marks and strips (D67); under "note" so readings refresh them. */
+  noteBlocks: (date: string) => ["note", "blocks", date] as const,
+  /** The strips' thread summaries (D67); under "note", which decisions and replies refresh too. */
+  noteThreads: (ids: readonly string[]) => ["note", "threads", ...ids] as const,
 };

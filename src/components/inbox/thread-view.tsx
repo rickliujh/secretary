@@ -405,9 +405,12 @@ export function ThreadView({ id }: { id: string }) {
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           {noteDate ? (
-            // A block of the daily note (D65): back to the note it came from.
+            // A block of the daily note (D65): back to its line, conversation open (D67).
             <Badge variant="outline" asChild>
-              <Link to="/note" search={{ date: noteDate === localDate() ? undefined : noteDate }}>
+              <Link
+                to="/note"
+                search={{ date: noteDate === localDate() ? undefined : noteDate, thread: id }}
+              >
                 Note · {shortDate(noteDate)}
               </Link>
             </Badge>

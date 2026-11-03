@@ -22,7 +22,7 @@ export function noteTyped() {
 export function noteChanged(r?: ReadResult) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.note });
   if (!r) return;
-  if (r.cards || r.revised || r.closed)
+  if (r.cards || r.revised || r.continued || r.closed)
     void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
   if (r.notes.length) void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
 }
