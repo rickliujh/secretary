@@ -32,7 +32,11 @@ const transport = new SecretaryTransport(
     requestWorkPass();
     void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
   },
-  () => void queryClient.invalidateQueries({ queryKey: queryKeys.inbox }),
+  () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+    // A thread the chat made or changed may be one of the note's (D67).
+    void queryClient.invalidateQueries({ queryKey: queryKeys.note });
+  },
 );
 const chats = new Map<string, Chat<UIMessage>>();
 

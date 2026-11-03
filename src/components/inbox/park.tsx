@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils";
 import { parkThread, type ThreadAbout, threadAbout, unparkThread } from "@/services/work/park";
 
 /** Park and Bring back refresh the Inbox, Today (under tickets) and the Work tab's timeline. */
-const PARK_KEYS = [queryKeys.inbox, queryKeys.tickets];
+const PARK_KEYS = [queryKeys.inbox, queryKeys.tickets, queryKeys.note];
 
 /** Whether the Inbox triages against the current item (Settings > Secretary). */
 export function useParkInput() {

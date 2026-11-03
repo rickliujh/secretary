@@ -102,9 +102,11 @@ export function describeError(error: unknown): Described {
         ? { title: "Obsidian isn't reachable", description, settingsTab: "sources" }
         : { title: "Note not found", description };
     case "NoteError":
-      return error.kind === "read_only"
-        ? { title: "Only today's note can be edited", description }
-        : { title: "The daily note isn't reachable", description, settingsTab: "sources" };
+      if (error.kind === "read_only")
+        return { title: "Only today's note can be edited", description };
+      if (error.kind === "not_found") return { title: "That line has changed", description };
+      if (error.kind === "private") return { title: "That line is private", description };
+      return { title: "The daily note isn't reachable", description, settingsTab: "sources" };
     case "DbError":
       return { title: "Database error", description, settingsTab: "data" };
     default:

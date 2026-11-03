@@ -24,6 +24,12 @@ export type NoteBlock = {
   uncheckedHash: string | null;
   /** Under the private heading: never sent to a model. */
   private: boolean;
+  /**
+   * Its first and last line in the body, 0-based (D67): a paragraph or list
+   * item spans its lines, a fenced block its fences.
+   */
+  fromLine: number;
+  toLine: number;
 };
 
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
@@ -169,7 +175,13 @@ export function withoutPrivate(body: string, privateHeading = "Private"): string
     .join("\n");
 }
 
-type RawBlock = { lines: string[]; section: string | null; private: boolean };
+type RawBlock = {
+  lines: string[];
+  section: string | null;
+  private: boolean;
+  fromLine: number;
+  toLine: number;
+};
 
 export function splitBlocks(body: string, privateHeading = "Private"): NoteBlock[] {
   const raw: RawBlock[] = [];
@@ -178,23 +190,34 @@ export function splitBlocks(body: string, privateHeading = "Private"): NoteBlock
     if (at.current) raw.push(at.current);
     at.current = null;
   };
-  const open = (l: ScannedLine) => {
-    at.current = { lines: [l.line], section: l.section, private: l.private };
+  const open = (l: ScannedLine, i: number) => {
+    at.current = {
+      lines: [l.line],
+      section: l.section,
+      private: l.private,
+      fromLine: i,
+      toLine: i,
+    };
+  };
+  const add = (l: ScannedLine, i: number) => {
+    if (!at.current) return;
+    at.current.lines.push(l.line);
+    at.current.toLine = i;
   };
 
-  for (const l of scanLines(body, privateHeading)) {
+  for (const [i, l] of scanLines(body, privateHeading).entries()) {
     switch (l.kind) {
       case "frontmatter":
         break;
       case "fence-open":
         close();
-        open(l);
+        open(l, i);
         break;
       case "fenced":
-        at.current?.lines.push(l.line);
+        add(l, i);
         break;
       case "fence-close":
-        at.current?.lines.push(l.line);
+        add(l, i);
         close();
         break;
       case "heading":
@@ -203,11 +226,11 @@ export function splitBlocks(body: string, privateHeading = "Private"): NoteBlock
         break;
       case "item":
         close();
-        open(l);
+        open(l, i);
         break;
       default:
-        if (at.current) at.current.lines.push(l.line);
-        else open(l);
+        if (at.current) add(l, i);
+        else open(l, i);
     }
   }
   close();
@@ -228,6 +251,8 @@ export function splitBlocks(body: string, privateHeading = "Private"): NoteBlock
       checked,
       uncheckedHash: box ? hashText(norm.replace(CHECKBOX, (m) => m.replace("[x]", "[ ]"))) : null,
       private: b.private,
+      fromLine: b.fromLine,
+      toLine: b.toLine,
     });
   }
   return out;

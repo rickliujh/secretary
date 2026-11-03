@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Note page: hover cards on blocks (mockup)</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #18181b; --muted: #71717a; --muted-bg: #f4f4f5; --border: #e4e4e7;
+    --card: #ffffff; --shadow: 0 10px 30px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.08);
+    --accent: #2563eb; --accent-bg: #eff6ff; --ok: #16a34a; --ok-bg: #f0fdf4; --warn: #d97706; --warn-bg: #fffbeb;
+    --bad: #dc2626; --bad-bg: #fef2f2; --note: #7c3aed; --note-bg: #f5f3ff; --hover-row: #fafafa;
+    --font: -apple-system, "Inter", "Segoe UI", system-ui, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  [data-theme="dark"] {
+    --bg: #09090b; --fg: #fafafa; --muted: #a1a1aa; --muted-bg: #18181b; --border: #27272a;
+    --card: #111113; --shadow: 0 10px 30px rgba(0,0,0,.6), 0 1px 3px rgba(0,0,0,.5);
+    --accent: #60a5fa; --accent-bg: #172554; --ok: #4ade80; --ok-bg: #052e16; --warn: #fbbf24; --warn-bg: #451a03;
+    --bad: #f87171; --bad-bg: #450a0a; --note: #a78bfa; --note-bg: #2e1065; --hover-row: #121214;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); }
+  a { color: var(--accent); text-decoration: none; }
+  .shell { display: grid; grid-template-columns: 200px 1fr; min-height: 100vh; }
+  .nav { border-right: 1px solid var(--border); padding: 16px 12px; color: var(--muted); font-size: 13px; }
+  .nav .brand { color: var(--fg); font-weight: 600; margin-bottom: 14px; padding-left: 8px; }
+  .nav div.item { padding: 6px 8px; border-radius: 6px; }
+  .nav div.item.on { background: var(--muted-bg); color: var(--fg); }
+  main { padding: 28px 40px 80px; }
+  .page { max-width: 1040px; }
+  .review { border: 1px solid var(--border); background: var(--muted-bg); border-radius: 10px; padding: 14px 18px; margin-bottom: 26px; font-size: 13px; }
+  .review h1 { font-size: 15px; margin: 0 0 6px; }
+  .review ul { margin: 6px 0 0; padding-left: 18px; }
+  .review li { margin: 2px 0; }
+  .review .legend { display: flex; flex-wrap: wrap; gap: 14px 22px; margin-top: 10px; }
+  .review .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  button { font: inherit; cursor: pointer; }
+  .btn { border: 1px solid var(--border); background: var(--card); color: var(--fg); border-radius: 6px; padding: 4px 10px; font-size: 12.5px; }
+  .btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+  .btn:hover { filter: brightness(.96); }
+
+  /* page header, as the Note page has it */
+  .head { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+  .head h2 { font-size: 18px; margin: 0; }
+  .head .arrows { display: flex; gap: 2px; }
+  .sync { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .sync .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 6px; vertical-align: 1px; }
+
+  /* the note */
+  .note { max-width: 680px; font-size: 15px; line-height: 1.6; }
+  .block { position: relative; padding: 2px 10px 2px 28px; margin-left: -28px; border-radius: 6px; }
+  .block:hover, .block.pinned { background: var(--hover-row); }
+  .block h3 { font-size: 17px; margin: 14px 0 2px; }
+  .block p { margin: 0; white-space: pre-wrap; }
+  .block.muted p { color: var(--muted); }
+  .caret { border-left: 1.5px solid var(--fg); animation: blink 1s steps(2) infinite; margin-left: 1px; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* the indicator: small, in the margin, quiet until hovered */
+  .ind { position: absolute; left: 6px; top: 7px; width: 14px; height: 14px; display: grid; place-items: center; border-radius: 50%; font-size: 10px; line-height: 1; font-weight: 700; opacity: .9; }
+  .ind svg { width: 12px; height: 12px; }
+  .ind.waiting { background: var(--accent); color: #fff; }           /* cards waiting */
+  .ind.question { background: var(--warn); color: #fff; }           /* a question for you */
+  .ind.done { color: var(--ok); }                                   /* approved, done */
+  .ind.noted { color: var(--note); }                                /* noted on a work item */
+  .ind.failed { background: var(--bad); color: #fff; }
+  .ind.reading { border: 1.5px solid var(--muted); animation: pulse 1.6s ease-in-out infinite; }
+  .ind.ghost, .ind.private { opacity: 0; color: var(--muted); }    /* nothing to do: shown only on hover */
+  .block:hover .ind.ghost, .block.pinned .ind.ghost, .block:hover .ind.private, .block.pinned .ind.private { opacity: .7; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .ind .badge { position: absolute; top: -6px; right: -7px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--fg); color: var(--bg); font-size: 9.5px; display: grid; place-items: center; }
+
+  /* the hover card, anchored to the right of the block like an inline comment */
+  .card { position: absolute; left: calc(100% + 18px); top: -6px; width: 360px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 12px 14px; z-index: 5; font-size: 13px; line-height: 1.45;
+          opacity: 0; transform: translateX(-6px); pointer-events: none; transition: opacity .12s ease, transform .12s ease; }
+  .block:hover .card, .block.pinned .card { opacity: 1; transform: none; pointer-events: auto; transition-delay: .18s; }
+  .block.pinned .card { transition-delay: 0s; }
+  .card::before { content: ""; position: absolute; left: -7px; top: 14px; width: 12px; height: 12px; background: var(--card); border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: rotate(45deg); }
+  .card .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
+  .card .top b { color: var(--fg); font-weight: 600; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+  .pill.waiting { background: var(--accent-bg); color: var(--accent); }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.bad { background: var(--bad-bg); color: var(--bad); }
+  .pill.note { background: var(--note-bg); color: var(--note); }
+  .pill.muted { background: var(--muted-bg); color: var(--muted); }
+  .action { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+  .action .kind { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; font-weight: 600; }
+  .action .what { margin: 2px 0 6px; }
+  .action .what code { font: 12px var(--mono); background: var(--muted-bg); padding: 1px 5px; border-radius: 4px; }
+  .action .row { display: flex; gap: 6px; align-items: center; }
+  .action .row .sp { flex: 1; }
+  .reply { display: flex; gap: 6px; margin-top: 10px; }
+  .reply input { flex: 1; font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
+  .reply input::placeholder { color: var(--muted); }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .foot kbd { font: 11px var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+  .q { margin: 6px 0 8px; }
+  .choices { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 22px; max-width: 680px; }
+  .section-note { color: var(--muted); font-size: 12px; margin: 26px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+  @media (max-width: 1100px) { .card { left: 28px; top: 100%; width: min(360px, 90vw); } .card::before { display: none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="nav">
+    <div class="brand">Secretary</div>
+    <div class="item">Today</div>
+    <div class="item on">Note</div>
+    <div class="item">Inbox <span style="float:right">3</span></div>
+    <div class="item">Waiting</div>
+    <div class="item">Tickets</div>
+    <div class="item">Sprint</div>
+    <div class="item">People</div>
+    <div class="item">Chat</div>
+  </aside>
+  <main>
+    <div class="page">
+      <div class="review">
+        <h1>Mockup for review: cards on the note's blocks, hover style</h1>
+        Hover any line of the note below. The idea: the text stays clean, a small mark in the margin says what the secretary did with the line, and the card with the suggested actions appears beside the line while you hover, like an inline comment in Confluence. Click a mark to pin its card; click again to unpin. Nothing here is live.
+        <div class="legend">
+          <span><i class="ind waiting" style="position:static">2</i> cards waiting (the number)</span>
+          <span><i class="ind question" style="position:static">?</i> a question for you</span>
+          <span><i class="ind done" style="position:static"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 8.5l3 3 7-7"/></svg></i> done, approved</span>
+          <span><i class="ind noted" style="position:static"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 2h8l2 2v10H3z" opacity=".25"/><path d="M5 7h6M5 10h6" stroke="currentColor" stroke-width="1.5"/></svg></i> noted on a work item</span>
+          <span><i class="ind reading" style="position:static"></i> will be read shortly</span>
+          <span><i class="ind failed" style="position:static">!</i> did not go through</span>
+          <span><i class="ind ghost" style="position:static;opacity:.7">·</i> nothing to do (shown on hover only)</span>
+        </div>
+        <div class="toolbar">
+          <button class="btn" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? '' : 'dark'">Light / dark</button>
+          <button class="btn ghost" onclick="document.querySelectorAll('.block.pinned').forEach(b => b.classList.remove('pinned'))">Unpin all</button>
+          <span style="color:var(--muted)">Keyboard: <kbd style="font:11px var(--mono);border:1px solid var(--border);border-radius:4px;padding:0 4px">Ctrl .</kbd> opens the card of the line at the cursor</span>
+        </div>
+      </div>
+
+      <div class="head">
+        <div class="arrows"><button class="btn ghost">‹</button><button class="btn ghost">›</button></div>
+        <h2>Today · Nov 3</h2>
+        <span style="flex:1"></span>
+        <button class="btn">Read now</button>
+      </div>
+      <div class="sync"><span class="dot"></span>In sync with Work vault · read 2 min ago: 2 cards, 1 note on Renew the payment gateway cert</div>
+
+      <div class="note">
+
+        <div class="block"><h3>Qoder migration</h3></div>
+
+        <div class="block">
+          <span class="ind waiting" onclick="pin(this)">2</span>
+          <p>We need to migrate QoderCN to the international plan, create an epic for that, first step is to figure out the process and where to start.</p>
+          <div class="card">
+            <div class="top"><b>From this line</b><span class="pill waiting">2 cards waiting</span></div>
+            <div class="action">
+              <div class="kind">Create Epic · PAY</div>
+              <div class="what">Migrate QoderCN to the international plan</div>
+              <div class="row"><button class="btn primary">Approve</button><button class="btn">Edit</button><button class="btn ghost">Reject</button></div>
+            </div>
+            <div class="action">
+              <div class="kind">Create Story · under the new epic</div>
+              <div class="what">Work out the migration process and where to start</div>
+              <div class="row"><button class="btn primary">Approve</button><button class="btn">Edit</button><button class="btn ghost">Reject</button></div>
+            </div>
+            <div class="row" style="display:flex;gap:6px;margin-top:4px"><button class="btn">Approve both</button></div>
+            <div class="reply"><input placeholder="Tell the secretary… (e.g. make the story a Task, assign to me)"><button class="btn">Send</button></div>
+            <div class="foot"><span>Note thread · 1 min ago</span><a href="#">Open in Inbox ↗</a></div>
+          </div>
+        </div>
+
+        <div class="block">
+          <span class="ind done" onclick="pin(this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 8.5l3 3 7-7"/></svg></span>
+          <p>Talked to Priya: the process is the partner portal form, about two weeks end to end.</p>
+          <div class="card">
+            <div class="top"><b>Added to the Qoder migration conversation</b><span class="pill ok">approved</span></div>
+            <div class="action">
+              <div class="kind">Comment on <code>PAY-40</code> · done</div>
+              <div class="what">Process: partner portal form, about two weeks end to end (per Priya).</div>
+              <div class="row"><span class="sp"></span><button class="btn ghost">Undo</button></div>
+            </div>
+            <div class="reply"><input placeholder="Tell the secretary…"><button class="btn">Send</button></div>
+            <div class="foot"><span>Same thread as the line above</span><a href="#">Open in Inbox ↗</a></div>
+          </div>
+        </div>
+
+        <div class="block"><h3>Today</h3></div>
+
+        <div class="block">
+          <span class="ind done" onclick="pin(this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 8.5l3 3 7-7"/></svg></span>
+          <p>- [ ] send Dana the Q3 numbers</p>
+          <div class="card">
+            <div class="top"><b>Small ask</b><span class="pill ok">ticket created</span></div>
+            <div class="action">
+              <div class="kind">Created <code>ASK-12</code> · Send Dana the Q3 numbers</div>
+              <div class="what" style="color:var(--muted)">Tick the box in the note when it is done and I will propose closing it.</div>
+              <div class="row"><button class="btn">Open ticket</button><span class="sp"></span><button class="btn ghost">Undo</button></div>
+            </div>
+            <div class="foot"><span>Note thread · 09:14</span><a href="#">Open in Inbox ↗</a></div>
+          </div>
+        </div>
+
+        <div class="block">
+          <span class="ind question" onclick="pin(this)">?</span>
+          <p>ask Tom about the firewall port for the ledger export</p>
+          <div class="card">
+            <div class="top"><b>One question before I act</b><span class="pill warn">needs you</span></div>
+            <div class="q">Is this a wait on Tom (I track it and remind you), or a task for you (a small ask ticket)?</div>
+            <div class="choices"><button class="btn">A wait on Tom</button><button class="btn">A task for me</button><button class="btn ghost">Neither, leave it</button></div>
+            <div class="reply"><input placeholder="Or answer in your own words…"><button class="btn">Send</button></div>
+            <div class="foot"><span>Note thread · 09:14</span><a href="#">Open in Inbox ↗</a></div>
+          </div>
+        </div>
+
+        <div class="block">
+          <span class="ind noted" onclick="pin(this)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 2h8l2 2v10H3z" opacity=".25"/><path d="M5 7h6M5 10h6" stroke="currentColor" stroke-width="1.5"/></svg></span>
+          <p>PAY-12 going well, halfway through the tests</p>
+          <div class="card">
+            <div class="top"><b>Noted on Renew the payment gateway cert</b><span class="pill note">context</span></div>
+            <div style="color:var(--muted)">Kept as your words on the work item's timeline; nothing to do. If something should happen, say so:</div>
+            <div class="reply"><input placeholder="e.g. move PAY-12 to In review"><button class="btn">Send</button></div>
+            <div class="foot"><span>Read 2 min ago</span><a href="#">Open work item ↗</a></div>
+          </div>
+        </div>
+
+        <div class="block muted">
+          <span class="ind ghost" onclick="pin(this)">·</span>
+          <p>Lunch with Mia</p>
+          <div class="card">
+            <div class="top"><b>Nothing for the secretary</b><span class="pill muted">left alone</span></div>
+            <div style="color:var(--muted)">Read 2 min ago. It will not be read again unless you change it.</div>
+            <div class="reply"><input placeholder="Ask the secretary about this line…"><button class="btn">Ask</button></div>
+          </div>
+        </div>
+
+        <div class="block">
+          <span class="ind failed" onclick="pin(this)">!</span>
+          <p>chase the Q3 cert renewal with Platform before Friday</p>
+          <div class="card">
+            <div class="top"><b>Did not go through</b><span class="pill bad">error</span></div>
+            <div style="color:var(--muted)">The model call timed out. Nothing was proposed.</div>
+            <div class="row" style="display:flex;gap:6px;margin-top:8px"><button class="btn primary">Try again</button><button class="btn ghost">Leave it</button></div>
+            <div class="foot"><span>09:16</span><a href="#">Open in Inbox ↗</a></div>
+          </div>
+        </div>
+
+        <div class="block">
+          <span class="ind reading" onclick="pin(this)"></span>
+          <p>Sarah says the cert is Friday now<span class="caret"></span></p>
+          <div class="card">
+            <div class="top"><b>Not read yet</b><span class="pill muted">in about a minute</span></div>
+            <div style="color:var(--muted)">I read new lines a minute after you stop typing, or now if you ask.</div>
+            <div class="row" style="display:flex;gap:6px;margin-top:8px"><button class="btn">Read this now</button></div>
+          </div>
+        </div>
+
+        <div class="block"><h3>Private</h3></div>
+
+        <div class="block muted">
+          <span class="ind private" onclick="pin(this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 016 0v2"/></svg></span>
+          <p>1:1 with my manager went badly, think about it over the weekend</p>
+          <div class="card">
+            <div class="top"><b>Private</b><span class="pill muted">never sent</span></div>
+            <div style="color:var(--muted)">Lines under the Private heading never reach a model. There is nothing to ask here; move the line out of the section if you want it read.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <p class="hint">What changes against the current PR #43: no strips between the lines, no gutter menus, no sheet by default. The indicator carries the state and a count; the card beside the line holds the suggested actions with Approve, Edit and Reject, a question's choices, a reply box that continues the same conversation, and a link to the full thread in the Inbox for the long cases. Pinning by click keeps a card open while you type elsewhere; Esc closes it.</p>
+
+      <div class="section-note">Open questions for you</div>
+      <ul class="hint" style="margin-top:0">
+        <li>Proportional font for the note (as here) or keep monospace as the page has now?</li>
+        <li>Should "nothing to do" lines show a faint dot always, or only on hover (as here)?</li>
+        <li>Card to the right on wide windows, below the line on narrow ones (as here), or always below the line?</li>
+        <li>Approve inside the card right away, or ask once more for ticket creates?</li>
+      </ul>
+    </div>
+  </main>
+</div>
+<script>
+  function pin(el) {
+    const b = el.closest('.block');
+    const was = b.classList.contains('pinned');
+    document.querySelectorAll('.block.pinned').forEach(x => x.classList.remove('pinned'));
+    if (!was) b.classList.add('pinned');
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.block.pinned').forEach(x => x.classList.remove('pinned')); });
+</script>
+</body>
+</html>

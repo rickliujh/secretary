@@ -8,9 +8,11 @@ import {
   issueRefs,
   MoveToSprint,
   PROPOSAL_LABELS,
+  type ProposalPayload,
   ProposalPayloadSchema,
   parsePayload,
   payloadChanges,
+  proposalLabel,
   resolveRefs,
   UpdateIssue,
 } from "./schema";
@@ -229,5 +231,38 @@ describe("parsePayload", () => {
   test("a value that no longer parses is returned as it is", () => {
     const broken = { kind: "create_issue", summary: "" };
     expect(parsePayload(broken)).toBe(broken as never);
+  });
+});
+
+describe("proposalLabel", () => {
+  const create = (issueType: string) =>
+    ProposalPayloadSchema.parse({
+      kind: "create_issue",
+      ref: "$new:1",
+      projectKey: "PAY",
+      issueType,
+      summary: "Migrate QoderCN",
+    });
+
+  test("a create names its issue type; without one, and for other kinds, the kind's label", () => {
+    expect(proposalLabel(create("Epic"))).toBe("Create Epic");
+    expect(proposalLabel(create("Story"))).toBe("Create Story");
+    expect(proposalLabel(create("Sub-task"))).toBe("Create Sub-task");
+    // A stored payload from before the type was required, or a blank one.
+    expect(proposalLabel({ ...create("Task"), issueType: "" } as ProposalPayload)).toBe(
+      "Create issue",
+    );
+    expect(proposalLabel({ ...create("Task"), issueType: "  " } as ProposalPayload)).toBe(
+      "Create issue",
+    );
+    expect(
+      proposalLabel(
+        ProposalPayloadSchema.parse({
+          kind: "transition_issue",
+          target: "PAY-1",
+          toStatus: "Done",
+        }),
+      ),
+    ).toBe("Move");
   });
 });

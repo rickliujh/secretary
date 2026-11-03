@@ -13,7 +13,14 @@ import { useAppMutation, useErrorToast } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { type AppServices, run } from "@/app/runtime";
 import { requestWorkPass } from "@/app/work";
-import { Intake, type ReplyInput, type TriageInput, type TriageResult } from "@/services/intake";
+import {
+  Intake,
+  type ReplyInput,
+  type Source,
+  type TriageInput,
+  type TriageResult,
+} from "@/services/intake";
+import { hasInput, type MessagePart } from "@/services/intake/thread";
 import { type ProposalPayload, Proposals } from "@/services/proposals";
 
 /**
@@ -28,6 +35,8 @@ const DECISION_KEYS = [
   queryKeys.dependencies,
   queryKeys.drafts,
   queryKeys.memories,
+  // The note's marks and cards (D67) say what its threads hold.
+  queryKeys.note,
 ];
 
 /** What a saved edit changes: the thread and the sprint fits that count its creates. */
@@ -178,6 +187,37 @@ export function useReply() {
     undefined,
     INTAKE_TURN_MUTATION,
   );
+}
+
+/**
+ * Replying in one thread as its view does (D22, D61): a typed reply answers
+ * the newest open question unless the user opted out (`skip`); pasted input
+ * starts new items instead; a choice answers its own question. The Inbox's
+ * thread and the note's cards (D67) share it.
+ */
+export function useThreadReply<P extends { id: string; kind: string; status: string }>(
+  inboxItemId: string,
+  proposals: readonly P[] | undefined,
+) {
+  const reply = useReply();
+  const [skipped, skip] = useState<string | null>(null);
+  const open = (proposals ?? [])
+    .filter((p) => p.kind === "needs_clarification" && p.status === "pending")
+    .at(-1);
+  const answering = open && open.id !== skipped ? open : null;
+  const send = (m: { parts: MessagePart[]; source?: Source }) => {
+    const withInput = hasInput(m.parts, true);
+    reply.mutate({
+      inboxItemId,
+      parts: m.parts,
+      source: withInput ? m.source : undefined,
+      answers: answering && !withInput ? answering.id : null,
+    });
+  };
+  /** A one-click answer: the choice, typed, as the reply to that question (D61). */
+  const choose = (proposalId: string, choice: string) =>
+    reply.mutate({ inboxItemId, parts: [{ type: "typed", text: choice }], answers: proposalId });
+  return { reply, answering, skip, send, choose };
 }
 
 /** A decision can partly apply before it fails, so views refresh either way. */

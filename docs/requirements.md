@@ -618,6 +618,27 @@ decides what is read and when. FR-20 is Phase 29.
   Whatever a block arrives as, the classify call is told which tickets were
   recently created on the user's approval and never creates one that a listed
   ticket already covers.
+- FR-20.7 (Must) Cards on the line. What the secretary did with a block is
+  shown at the block by a small mark in the margin (how many cards wait, a
+  question, done, noted on a work item, not read yet, failed, private; a line
+  with nothing to do shows a mark only when hovered). Hovering the line opens a
+  card beside it, as an inline comment does, with the suggested actions to
+  approve, edit or reject right away, a question's choices, what was done with
+  undo, and a box to continue the conversation; what is said there and what the
+  note's later edits say are one conversation. The user can ask the secretary
+  about any block that has no conversation from the same card. Showing the page
+  sends nothing to a model. The text itself stays clean: nothing is inserted
+  between the lines.
+- AC (Phase 31, against the mock Jira, service level; the look against
+  `docs/note-cards-mockup.html` by the user): after a reading, the block that
+  made a card carries the count 1 and its card shows the proposal; approving it
+  there executes it and the mark becomes done, and the Inbox agrees; a reply
+  typed in the card is a turn of the same thread the Inbox shows; a question's
+  choice answers it; Ask on a block the reading left alone makes a thread and the
+  mark, and editing that block afterwards revises that thread; a private block
+  offers no Ask; an earlier day shows its marks and cards with the text
+  read-only. The note's text is unchanged by the editor: typing, sync and the
+  reading work as in the Phase 29 and 30 ACs.
 - AC (Phase 30, against the mock Jira): a block that made an Epic and a Story,
   both approved, gives nothing at a second read of the unchanged note; editing
   that block gives new cards in the same thread, and the thread's classify

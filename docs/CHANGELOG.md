@@ -2600,3 +2600,132 @@ Known limits
   new created-epic case failed with 403 "Key limit exceeded"), so the new
   case and a regression check of version 17 are still to run.
 - Not verified in the running app.
+
+## Phase 31: Cards on the note's blocks (2026-11-03)
+
+A first build put a one-line strip under each block with a conversation, a
+menu on each gutter mark and the thread in a side sheet. After the visual
+review it was rebuilt to `docs/note-cards-mockup.html`: quiet marks in the
+margin and a card beside the hovered line, like an inline comment.
+
+Built
+- The Note page's editor is CodeMirror 6 (`@uiw/react-codemirror` 4.25 with
+  `@codemirror/lang-markdown` 6.5, `components/note/note-editor.tsx`): the
+  note's text byte for byte (lines split on "\n" only; Enter inserts "\n"
+  and Backspace deletes one character; pasted "\r\n" becomes "\n"; no
+  typing aid that changes text), line wrapping, the app's light or dark
+  theme, read-only for earlier days. Proportional type (the app's sans,
+  15 px, line height 1.6), headings a little larger, monospace inside
+  fenced code only. A sync or the chat's append reaches the editor as one
+  change over the common prefix and suffix (`doc-change.ts`), outside the
+  undo history, so the cursor and scroll stay. Save, sync and the reading
+  are unchanged.
+- The mark (`block-marks.ts`, `cards-extension.ts`): one small button in
+  the margin on each block's first line, drawn by CodeMirror: a blue count
+  of cards waiting, an amber "?" for a question, a green check when done,
+  a purple note mark when noted on a work item, a hollow pulsing dot when
+  not read yet, a red "!" when a turn or an approved card failed, a lock
+  for a private line, and for a line left alone a faint dot shown only
+  while the line is hovered. A block being edited keeps its mark (as not
+  read yet) and its card until the reading records the new words.
+- The card (`block-card.tsx`, `card-store.ts`, `card-content.ts`): one
+  Radix popover anchored at the hovered or pinned block's first line, to
+  the right of the text on wide windows and below the block on narrow
+  ones. It opens after about 180 ms of the pointer resting on the block
+  (never from typing), stays while the pointer is on the block or the
+  card, and closes about 150 ms after it left both; the hovered block's
+  lines get a faint background. Clicking the mark or Ctrl+. (Cmd+. on a
+  Mac) pins it; Esc, a click outside or another pin unpins; a pinned card
+  follows its block as lines above change. By state: waiting cards as
+  compact rows (kind and target, the summary, Approve, Edit, Reject;
+  Approve all for more than one), a question's choices, what was done with
+  ticket links and Undo, the error with Try again, "Nothing for the
+  secretary" or the work item's name with Ask, "Read this now" for a line
+  not read yet, "never sent" for a private line; a reply box that
+  continues the same thread, and Open in Inbox. Approve acts at once, as
+  in the Inbox. Small-ask Track rows and playbook bundles are the Inbox's
+  own rows.
+- The card reuses the Inbox's code: `useDecisions`, `useThreadReply` (new,
+  taken out of the thread view: send, answer the open question, a
+  choice), `ProposalEditor` (new, taken out of the proposal card: the edit
+  dialog with the sprint switch), `RevokeControl`, `SmallAskRow` and
+  `BundleCard`. Nothing in it calls Jira or a model.
+- Ask: `DailyNote.ask(date, hash)` (`services/note/ask.ts`) routes the
+  block as the reading does and otherwise starts a thread exactly as the
+  reading's act; the block is recorded acted, so later edits revise that
+  thread. One Ask at a time; the card shows the result.
+- `/note?thread=<id>` pins the card of that thread's block and scrolls to
+  it; the Inbox's "Note · <date>" badge links there. The parameter is
+  dropped once pinned, or when no block shows the thread 2 s after the
+  day's blocks loaded.
+- A proposal's label names a create's issue type: "Create Epic", "Create
+  Story" rather than "Create issue" (`proposalLabel` in
+  `services/proposals/schema.ts`), on the Inbox's cards and their labels
+  for assistive tech, the edit dialog's title, outcome cards and the
+  note's cards. `PROPOSAL_LABELS` stays for callers with only a kind.
+- `services/note/cards.ts`: `blocksOf(date)`, `threadSummaries(ids)`, and
+  the mark's state (`threadMark`, `markState`, `markLabel`, replacing
+  `stripBadge`); `queryKeys.noteBlocks` and `noteThreads` under "note",
+  refreshed by readings, syncs, decisions, replies, triage, the chat's
+  threads, the work and day-end passes and park/unpark. `NoteError` kinds
+  `not_found` and `private`.
+- Removed: `block-strip.tsx`, `cards-layer.tsx`, `thread-sheet.tsx` and the
+  hint line under the note.
+- Tests: block line ranges; the minimal change; Enter, Backspace and
+  external changes out of the undo history; the mark's state for every
+  state; marks in an `EditorState` as the text changes, the lit lines
+  following their block, an edited block keeping its key; the mark's
+  face; hover intent, pin, unpin, typing and the thread link on the store
+  with a hand-run clock; the card's head per state and its rows; `cards.ts`
+  on the database; Ask; the FR-20.7 AC at the service level against the
+  mock Jira (the count after a reading, approve and the mark done, a reply
+  as a turn of the same thread, a choice answering the question, Ask then
+  edit, private); the hover plugin in a jsdom `EditorView` with a store
+  listener that pins the thread's card while the editor updates; the
+  label of a create.
+
+Review fixes
+- `?thread=` crashed the hover plugin: the pin's scroll was dispatched
+  from a store listener running inside the editor's update. Store
+  callbacks never dispatch directly now, and the page's pin runs after
+  the update.
+- A card closed under the pointer (Esc, typing, its block gone) left the
+  store thinking the pointer was in a card, so hover cards never closed
+  afterwards.
+- A paragraph typed at a block's start took that block's key, row and
+  thread; an earlier range now goes to the block with the same words
+  first, then to the largest overlap.
+- A reply that did not go through was invisible when the thread had
+  approved or waiting cards; it now shows as "!" with Try again, as the
+  Inbox shows it.
+- Ctrl+. on a card already open moves the focus into it; a pin moving to
+  another block no longer closes and reopens the card; the room on the
+  right is 388 px (the card, its gap and the collision padding); the mark
+  is centred on the line.
+
+Departures
+- The card's side is chosen in code (right when the window has 388 px
+  beside the text, else below the whole block) and handed to Radix, whose
+  flip would otherwise go left.
+- Clicking or focusing inside a hover card pins it; while a card is
+  pinned, hovering another block opens no card; typing closes a card that
+  is not pinned.
+- Ask is a button, not the mockup's text box; a noted card names the work
+  item without a link (there is no work item page).
+- The page is wider (`max-w-5xl`) and the note column 44 rem, so the card
+  fits beside the text on a 1440 px window.
+- The page's data reaches the editor through a state field and an effect,
+  so a reconfigure (the theme switch) keeps it. `useNoteEditor` is
+  unchanged.
+
+Known limits
+- Not verified in the running app: the hover timing, the card's placement
+  and its switch to below on a narrow window, the marks' alignment with
+  proportional type and larger headings, a mark's click leaving the cursor
+  and focus in the text, Esc and outside clicks, Ctrl+. moving the focus
+  into the card and back, the card's position following edits, the scroll
+  to a `?thread=` block (its pin from inside an editor update is covered
+  by the jsdom test), selects, the edit dialog and Undo's confirmation
+  opened from inside the card, the light and dark colours, fenced code in
+  monospace, and a screen reader on the marks. These were checked by
+  type, unit, jsdom and service tests only.

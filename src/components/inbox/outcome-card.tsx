@@ -27,7 +27,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { dateTime, relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import type { InboxDetail, ProposalView } from "@/services/inbox/queries";
-import { PROPOSAL_LABELS, type ProposalPayload } from "@/services/proposals/schema";
+import { effectivePayload, type ProposalPayload, proposalLabel } from "@/services/proposals/schema";
 import { answerOffer, offerFor } from "@/services/work/playbooks/offers";
 import { foundEdits, waitingFactsOf } from "@/services/work/playbooks/waiting";
 import { SITUATION_LABELS } from "@/services/work/rules";
@@ -97,7 +97,7 @@ function Step({
         <Label htmlFor={id} className="min-w-0 flex-1 flex-col items-start gap-0.5 font-normal">
           <span className="text-sm">{label}</span>
           <span className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-            {PROPOSAL_LABELS[proposal.payload.kind]}
+            {proposalLabel(effectivePayload(proposal))}
             {required && <Badge variant="outline">the rest hang on this</Badge>}
             {proposal.editedPayload && <Badge variant="outline">edited</Badge>}
           </span>
@@ -327,7 +327,7 @@ function BundleSteps({
               proposal={p}
               label={lineOf(
                 p,
-                meta.get(p.seq)?.label ?? p.rationale ?? PROPOSAL_LABELS[p.payload.kind],
+                meta.get(p.seq)?.label ?? p.rationale ?? proposalLabel(effectivePayload(p)),
                 preview?.edits.get(p.seq),
                 choice,
                 isChoice(p),

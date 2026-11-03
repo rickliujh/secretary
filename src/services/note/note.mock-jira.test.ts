@@ -22,15 +22,19 @@
  * decisions as already decided; a create repeating the Epic is sent back; a
  * block naming the Story's key, and one the triage assigns to the thread, are
  * new messages there; a to-do copied into the next day's note gives no card.
+ *
+ * FR-20.7 acceptance (Phase 31, D67), at the service level: see the last suite.
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect, Either, Layer } from "effect";
+import { blockMarks } from "@/components/note/block-marks";
 import { dependencies, inboxItems, people, proposals } from "@/db/schema";
 import { localDate } from "@/lib/dates";
 import { nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
 import { ExecutorLive } from "@/services/executor/live";
+import { Intake } from "@/services/intake";
 import { IntakeLive } from "@/services/intake/live";
 import { LlmLive } from "@/services/llm/live";
 import { makeScriptedModels, type Scripted } from "@/services/llm/test";
@@ -46,6 +50,8 @@ import { out } from "@/test/intake-layer";
 import { jiraSettings, jiraTestLayer } from "@/test/layers";
 import { createHandler, generate } from "../../../scripts/mock-jira";
 import { DailyNote } from ".";
+import { splitBlocks } from "./blocks";
+import { blocksOf, markLabel, threadMark, threadSummaries } from "./cards";
 import { DailyNoteLive } from "./live";
 import { saveBody } from "./queries";
 import { readNote } from "./read";
@@ -528,5 +534,176 @@ describe("one conversation per topic against the mock Jira (FR-20.6 AC, Phase 30
     expect(
       r.thread.props.filter((p) => p.kind === "create_issue" && p.status === "pending")[0]?.payload,
     ).toMatchObject({ issueType: "Story", epic: made.epic });
+  });
+});
+
+/**
+ * FR-20.7 acceptance (Phase 31, D67) at the service level: what the page's
+ * marks and cards read (`blocksOf`, `threadSummaries`, the mark's state)
+ * after a reading, an approval in the card, a reply typed in it and a
+ * question's choice; Ask on a block the reading left alone, then an edit of
+ * it; no Ask on a private block.
+ */
+describe("cards on the note's blocks against the mock Jira (FR-20.7 AC, Phase 31)", () => {
+  test("count, approve, reply, a choice, Ask and its revision, private", async () => {
+    const { layer, models } = setup({
+      "fast-m": [
+        out({
+          blocks: [
+            { index: "1", kind: "act", item: "(none)", thread: "(none)" },
+            { index: "2", kind: "skip", item: "(none)", thread: "(none)" },
+          ],
+        }),
+      ],
+      "std-m": [
+        out(smallAsk("Send Dana the Q3 numbers")),
+        out({
+          summary: "Send Dana the Q3 numbers",
+          question: "Should Mia be a watcher on the ticket, or copied on the mail to Dana?",
+          confidence: 0.9,
+          proposals: [],
+        }),
+        // The answer leads to one more card.
+        out(smallAsk("Mail Dana the Q3 numbers with Mia copied")),
+        out(smallAsk("Book the room for Friday")),
+        out(smallAsk("Book the big room for Friday")),
+      ],
+    });
+    const badgeOf = (id: string) =>
+      Effect.map(threadSummaries([id]), (t) => (t[0] ? markLabel(threadMark(t[0])) : "none"));
+    /** The marks the page shows for the note, from the same queries. */
+    const marksOf = (body: string) =>
+      Effect.gen(function* () {
+        const rows = yield* blocksOf(TODAY);
+        const ids = rows.map((b) => b.inboxItemId).filter((id): id is string => !!id);
+        const threads = yield* threadSummaries(ids);
+        return blockMarks(body, {
+          privateHeading: "Private",
+          rows: new Map(rows.map((b) => [b.hash, b])),
+          threads: new Map(threads.map((t) => [t.id, t])),
+          reads: true,
+        }).marks.map((m) => m.state);
+      });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const note = yield* DailyNote;
+          const body =
+            "- [ ] send Dana the Q3 numbers\n\nbook the room for Friday\n\n## Private\nsalary review with HR\n";
+          yield* note.save(TODAY, body);
+          const read = yield* note.read("button");
+          const marksAfterRead = yield* marksOf(body);
+          const rows = yield* blocksOf(TODAY);
+          const todo = rows.find((b) => b.status === "acted")?.inboxItemId ?? "";
+          const afterRead = yield* badgeOf(todo);
+
+          // Approved in the card (the Inbox's approve): the mark and the Inbox agree.
+          const card = (yield* readThread(todo)).props.find((p) => p.kind === "create_issue");
+          yield* (yield* Proposals).approve(card?.id ?? "");
+          const afterApprove = yield* badgeOf(todo);
+          const marksAfterApprove = yield* marksOf(body);
+          const summary = (yield* threadSummaries([todo]))[0];
+          const inboxAfterApprove = yield* readThread(todo);
+
+          // A reply typed in the card is a turn of the same thread.
+          yield* (yield* Intake).reply({
+            inboxItemId: todo,
+            parts: [{ type: "typed", text: "copy Mia on it" }],
+          });
+          const afterReply = yield* readThread(todo);
+          const afterReplyBadge = yield* badgeOf(todo);
+
+          // A choice answers the question, as the card's choice button sends it.
+          const question = afterReply.props.find(
+            (p) => p.kind === "needs_clarification" && p.status === "pending",
+          );
+          yield* (yield* Intake).reply({
+            inboxItemId: todo,
+            parts: [{ type: "typed", text: "Copied on the mail" }],
+            answers: question?.id ?? null,
+          });
+          const afterChoice = yield* readThread(todo);
+          const afterChoiceBadge = yield* badgeOf(todo);
+
+          // Ask on the block the reading left alone: a thread and its mark.
+          const room = splitBlocks(body).find((b) => b.text.startsWith("book the room"));
+          const asked = yield* note.ask(TODAY, room?.hash ?? "");
+          const afterAsk = yield* badgeOf(asked.inboxItemId);
+          const marksAfterAsk = yield* marksOf(body);
+          const roomRow = (yield* blocksOf(TODAY)).find((b) => b.hash === room?.hash);
+          // Editing it afterwards revises that thread.
+          yield* note.save(TODAY, body.replace("book the room", "book the big room"));
+          const edit = yield* note.read("typing");
+          const roomThread = yield* readThread(asked.inboxItemId);
+
+          // A private block offers no Ask.
+          const salary = splitBlocks(body).find((b) => b.private);
+          const priv = yield* Effect.either(note.ask(TODAY, salary?.hash ?? ""));
+          return {
+            read,
+            marksAfterRead,
+            afterRead,
+            afterApprove,
+            marksAfterApprove,
+            summary,
+            inboxAfterApprove,
+            afterReply,
+            afterReplyBadge,
+            question,
+            afterChoice,
+            afterChoiceBadge,
+            todo,
+            asked,
+            afterAsk,
+            marksAfterAsk,
+            roomRow,
+            edit,
+            roomThread,
+            priv,
+            threads: yield* noteThreads,
+          };
+        }),
+        layer,
+      ),
+    );
+    expect(r.read).toMatchObject({ cards: 1, skippedBlocks: 1, privateBlocks: 1 });
+    // The block that made a card carries the count 1; the one left alone a quiet mark; private a lock.
+    expect(r.marksAfterRead).toEqual([
+      { kind: "waiting", count: 1, questions: 0 },
+      { kind: "alone" },
+      { kind: "private" },
+    ]);
+    expect(r.afterRead).toBe("1 card waiting");
+    expect(r.afterApprove).toBe("approved");
+    expect(r.marksAfterApprove[0]).toEqual({ kind: "done", ended: "approved" });
+    expect(r.inboxAfterApprove.props.map((p) => p.status)).toEqual(["executed"]);
+    expect(r.summary?.created).toHaveLength(1);
+    expect(r.summary?.created[0]).toMatch(/^OPS-\d+$/);
+    // The reply is the thread's next user turn; no new thread.
+    const users = r.afterReply.messages.filter((m) => m.role === "user");
+    expect(users).toHaveLength(2);
+    expect(users[1]?.content).toMatchObject({ parts: [{ type: "typed", text: "copy Mia on it" }] });
+    expect(r.afterReplyBadge).toBe("1 question");
+    // The choice answered it: the question is closed with the answer.
+    expect(r.question).toBeDefined();
+    expect(r.afterChoice.props.find((p) => p.id === r.question?.id)).toMatchObject({
+      status: "executed",
+      result: { answer: "Copied on the mail" },
+    });
+    expect(r.afterChoice.messages.filter((m) => m.role === "user")).toHaveLength(3);
+    // No question waits any more: the new card is what the mark counts.
+    expect(r.afterChoiceBadge).toBe("1 card waiting");
+    expect(r.afterAsk).toBe("1 card waiting");
+    expect(r.marksAfterAsk[1]).toEqual({ kind: "waiting", count: 1, questions: 0 });
+    expect(r.roomRow).toMatchObject({ status: "acted", inboxItemId: r.asked.inboxItemId });
+    expect(r.edit).toMatchObject({ revised: 1, cards: 0, called: false });
+    expect(r.roomThread.props.map((p) => [p.kind, p.status])).toEqual([
+      ["create_issue", "superseded"],
+      ["create_issue", "pending"],
+    ]);
+    expect(r.threads.map((t) => t.id).sort()).toEqual([r.todo, r.asked.inboxItemId].sort());
+    expect(Either.isLeft(r.priv) && r.priv.left).toMatchObject({ kind: "private" });
+    for (const c of models.calls) expect(JSON.stringify(c.prompt)).not.toContain("salary");
   });
 });
