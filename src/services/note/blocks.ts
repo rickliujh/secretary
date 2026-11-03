@@ -57,6 +57,14 @@ export function normaliseBlock(text: string): string {
     .replace(CHECKBOX, (m) => m.replace("[X]", "[x]"));
 }
 
+/** The hash of a ticked block's text unticked; null when it is not a ticked box. */
+export function uncheckedHashOf(text: string): string | null {
+  const norm = normaliseBlock(text);
+  const box = CHECKBOX.exec(norm);
+  if (!box || box[2] === " ") return null;
+  return hashText(norm.replace(CHECKBOX, (m) => m.replace("[x]", "[ ]")));
+}
+
 /** Whether a block says anything once list markers and an empty checkbox are gone. */
 const hasWords = (norm: string) =>
   norm

@@ -5,25 +5,40 @@
  *
  * 1. A block read before is left alone (the same block is never sent twice).
  * 2. A block under the private heading is recorded `private` and never sent.
- * 3. A ticked box whose unticked line made a ticket that now exists proposes
+ * 3. Carried over (D66): a block whose words a block of the last 14 days had,
+ *    on another day, takes that block's status, thread and work item and is
+ *    not sent; an unticked to-do copied into today's note is the same ask.
+ *    Not when it came back after it was done: its ticked box was recorded, or
+ *    every ticket its thread created is done; then it is read as new.
+ * 4. A ticked box whose unticked line made a ticket that now exists proposes
  *    closing it (a card in the same thread); ticking anything else does
  *    nothing.
- * 4. A changed block (its old words gone, new words at its place) whose
- *    thread still has undecided proposals revises that thread through
- *    `Intake.reply` with "The note now says: «...»" (D56).
- * 5. Every other new block, at most 30, oldest first, goes to one
- *    `note_triage` call, which says per block act, context (one of the
- *    listed work items) or skip. Act: `Intake.triage` with source "note".
- *    Context: a `note` event on the item, as the user's words. Skip: recorded.
+ * 5. A changed block (its old words gone, new words at its place) revises
+ *    that thread through `Intake.reply` with "The note now says: «...»"
+ *    (D56), whatever its proposals' status (D66): a decided thread knows what
+ *    it made and decided. With nothing pending, the block at its place must
+ *    be as alike as any other match (word overlap at least one half); a
+ *    thread whose first turn failed (no items) is not revised.
+ * 6. Every other new block, at most 30, oldest first, goes to one
+ *    `note_triage` call, which says per block act (with one of the listed
+ *    earlier note threads, or none), context (one of the listed work items)
+ *    or skip. Act on a block naming a ticket that a note thread of the last
+ *    14 days created or acts on continues the newest such thread, whatever
+ *    thread the model gave (D66); other act with a thread: a new message in
+ *    it; act: `Intake.triage` with source "note". Context: a `note` event on
+ *    the item, as the user's words. Skip: recorded.
  *
- * No new blocks, no model call. Nothing here calls `JiraClient`; the close
- * is a proposal like any other.
+ * Continuing a thread is `Intake.reply` with `asInput`: the block is a new
+ * item of the thread, which sees its earlier items, decisions and created
+ * tickets. No new blocks, no model call. Nothing here calls `JiraClient`; the
+ * close is a proposal like any other.
  */
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { Effect, Either } from "effect";
 import {
   inboxItems,
   inboxMessages,
+  intakeItems,
   jiraIssues,
   proposals,
   workItemIssues,
@@ -32,6 +47,7 @@ import {
 import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
+import { ISSUE_KEY_SCAN } from "@/prompts/classify";
 import {
   buildNoteTriagePrompt,
   buildNoteTriageSchema,
@@ -55,8 +71,13 @@ import { type NoteBlock, similarity, splitBlocks } from "./blocks";
 import {
   type BlockRow,
   blockRows,
+  createdAllDone,
   dayBefore,
   loadRow,
+  NOTE_THREADS_LISTED,
+  type NoteThread,
+  recentBlocks,
+  recentNoteThreads,
   recordBlock,
   saveLastRead,
   setBlockStatus,
@@ -72,6 +93,7 @@ const emptyResult = (trigger: ReadTrigger, at: string): ReadResult => ({
   trigger,
   cards: 0,
   revised: 0,
+  continued: 0,
   closed: 0,
   notes: [],
   skippedBlocks: 0,
@@ -120,18 +142,12 @@ const candidateItems = Effect.gen(function* () {
   });
 });
 
-/** Whether a thread still holds a proposal no one decided. */
-const hasPending = (inboxItemId: string) =>
-  Effect.map(
-    query((d) =>
-      d
-        .select({ n: sql<number>`count(*)` })
-        .from(proposals)
-        .where(and(eq(proposals.inboxItemId, inboxItemId), eq(proposals.status, "pending")))
-        .get(),
-    ),
-    (r) => Number(r?.n ?? 0) > 0,
-  );
+/** The newest note thread that created or acts on a ticket the block names (D66). */
+function namedThread(text: string, threads: readonly NoteThread[]): NoteThread | null {
+  const keys = new Set(text.match(ISSUE_KEY_SCAN) ?? []);
+  if (!keys.size) return null;
+  return threads.find((t) => [...t.created, ...t.acted].some((k) => keys.has(k))) ?? null;
+}
 
 /**
  * The status a ticket closes into, from the cache: the most used done-category
@@ -236,11 +252,44 @@ const closeTicked = (inboxItemId: string, block: NoteBlock) =>
     return "closed" as const;
   });
 
-/** The gone block a new one replaces: the one at its place, else the most alike. */
-function changedFrom(block: NoteBlock, gone: readonly BlockRow[], used: Set<string>) {
+/** Whether a thread holds a proposal no one decided, and how many items it has. */
+const threadShape = (inboxItemId: string) =>
+  Effect.gen(function* () {
+    const pending = yield* query((d) =>
+      d
+        .select({ n: sql<number>`count(*)` })
+        .from(proposals)
+        .where(and(eq(proposals.inboxItemId, inboxItemId), eq(proposals.status, "pending")))
+        .get(),
+    );
+    const items = yield* query((d) =>
+      d
+        .select({ n: sql<number>`count(*)` })
+        .from(intakeItems)
+        .where(eq(intakeItems.inboxItemId, inboxItemId))
+        .get(),
+    );
+    return { pending: Number(pending?.n ?? 0) > 0, items: Number(items?.n ?? 0) };
+  });
+
+/**
+ * The gone block a new one replaces: the one at its place, else the most
+ * alike. The one at its place needs only a shared word while its thread still
+ * has undecided proposals (an edit before a decision); once all are decided it
+ * must be as alike as any other match, so an unrelated line written in the
+ * place of a done one is not pulled into its thread (D66).
+ */
+function changedFrom(
+  block: NoteBlock,
+  gone: readonly BlockRow[],
+  used: Set<string>,
+  pending: (row: BlockRow) => boolean,
+) {
   const open = gone.filter((g) => !used.has(g.id));
   const atPlace = open.find((g) => g.position === block.position);
-  if (atPlace && similarity(atPlace.text, block.text) > 0) return atPlace;
+  const placeScore = atPlace ? similarity(atPlace.text, block.text) : 0;
+  if (atPlace && placeScore > 0 && (pending(atPlace) || placeScore >= CHANGED_SIMILARITY))
+    return atPlace;
   let best: BlockRow | null = null;
   let score = CHANGED_SIMILARITY;
   for (const g of open) {
@@ -267,7 +316,12 @@ const threadOf = (rawSince: string) =>
     (r) => r?.id ?? null,
   );
 
-type Fresh = { date: string; block: NoteBlock };
+type Fresh = {
+  date: string;
+  block: NoteBlock;
+  /** The note thread a ticket the block names belongs to (D66). */
+  named?: string;
+};
 
 export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
   Effect.gen(function* () {
@@ -283,16 +337,59 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
     // Yesterday too, so lines written just before midnight are not lost.
     const dates = [dayBefore(today), today];
     const rows = yield* blockRows(dates);
+    // What the note led to in the last two weeks (D66).
+    const { byHash: recent, ticked } = yield* recentBlocks(today);
+    const threads = yield* recentNoteThreads(today);
+    /**
+     * A block that continues an earlier thread: a new message there, recorded
+     * as acted. A failed turn records nothing, so the next reading tries again.
+     */
+    const continueThread = (inboxItemId: string, date: string, block: NoteBlock) =>
+      Effect.gen(function* () {
+        const r = yield* Effect.either(
+          intake.reply({
+            inboxItemId,
+            asInput: true,
+            parts: noteParts(block.text),
+            noteDate: date,
+            today,
+          }),
+        );
+        if (Either.isLeft(r)) {
+          logger.warn("Continuing a note thread failed", r.left);
+          return;
+        }
+        yield* recordBlock(date, block, "acted", { inboxItemId });
+        result.continued++;
+      });
+    /** A carried-over block that came back after it was done is read as new (D66). */
+    const cameBack = (earlier: BlockRow) =>
+      Effect.gen(function* () {
+        const tickedAt = ticked.get(earlier.hash);
+        if (tickedAt && tickedAt >= earlier.seenAt) return true;
+        if (earlier.status !== "acted" || !earlier.inboxItemId) return false;
+        return yield* createdAllDone(earlier.inboxItemId);
+      });
     const fresh: Fresh[] = [];
+    // The same new block on both days is read once; the copy follows it.
+    const thisRead = new Set<string>();
+    const twins: Fresh[] = [];
     for (const date of dates) {
       const body = (yield* loadRow(date))?.body ?? "";
       const blocks = splitBlocks(body, cfg.privateHeading);
       const known = rows.filter((r) => r.date === date);
       const byHash = new Map(known.map((r) => [r.hash, r]));
       const present = new Set(blocks.map((b) => b.hash));
-      const gone = known.filter(
+      const goneRows = known.filter(
         (r) => !present.has(r.hash) && r.status === "acted" && !!r.inboxItemId,
       );
+      const shapes = new Map<string, { pending: boolean; items: number }>();
+      for (const g of goneRows)
+        if (g.inboxItemId && !shapes.has(g.inboxItemId))
+          shapes.set(g.inboxItemId, yield* threadShape(g.inboxItemId));
+      // A thread whose first turn failed has nothing to revise: the block is read as new.
+      const gone = goneRows.filter((g) => (shapes.get(g.inboxItemId ?? "")?.items ?? 0) > 0);
+      const pendingIn = (g: BlockRow) => !!shapes.get(g.inboxItemId ?? "")?.pending;
       const used = new Set<string>();
       for (const block of blocks) {
         const seen = byHash.get(block.hash);
@@ -303,8 +400,26 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
           result.privateBlocks++;
           continue;
         }
+        // Carried over from another day: the same block, nothing sent (D66).
+        const earlier = recent.get(block.hash);
+        if (earlier && earlier.date !== date && !(yield* cameBack(earlier))) {
+          yield* recordBlock(date, block, earlier.status, {
+            inboxItemId: earlier.inboxItemId,
+            workItemId: earlier.workItemId,
+          });
+          continue;
+        }
+        if (thisRead.has(block.hash)) {
+          twins.push({ date, block });
+          continue;
+        }
+        thisRead.add(block.hash);
         if (block.checked && block.uncheckedHash) {
-          const was = byHash.get(block.uncheckedHash);
+          // Its unticked line on this day, else carried from another day (D66).
+          const before = recent.get(block.uncheckedHash);
+          const was =
+            byHash.get(block.uncheckedHash) ??
+            (before && before.date !== date ? before : undefined);
           if (was) {
             used.add(was.id);
             const outcome =
@@ -323,8 +438,9 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
             continue;
           }
         }
-        const old = changedFrom(block, gone, used);
-        if (old?.inboxItemId && (yield* hasPending(old.inboxItemId))) {
+        // A changed block revises its thread, decided or not (D66).
+        const old = changedFrom(block, gone, used, pendingIn);
+        if (old?.inboxItemId) {
           used.add(old.id);
           const inboxItemId = old.inboxItemId;
           const r = yield* Effect.either(
@@ -337,29 +453,52 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
               today,
             }),
           );
-          if (Either.isLeft(r)) logger.warn("Revising a note thread failed", r.left);
+          // A failed turn records nothing: the next reading tries the revision again.
+          if (Either.isLeft(r)) {
+            logger.warn("Revising a note thread failed", r.left);
+            continue;
+          }
           yield* setBlockStatus(old.id, "revised");
           yield* recordBlock(date, block, "acted", { inboxItemId });
           result.revised++;
           continue;
         }
-        fresh.push({ date, block });
+        // Names a ticket a recent note thread made or acts on: that thread, when
+        // the triage says act (D66); context and skip stay as for any block.
+        const named = namedThread(block.text, threads);
+        fresh.push({ date, block, ...(named ? { named: named.id } : {}) });
       }
     }
 
     const batch = fresh.slice(0, NOTE_TRIAGE_MAX_BLOCKS);
     result.left = fresh.length - batch.length;
+    /** The copies of blocks read in this reading take what their first was recorded as. */
+    const followTwins = Effect.gen(function* () {
+      if (!twins.length) return;
+      const { byHash: now } = yield* recentBlocks(today);
+      for (const t of twins) {
+        const first = now.get(t.block.hash);
+        if (first)
+          yield* recordBlock(t.date, t.block, first.status, {
+            inboxItemId: first.inboxItemId,
+            workItemId: first.workItemId,
+          });
+      }
+    });
     if (!batch.length) {
+      yield* followTwins;
       yield* saveLastRead(result);
       return result;
     }
 
     const items = settings.work.enabled ? yield* candidateItems : [];
     const ids = items.map((i) => i.id);
+    const listed = threads.slice(0, NOTE_THREADS_LISTED);
+    const threadIds = listed.map((t) => t.id);
     result.called = true;
     const call = yield* Effect.either(
       llm.object<NoteTriageOutput>("note_triage", {
-        schema: buildNoteTriageSchema(batch.length, ids) as never,
+        schema: buildNoteTriageSchema(batch.length, ids, threadIds) as never,
         ...buildNoteTriagePrompt({
           blocks: batch.map((f) => ({
             text: f.block.text,
@@ -367,9 +506,15 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
             date: f.date,
           })),
           items,
+          threads: listed.map((t) => ({
+            id: t.id,
+            date: t.date,
+            summary: t.summary,
+            tickets: [...t.created, ...t.acted],
+          })),
           today,
         }),
-        validate: (out) => validateNoteTriage(out, batch.length, ids),
+        validate: (out) => validateNoteTriage(out, batch.length, ids, threadIds),
       }),
     );
     if (Either.isLeft(call)) {
@@ -382,7 +527,11 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
     for (const decision of noteDecisions(call.right.value, batch.length)) {
       const f = batch[decision.index];
       if (!f) continue;
-      if (decision.kind === "act") {
+      // A named ticket's thread wins; else the model's, from the listed ones.
+      const thread = decision.kind === "act" ? (f.named ?? decision.threadId) : null;
+      if (thread) {
+        yield* continueThread(thread, f.date, f.block);
+      } else if (decision.kind === "act") {
         const since = nowIso();
         const r = yield* Effect.either(
           intake.triage({
@@ -407,10 +556,11 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
         result.skippedBlocks++;
       }
     }
+    yield* followTwins;
     yield* saveLastRead(result);
-    if (result.cards || result.notes.length || result.revised || result.closed)
+    if (result.cards || result.notes.length || result.revised || result.continued || result.closed)
       logger.info(
-        `Daily note read: ${result.cards} cards, ${result.notes.length} notes, ${result.revised} revised, ${result.closed} closed, ${result.skippedBlocks} left alone`,
+        `Daily note read: ${result.cards} cards, ${result.continued} continued, ${result.notes.length} notes, ${result.revised} revised, ${result.closed} closed, ${result.skippedBlocks} left alone`,
       );
     return result;
   });
@@ -422,6 +572,7 @@ export function describeRead(r: ReadResult, time: (iso: string) => string): stri
   const n = (count: number, one: string, many = `${one}s`) =>
     `${count} ${count === 1 ? one : many}`;
   if (r.cards) parts.push(n(r.cards, "card"));
+  if (r.continued) parts.push(`${r.continued} continued`);
   if (r.revised) parts.push(`${n(r.revised, "thread")} revised`);
   if (r.closed) parts.push(`${n(r.closed, "close")} proposed`);
   const byItem = new Map<string, number>();

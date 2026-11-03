@@ -6,7 +6,7 @@
  */
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { dependencies, workItemIssues, workItems } from "@/db/schema";
+import { dependencies, inboxItems, proposals, workItemIssues, workItems } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
 import { createDependency } from "@/services/dependencies/queries";
@@ -14,7 +14,64 @@ import { getState, SYNC_KEYS } from "@/services/sync/state";
 import { appendEvents } from "@/services/work/events";
 import type { WorkState } from "@/services/work/schema";
 import { blockedByLink, insertIssues, issue } from "@/test/work";
-import type { EvalWorkItem } from "./cases";
+import type { EvalCreated, EvalWorkItem } from "./cases";
+
+/**
+ * Seeds a ticket an earlier thread created on the user's approval (D66): the
+ * thread with its executed create, two days before the eval's today, and the
+ * ticket in the cache as the sync would hold it.
+ */
+export const seedCreated = (c: EvalCreated) =>
+  Effect.gen(function* () {
+    const me = (yield* getState(SYNC_KEYS.username)) ?? "me";
+    const at = "2026-09-22T09:00:00.000Z";
+    yield* insertIssues([
+      issue(c.key, {
+        summary: c.summary,
+        issueType: c.issueType,
+        status: "To Do",
+        statusCategory: "new",
+        assignee: me,
+        assigneeDisplay: "Me",
+        sprint: null,
+        created: at,
+        updated: at,
+        syncedAt: at,
+      }),
+    ]);
+    const thread = newId();
+    yield* query((d) =>
+      d.insert(inboxItems).values({
+        id: thread,
+        source: "typed",
+        senderPersonId: null,
+        rawText: c.request,
+        receivedAt: at,
+        status: "filed",
+        summary: c.request,
+      }),
+    );
+    const [project = "PAY"] = c.key.split("-");
+    yield* query((d) =>
+      d.insert(proposals).values({
+        id: newId(),
+        inboxItemId: thread,
+        kind: "create_issue",
+        payload: {
+          kind: "create_issue",
+          ref: "$new:1",
+          projectKey: project,
+          issueType: c.issueType,
+          summary: c.summary,
+        },
+        status: "executed",
+        result: { issueKey: c.key },
+        createdAt: at,
+        decidedAt: "2026-09-22T10:00:00.000Z",
+      }),
+    );
+    return thread;
+  });
 
 /** The fixtures' active sprint. */
 const ACTIVE_SPRINT = "Payments 15";

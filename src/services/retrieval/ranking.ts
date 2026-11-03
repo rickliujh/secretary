@@ -21,8 +21,20 @@ export function retrievalFtsQuery(text: string, max = 16): string | null {
   return unique.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" OR ");
 }
 
-/** Why retrieval offered a ticket; `work`: a ticket of a work item the input touches (prompt version 15, D61). */
-export type Reason = "mentioned" | "work" | "search" | "recent" | "sender" | "epic" | "tracked";
+/**
+ * Why retrieval offered a ticket; `work`: a ticket of a work item the input
+ * touches (prompt version 15, D61); `created`: made by an approved create of
+ * the last 14 days, in any thread (prompt version 17, D66).
+ */
+export type Reason =
+  | "mentioned"
+  | "work"
+  | "created"
+  | "search"
+  | "recent"
+  | "sender"
+  | "epic"
+  | "tracked";
 
 /**
  * Merges candidate sources in priority order, keeping each key once with all
@@ -51,6 +63,39 @@ export function mergeCandidates(
 export function overlap(a: string, b: string): number {
   const ta = new Set(tokens(a));
   const tb = new Set(tokens(b));
+  if (ta.size === 0 || tb.size === 0) return 0;
+  let inter = 0;
+  for (const t of ta) if (tb.has(t)) inter++;
+  return inter / (ta.size + tb.size - inter);
+}
+
+/**
+ * A ticket summary's words for comparing two summaries (D66): unlike `tokens`,
+ * short words and words with digits count ("Q3", "4.2", "iOS", "18"), since
+ * they are often what tells two tickets apart.
+ */
+export function summaryTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize("NFKC")
+    .split(/[^\p{L}\p{N}_.]+/u)
+    .map((t) => t.replace(/^\.+|\.+$/g, ""))
+    .filter((t) => (t.length >= 2 || /\d/.test(t)) && !STOPWORDS.has(t));
+}
+
+/**
+ * How alike two ticket summaries are (Jaccard over `summaryTokens`), 0 to 1;
+ * 0 when their words with digits differ ("Q3 numbers" is not "Q4 numbers").
+ */
+export function summaryOverlap(a: string, b: string): number {
+  const ta = new Set(summaryTokens(a));
+  const tb = new Set(summaryTokens(b));
+  const digits = (s: Set<string>) =>
+    [...s]
+      .filter((t) => /\d/.test(t))
+      .sort()
+      .join(" ");
+  if (digits(ta) !== digits(tb)) return 0;
   if (ta.size === 0 || tb.size === 0) return 0;
   let inter = 0;
   for (const t of ta) if (tb.has(t)) inter++;

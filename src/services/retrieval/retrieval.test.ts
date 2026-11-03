@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { memories } from "@/db/schema";
+import { memories, proposals } from "@/db/schema";
 import { query } from "@/services/db";
 import { addNote } from "@/services/directory/notes";
 import { createPerson, createTeam } from "@/services/directory/queries";
@@ -143,5 +143,60 @@ describe("Retrieval.snapshot", () => {
     expect(keys.without).not.toContain("PAY-2");
     expect(keys.without).not.toContain("PAY-4");
     expect(keys.without).toContain("OPS-7");
+  });
+});
+
+describe("created candidates (prompt version 17, D66)", () => {
+  test("tickets approved creates made in the last two weeks, newest first, after named and before search", async () => {
+    const { layer } = syncedJiraLayer([]);
+    const quote = "the ledger export PAY-2 is blocked, can you chase?";
+    const made = (id: string, key: string, decidedAt: string, status = "executed") => ({
+      id,
+      kind: "create_issue",
+      payload: { kind: "create_issue" },
+      status: status as "executed",
+      result: { issueKey: key },
+      createdAt: decidedAt,
+      decidedAt,
+    });
+    const s = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          yield* query((d) =>
+            d.insert(proposals).values([
+              made("c1", "PAY-1", "2026-09-20T10:00:00.000Z"),
+              made("c2", "PAY-4", "2026-09-22T10:00:00.000Z"),
+              // Older than two weeks, not approved, or not in the cache: not offered.
+              made("c3", "OPS-7", "2026-09-01T10:00:00.000Z"),
+              made("c4", "PAY-3", "2026-09-23T10:00:00.000Z", "rejected"),
+              made("c5", "PAY-99", "2026-09-23T10:00:00.000Z"),
+              // After the item's day: not offered either.
+              made("c6", "PAY-3", "2026-09-26T10:00:00.000Z"),
+            ]),
+          );
+          return yield* (yield* Retrieval).snapshot({
+            quote,
+            source: "teams",
+            senderPersonId: null,
+            references: extractReferences(quote, []),
+            today: "2026-09-24",
+            createdKeys: ["PAY-4"],
+          });
+        }),
+        Layer.provideMerge(RetrievalLive, layer),
+      ),
+    );
+    const keys = s.candidates.map((c) => c.key);
+    const byKey = new Map(s.candidates.map((c) => [c.key, c]));
+    // Named first, then the created ones newest first, then search.
+    expect(keys.slice(0, 3)).toEqual(["PAY-2", "PAY-4", "PAY-1"]);
+    expect(byKey.get("PAY-4")?.reasons[0]).toBe("created");
+    expect(byKey.get("PAY-1")?.reasons[0]).toBe("created");
+    expect(byKey.get("OPS-7")?.reasons).not.toContain("created");
+    expect(byKey.get("PAY-3")?.reasons ?? []).not.toContain("created");
+    expect(keys).not.toContain("PAY-99");
+    // The thread's own creates ride along for the duplicate check, never shown.
+    expect(s.createdKeys).toEqual(["PAY-4"]);
   });
 });

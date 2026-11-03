@@ -6,6 +6,8 @@ import {
   rankByRelevance,
   rankMemories,
   retrievalFtsQuery,
+  summaryOverlap,
+  summaryTokens,
   tokens,
 } from "./ranking";
 
@@ -83,5 +85,25 @@ describe("retrieval ranking", () => {
       "Low",
       "Custom",
     ]);
+  });
+});
+
+describe("summary overlap for the duplicate check (D66)", () => {
+  test("short words and words with digits count", () => {
+    expect(summaryTokens("Fix the iOS 18 crash in v4.2.")).toEqual([
+      "fix",
+      "ios",
+      "18",
+      "crash",
+      "v4.2",
+    ]);
+    expect(summaryTokens("Send Dana the Q3 numbers")).toEqual(["send", "dana", "q3", "numbers"]);
+  });
+
+  test("summaries whose numbers differ never match; otherwise Jaccard", () => {
+    expect(summaryOverlap("Send Dana the Q4 numbers", "Send Dana the Q3 numbers")).toBe(0);
+    expect(summaryOverlap("Send Dana the Q3 numbers", "send dana the q3 numbers")).toBe(1);
+    expect(summaryOverlap("Payment webhook logging", "Payment webhook retries")).toBe(0.5);
+    expect(summaryOverlap("", "Payment")).toBe(0);
   });
 });

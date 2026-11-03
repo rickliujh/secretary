@@ -18,6 +18,18 @@ describe("eval cases", () => {
     expect(EVAL_CASES.length).toBeGreaterThanOrEqual(5);
   });
 
+  test("a created epic case: the epic is a seeded created ticket, a second epic is forbidden (D66)", () => {
+    const cases = EVAL_CASES.filter((c) => c.created);
+    expect(cases).toHaveLength(1);
+    const c = cases[0];
+    expect(c?.created?.issueType).toBe("Epic");
+    // Not a fixture: the case seeds it, and the input repeats the request it came from.
+    expect(fixtureIssues.some((i) => i.key === c?.created?.key)).toBe(false);
+    expect(c?.text.startsWith(c?.created?.request ?? "-")).toBe(true);
+    expect(c?.expect.required).toEqual([{ kind: "create_issue", target: c?.created?.key }]);
+    expect(c?.expect.forbidden).toEqual([{ kind: "create_issue", fields: { issueType: "Epic" } }]);
+  });
+
   test("a reply with a paste inside its sentence (D56)", () => {
     const inline = EVAL_CASES.filter((c) =>
       c.followUpParts?.some((p, i, all) => p.type === "pasted" && all[i - 1]?.type === "typed"),

@@ -605,6 +605,31 @@ decides what is read and when. FR-20 is Phase 29.
   that ticket.
 - FR-20.5 (Should) Chat. "Note this: …" appends to today's note; "what's in my
   note?" reads it.
+- FR-20.6 (Must) One conversation per topic. The note is read as a running text,
+  not as a stream of new messages. A block the user edits after its cards were
+  decided revises the same conversation, which knows what it already did:
+  approved tickets are not proposed again, and the changed words lead to an
+  update, a close, a new ticket for new work, or nothing. A new line about the
+  same work, or one that names a ticket the note created, continues that
+  conversation instead of starting another. A to-do copied into the next day's
+  note is the same ask. Which earlier conversation a line continues is decided
+  by code when the line repeats or edits an earlier block or names a ticket the
+  note made, and otherwise by the triage call from the conversations code lists.
+  Whatever a block arrives as, the classify call is told which tickets were
+  recently created on the user's approval and never creates one that a listed
+  ticket already covers.
+- AC (Phase 30, against the mock Jira): a block that made an Epic and a Story,
+  both approved, gives nothing at a second read of the unchanged note; editing
+  that block gives new cards in the same thread, and the thread's classify
+  input lists the created Epic as a candidate with its decisions under "Already
+  decided"; a new block naming the Story's key continues that thread; a block
+  the triage call assigns to an earlier thread is a new message there, not a new
+  thread; "- [ ] send Dana the Q3 numbers" copied into the next day's note gives
+  no second card; a create whose summary nearly repeats a candidate's is sent
+  back for repair. The model side is measured by eval: an input that repeats a
+  request whose Epic is a `created` candidate and adds a step yields a Story
+  under that Epic and no new Epic (classify), and a block about an earlier
+  thread's topic is routed to that thread (note triage).
 - AC (Phase 29, against the mock Jira): with a wait on Sarah for the cert open on
   PAY-12, writing "PAY-12: Sarah says the cert is Friday now" in the note and
   letting the secretary read it gives one Update wait card in a thread marked as

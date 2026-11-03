@@ -119,11 +119,12 @@ const runCase = (c: NoteEvalCase) =>
     const llm = yield* Llm;
     const input = noteEvalInput(c);
     const ids = input.items.map((i) => i.id);
+    const threadIds = (input.threads ?? []).map((t) => t.id);
     const r = yield* Effect.either(
       llm.object<NoteTriageOutput>("note_triage", {
-        schema: buildNoteTriageSchema(input.blocks.length, ids) as never,
+        schema: buildNoteTriageSchema(input.blocks.length, ids, threadIds) as never,
         ...buildNoteTriagePrompt(input),
-        validate: (out) => validateNoteTriage(out, input.blocks.length, ids),
+        validate: (out) => validateNoteTriage(out, input.blocks.length, ids, threadIds),
       }),
     );
     const fails = scoreNoteCase(c, r._tag === "Right" ? r.right.value : null);

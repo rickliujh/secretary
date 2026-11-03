@@ -37,12 +37,14 @@ describe("eval scoring", () => {
       pass: true,
       missing: [],
       forbidden: [],
+      unwanted: [],
     });
     const other = group.map((g) => ({ ...g, target: "PAY-12" }));
     expect(scoreCase({ required: [], anyOf: [group, other] }, actual)).toEqual({
       pass: false,
       missing: other,
       forbidden: [],
+      unwanted: [],
     });
   });
 
@@ -67,6 +69,23 @@ describe("eval scoring", () => {
     expect(scoreCase({ required: [], forbiddenKinds: ["create_issue"] }, actual).forbidden).toEqual(
       ["create_issue"],
     );
+  });
+
+  test("forbidden expectations fail the case when matched, as required ones match", () => {
+    const epic = { kind: "create_issue" as const, fields: { issueType: "Epic" } };
+    expect(scoreCase({ required: [], forbidden: [epic] }, actual)).toMatchObject({
+      pass: true,
+      unwanted: [],
+    });
+    const story = {
+      kind: "create_issue" as const,
+      target: "PAY-1",
+      fields: { issueType: "Story" },
+    };
+    expect(scoreCase({ required: [], forbidden: [story] }, actual)).toMatchObject({
+      pass: false,
+      unwanted: [story],
+    });
   });
 
   test("signatures ignore order and questions", () => {

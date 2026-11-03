@@ -8,6 +8,8 @@ import { Effect } from "effect";
 import {
   dailyNoteBlocks,
   inboxItems,
+  intakeItems,
+  jiraIssues,
   proposals,
   workEvents,
   workItemIssues,
@@ -16,12 +18,14 @@ import {
 import { localDate } from "@/lib/dates";
 import { nowIso } from "@/lib/ids";
 import type { Scripted } from "@/services/llm/test";
+import { setState } from "@/services/sync/state";
 import { promptOf, readThread } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
-import { type Db, query } from "../db";
+import { query } from "../db";
 import { DailyNote, type DailyNoteShape } from ".";
-import { describeRead } from "./read";
+import { dayBefore, loadLastRead, saveBody } from "./queries";
+import { describeRead, readNote } from "./read";
 
 const home = {
   smallAsks: {
@@ -60,6 +64,7 @@ const triage = (...kinds: (string | [string, string])[]) =>
       index: String(i + 1),
       kind: Array.isArray(k) ? k[0] : k,
       item: Array.isArray(k) ? k[1] : "(none)",
+      thread: "(none)",
     })),
   });
 
@@ -67,7 +72,7 @@ type Ctx = { note: DailyNoteShape; today: string };
 
 async function withNote<A>(
   scripts: Record<string, Scripted[]>,
-  body: (c: Ctx) => Effect.Effect<A, unknown, Db>,
+  body: (c: Ctx) => Effect.Effect<A, unknown, unknown>,
 ) {
   const { layer, models } = intakeTestLayer(scripts, [], { settings: home });
   const r = await Effect.runPromise(
@@ -356,5 +361,435 @@ describe("context and the work item", () => {
     expect(r.threads).toHaveLength(0);
     expect(promptOf(models.calls, 0)).toContain("w1: Renew the cert (the item the user is on now)");
     expect(describeRead(r.res, () => "9:00")).toBe("Read at 9:00: 1 note on Renew the cert.");
+  });
+});
+
+/** A note thread made earlier, as the reading finds it (D66). */
+const insertThread = (id: string, summary: string, receivedAt: string) =>
+  query((d) =>
+    d.insert(inboxItems).values({
+      id,
+      source: "note",
+      senderPersonId: null,
+      rawText: summary,
+      receivedAt,
+      status: "triaged",
+      summary,
+    }),
+  );
+const executedCreate = (id: string, inboxItemId: string, key: string) =>
+  query((d) =>
+    d.insert(proposals).values({
+      id,
+      inboxItemId,
+      kind: "create_issue",
+      payload: {
+        kind: "create_issue",
+        ref: "$new:1",
+        projectKey: "PAY",
+        issueType: "Story",
+        summary: "made",
+      },
+      status: "executed",
+      result: { issueKey: key },
+      createdAt: nowIso(),
+      decidedAt: nowIso(),
+    }),
+  );
+const insertItem = (inboxItemId: string, quote: string) =>
+  query((d) =>
+    d.insert(intakeItems).values({
+      id: `${inboxItemId}-0`,
+      inboxItemId,
+      idx: 0,
+      quote,
+      summary: quote,
+      snapshot: {},
+      promptVersion: 17,
+    }),
+  );
+const userMessages = (thread: { messages: { role: string; content: unknown }[] }) =>
+  thread.messages.filter((m) => m.role === "user").map((m) => m.content);
+const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
+
+describe("one conversation per topic (FR-20.6, D66)", () => {
+  test("a block carried over to another day keeps its thread and is not sent", async () => {
+    const { r, models } = await withNote(
+      {
+        "fast-m": [triage("act"), triage("skip")],
+        "std-m": [out(ask("Send Dana the Q3 numbers"))],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          const earlier = daysAgo(3);
+          const day = localDate(earlier);
+          yield* saveBody(day, "- [ ] send Dana the Q3 numbers\n");
+          yield* readNote("button", { now: earlier });
+          yield* note.save(today, "- [ ] send Dana the Q3 numbers\n\nCoffee with Sam\n");
+          const res = yield* note.read("button");
+          return { res, rows: yield* blocks, threads: yield* noteThreads, day, today };
+        }),
+    );
+    expect(r.res).toMatchObject({ cards: 0, continued: 0, skippedBlocks: 1 });
+    expect(r.threads).toHaveLength(1);
+    const copy = r.rows.find((b) => b.date === r.today && b.text.startsWith("- [ ]"));
+    expect(copy).toMatchObject({ status: "acted", inboxItemId: r.threads[0]?.id });
+    // The second reading sent only the new line.
+    expect(promptOf(models.calls, 2)).not.toContain('number=\\"2\\"');
+    expect(promptOf(models.calls, 2)).toContain("Coffee with Sam");
+    expect(triageCalls(models.calls)).toBe(2);
+  });
+
+  test("the same new block on both days is read once; the copy follows it", async () => {
+    const { r, models } = await withNote({ "fast-m": [triage("skip")] }, ({ note, today }) =>
+      Effect.gen(function* () {
+        yield* saveBody(dayBefore(today), "Standup notes\n");
+        yield* note.save(today, "Standup notes\n");
+        const res = yield* note.read("button");
+        return { res, rows: yield* blocks };
+      }),
+    );
+    expect(r.res).toMatchObject({ skippedBlocks: 1 });
+    expect(r.rows.map((b) => b.status)).toEqual(["skipped", "skipped"]);
+    expect(promptOf(models.calls, 0).match(/Standup notes/g)).toHaveLength(1);
+  });
+
+  test("a changed block revises its thread after every proposal was executed", async () => {
+    const { r, models } = await withNote(
+      {
+        "fast-m": [triage("act")],
+        "std-m": [out(ask("Send Dana the Q3 numbers")), out(ask("Send Dana the Q4 numbers"))],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* note.save(today, "- [ ] send Dana the Q3 numbers\n");
+          yield* note.read("button");
+          const id = (yield* noteThreads)[0]?.id ?? "";
+          yield* query((d) =>
+            d
+              .update(proposals)
+              .set({ status: "executed", decidedAt: nowIso(), result: { issueKey: "OPS-7" } })
+              .where(eq(proposals.inboxItemId, id)),
+          );
+          // OPS-7 is the Q3 ask as made: the Q4 one is new work, not a repeat of it.
+          yield* query((d) =>
+            d
+              .update(jiraIssues)
+              .set({ summary: "Send Dana the Q3 numbers", statusCategory: "new", status: "To Do" })
+              .where(eq(jiraIssues.key, "OPS-7")),
+          );
+          yield* note.save(today, "- [ ] send Dana the Q3 numbers, and the Q4 forecast too\n");
+          const res = yield* note.read("typing");
+          return { res, thread: yield* readThread(id), threads: yield* noteThreads };
+        }),
+    );
+    expect(r.res).toMatchObject({ revised: 1, cards: 0, called: false });
+    expect(r.threads).toHaveLength(1);
+    expect(userMessages(r.thread)[1]).toMatchObject({
+      parts: [
+        { type: "typed", text: "The note now says: " },
+        { type: "pasted", text: "- [ ] send Dana the Q3 numbers, and the Q4 forecast too" },
+      ],
+    });
+    const p = promptOf(models.calls, 2);
+    expect(p).toContain(
+      "1. The note now says: «- [ ] send Dana the Q3 numbers, and the Q4 forecast too»",
+    );
+    expect(p).toContain("## Already decided in this conversation");
+    expect(p).toContain("- OPS-7 [");
+    expect(r.thread.props.map((p) => [p.kind, p.status])).toEqual([
+      ["create_issue", "executed"],
+      ["create_issue", "pending"],
+    ]);
+  });
+
+  test("a block naming a ticket a note thread made: on act it continues the newest such thread", async () => {
+    const { r, models } = await withNote(
+      {
+        // The model gives no thread; the named ticket decides.
+        "fast-m": [triage("act")],
+        "std-m": [out(ask("Chase the PAY-4 review"))],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* insertThread(
+            "t-old",
+            "Refund totals",
+            new Date(Date.now() - 86_400_000 * 2).toISOString(),
+          );
+          yield* executedCreate("p-old", "t-old", "PAY-4");
+          yield* insertThread(
+            "t-new",
+            "Refund totals review",
+            new Date(Date.now() - 3_600_000).toISOString(),
+          );
+          yield* insertItem("t-new", "Review the refund totals in PAY-4 with Ana");
+          yield* query((d) =>
+            d.insert(proposals).values({
+              id: "p-new",
+              inboxItemId: "t-new",
+              kind: "add_comment",
+              payload: { kind: "add_comment", target: "PAY-4", body: "Review soon." },
+              status: "pending",
+              createdAt: nowIso(),
+            }),
+          );
+          // Ten newer threads: the named one is still found (not only the listed ten).
+          for (let i = 0; i < 10; i++)
+            yield* insertThread(
+              `t-${i}`,
+              `Other ${i}`,
+              new Date(Date.now() - i * 1000).toISOString(),
+            );
+          yield* note.save(today, "PAY-4 review slipped, chase Ana tomorrow\n");
+          const res = yield* note.read("button");
+          return {
+            res,
+            fresh: yield* readThread("t-new"),
+            old: yield* readThread("t-old"),
+            threads: yield* noteThreads,
+            rows: yield* blocks,
+            today,
+          };
+        }),
+    );
+    expect(r.res).toMatchObject({ continued: 1, cards: 0, called: true });
+    expect(triageCalls(models.calls)).toBe(1);
+    expect(r.threads).toHaveLength(12);
+    expect(userMessages(r.fresh)).toEqual([
+      {
+        parts: [{ type: "typed", text: "PAY-4 review slipped, chase Ana tomorrow" }],
+        inline: true,
+        source: "note",
+        answers: null,
+        asInput: true,
+        noteDate: r.today,
+      },
+    ]);
+    expect(userMessages(r.old)).toEqual([]);
+    expect(r.rows[0]).toMatchObject({ status: "acted", inboxItemId: "t-new" });
+    // Classified as new input next to the thread's earlier item.
+    const p = promptOf(models.calls, 1);
+    expect(p).toContain("## Earlier in this conversation (context only)");
+    expect(p).toContain("Review the refund totals in PAY-4 with Ana");
+    expect(p).not.toContain("Instructions from the user in this conversation");
+    expect(
+      r.fresh.props
+        .filter((x) => x.status === "pending")
+        .map((x) => (x.payload as { summary?: string }).summary ?? x.kind),
+    ).toEqual(["add_comment", "Chase the PAY-4 review"]);
+    expect(describeRead(r.res, () => "9:00")).toBe("Read at 9:00: 1 continued.");
+  });
+
+  test("a block naming a ticket a note thread made that the triage calls context is a note, not a message", async () => {
+    const { r, models } = await withNote(
+      { "fast-m": [triage(["context", "w1"])] },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* query((d) =>
+            d.insert(workItems).values({ id: "w1", name: "Refunds", createdAt: nowIso() }),
+          );
+          yield* insertThread("t-ref", "Refund totals", nowIso());
+          yield* executedCreate("p-ref", "t-ref", "PAY-4");
+          yield* note.save(today, "PAY-4 going well, halfway through the tests\n");
+          const res = yield* note.read("button");
+          const events = yield* query((d) =>
+            d.select().from(workEvents).where(eq(workEvents.kind, "note")).all(),
+          );
+          return { res, thread: yield* readThread("t-ref"), events };
+        }),
+    );
+    expect(r.res).toMatchObject({ continued: 0, notes: ["Refunds"] });
+    expect(r.events).toHaveLength(1);
+    expect(userMessages(r.thread)).toEqual([]);
+    expect(models.calls.filter((c) => c.model === "std-m")).toHaveLength(0);
+  });
+
+  test("a failed continuation records nothing; the next reading tries again", async () => {
+    const pick = out({ blocks: [{ index: "1", kind: "act", item: "(none)", thread: "t-cert" }] });
+    const { r } = await withNote(
+      {
+        "fast-m": [pick, pick],
+        "std-m": [{ status: 401 }, out(ask("Thank Sarah for the cert"))],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* insertThread("t-cert", "Sarah gets the gateway cert by Friday", nowIso());
+          yield* note.save(today, "Sarah has the cert now\n");
+          const failed = yield* note.read("button");
+          const rows = yield* blocks;
+          const next = yield* note.read("button");
+          return { failed, rows, next, after: yield* blocks };
+        }),
+    );
+    expect(r.failed).toMatchObject({ continued: 0, cards: 0 });
+    expect(r.rows).toHaveLength(0);
+    expect(r.next).toMatchObject({ continued: 1 });
+    expect(r.after[0]).toMatchObject({ status: "acted", inboxItemId: "t-cert" });
+  });
+
+  test("an unrelated line written in the place of a decided one is new, not a revision", async () => {
+    const { r, models } = await withNote(
+      {
+        "fast-m": [triage("act"), triage("act")],
+        "std-m": [out(ask("Send Dana the Q3 numbers")), out(ask("Call the bank"))],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* note.save(today, "- [ ] send Dana the Q3 numbers\n");
+          yield* note.read("button");
+          const id = (yield* noteThreads)[0]?.id ?? "";
+          yield* query((d) =>
+            d
+              .update(proposals)
+              .set({ status: "executed", decidedAt: nowIso(), result: { issueKey: "OPS-7" } })
+              .where(eq(proposals.inboxItemId, id)),
+          );
+          yield* note.save(today, "- [ ] call the bank\n");
+          const res = yield* note.read("typing");
+          return { res, threads: yield* noteThreads, dana: yield* readThread(id) };
+        }),
+    );
+    expect(r.res).toMatchObject({ revised: 0, cards: 1, called: true });
+    expect(r.threads).toHaveLength(2);
+    expect(userMessages(r.dana)).toHaveLength(1);
+    expect(triageCalls(models.calls)).toBe(2);
+  });
+
+  test("a changed block whose thread's first turn failed is read as new", async () => {
+    const { r } = await withNote(
+      {
+        "fast-m": [triage("act"), triage("act")],
+        "std-m": [{ status: 401 }, out(ask("Send Dana the Q3 and Q4 numbers"))],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* note.save(today, "- [ ] send Dana the Q3 numbers\n");
+          yield* note.read("button");
+          yield* note.save(today, "- [ ] send Dana the Q3 and Q4 numbers\n");
+          const res = yield* note.read("typing");
+          return { res, threads: yield* noteThreads };
+        }),
+    );
+    expect(r.res).toMatchObject({ revised: 0, cards: 1, called: true });
+    expect(r.threads).toHaveLength(2);
+  });
+
+  test("a to-do that comes back after it was done is read as new", async () => {
+    const { r, models } = await withNote(
+      {
+        "fast-m": [triage("act"), triage("act"), triage("act")],
+        "std-m": [
+          out(ask("Send weekly status to Dana")),
+          out(ask("Send weekly status to Dana")),
+          out(ask("Send weekly status to Dana")),
+        ],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          const line = "- [ ] send weekly status to Dana\n";
+          // Two weeks ago less a day: made OPS-7, which is done now.
+          const first = daysAgo(13);
+          yield* saveBody(localDate(first), line);
+          yield* readNote("button", { now: first });
+          const t1 = (yield* noteThreads)[0]?.id ?? "";
+          yield* query((d) =>
+            d
+              .update(proposals)
+              .set({ status: "executed", decidedAt: nowIso(), result: { issueKey: "OPS-7" } })
+              .where(eq(proposals.inboxItemId, t1)),
+          );
+          yield* query((d) =>
+            d
+              .update(jiraIssues)
+              .set({ status: "Done", statusCategory: "done" })
+              .where(eq(jiraIssues.key, "OPS-7")),
+          );
+          // A week ago: the same line again is a new ask; it is made and ticked that day.
+          const second = daysAgo(7);
+          const day2 = localDate(second);
+          yield* saveBody(day2, line);
+          const again = yield* readNote("button", { now: second });
+          const t2 = (yield* noteThreads).find((t) => t.id !== t1)?.id ?? "";
+          yield* query((d) =>
+            d
+              .update(proposals)
+              .set({ status: "executed", decidedAt: nowIso(), result: { issueKey: "PAY-4" } })
+              .where(eq(proposals.inboxItemId, t2)),
+          );
+          yield* saveBody(day2, "- [x] send weekly status to Dana\n");
+          const ticked = yield* readNote("button", { now: second });
+          // Today: the line once more, after the tick: new again.
+          yield* note.save(today, line);
+          const third = yield* note.read("button");
+          return { again, ticked, third, threads: yield* noteThreads };
+        }),
+    );
+    expect(r.again).toMatchObject({ cards: 1, called: true });
+    expect(r.ticked).toMatchObject({ closed: 1 });
+    expect(r.third).toMatchObject({ cards: 1, called: true });
+    expect(r.threads).toHaveLength(3);
+    expect(triageCalls(models.calls)).toBe(3);
+  });
+
+  test("the triage's thread choice continues that thread; with context the thread is ignored", async () => {
+    const pick = out({
+      blocks: [
+        { index: "1", kind: "act", item: "(none)", thread: "t-cert" },
+        { index: "2", kind: "context", item: "w1", thread: "t-cert" },
+      ],
+    });
+    const { r, models } = await withNote(
+      { "fast-m": [pick], "std-m": [out(ask("Thank Sarah for the cert"))] },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* query((d) =>
+            d.insert(workItems).values({ id: "w1", name: "Ledger export", createdAt: nowIso() }),
+          );
+          yield* insertThread("t-cert", "Sarah gets the gateway cert by Friday", nowIso());
+          yield* note.save(today, "Sarah has the cert now\n\nledger export halfway\n");
+          const res = yield* note.read("button");
+          const events = yield* query((d) =>
+            d.select().from(workEvents).where(eq(workEvents.kind, "note")).all(),
+          );
+          return { res, cert: yield* readThread("t-cert"), threads: yield* noteThreads, events };
+        }),
+    );
+    expect(r.res).toMatchObject({ continued: 1, cards: 0, notes: ["Ledger export"] });
+    expect(r.threads).toHaveLength(1);
+    expect(userMessages(r.cert)).toHaveLength(1);
+    expect(userMessages(r.cert)[0]).toMatchObject({ asInput: true, source: "note" });
+    expect(r.events).toHaveLength(1);
+    const p = promptOf(models.calls, 0);
+    expect(p).toContain("Earlier conversations from the note");
+    expect(p).toContain("- t-cert (started");
+    expect(p).toContain("Sarah gets the gateway cert by Friday");
+    expect(describeRead(r.res, () => "9:00")).toBe(
+      "Read at 9:00: 1 continued, 1 note on Ledger export.",
+    );
+  });
+
+  test("a result stored before Phase 30, without continued, still loads", async () => {
+    const { r } = await withNote({}, () =>
+      Effect.gen(function* () {
+        const { continued: _, ...old } = {
+          at: nowIso(),
+          trigger: "pass" as const,
+          cards: 1,
+          revised: 0,
+          continued: 0,
+          closed: 0,
+          notes: [],
+          skippedBlocks: 0,
+          privateBlocks: 0,
+          left: 0,
+          called: true,
+          error: null,
+        };
+        yield* setState("note.lastRead", JSON.stringify(old));
+        return yield* loadLastRead;
+      }),
+    );
+    expect(r).toMatchObject({ cards: 1, continued: 0 });
   });
 });
