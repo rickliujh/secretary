@@ -2516,3 +2516,87 @@ Review fixes
 - A pass reads the note only after a minute without typing.
 - A page left open past midnight moves to the new day.
 - Blocks are clipped to 4000 characters in the `note_triage` prompt.
+
+## Phase 30: The note as one conversation per topic (2026-11-03)
+
+Built
+- Routing in code (`services/note/read.ts`, D66): a block carried over
+  from another day of the last 14 (same hash) takes that block's status,
+  thread and work item and is not sent, unless it came back after it was
+  done (its ticked box recorded, or every ticket its thread made done); a
+  changed block revises its thread whatever its proposals' status (with
+  nothing pending, the block at its place must overlap at least one half; a
+  thread whose first turn failed is not revised); the rest go to
+  `note_triage`, and `act` on a block naming a ticket a note thread of the
+  last 14 days created or acts on continues the newest such thread, while
+  context and skip stay as for any block. A failed continuation or revision
+  records nothing, so the next reading tries again.
+- `services/note/queries.ts`: `recentBlocks` (acted, context and skipped
+  blocks by hash, and the ticked boxes recorded), `recentNoteThreads` (all
+  of the 14 days, newest first, with summary, created tickets and tickets
+  acted on; the triage call lists 10) and `createdAllDone`.
+- `note_triage` version 2: the note's earlier conversations listed as the
+  assistant's record (summaries wrapped as untrusted, at most 10 tickets
+  each); per block `thread`, an enum of their ids plus
+  "(none)"; a thread not listed is a repair error with act, ignored with
+  context or skip; `noteDecisions` returns `{ kind: "act", threadId }`.
+- Continuing a thread is `Intake.reply` with `asInput: true` (and
+  `noteDate`): the typed lines are input, as in a first message, stored on
+  the message as `asInput`, so the block becomes a new item that sees the
+  thread's earlier items, decisions and created tickets; a dismissed or
+  filed thread returns to the Inbox. The thread view marks a later note
+  message "from the note, <date>".
+- Retrieval: candidate reason `created`, the tickets approved creates made
+  in the last 14 days in any thread (at most 5, newest first), after the
+  named and pinned work tickets and before search.
+- `classify_item` prompt version 17: the candidate header explains
+  `created`; "act on that issue instead of creating one" leaves the
+  small-ask rule and becomes a general rule next to the D64 shape rule; a
+  `create_issue` whose summary overlaps an open candidate's in the same
+  project at 0.75 (0.5 for a ticket this thread created, unless it is a
+  sibling under the same epic or parent) is sent back for repair; summaries
+  are compared with short words and numbers kept (`summaryOverlap`), and
+  differing numbers ("Q3", "Q4") never match. Retrieval's `created` window
+  ends with the item's day. Version 16 snapshots render and validate as before.
+- `ReadResult.continued` ("1 continued" on the page; an older stored result
+  reads as 0).
+- Tests: note triage schema, validation, decisions and prompt with threads;
+  classify version 17 rule placement, header, version 16 replay and the
+  duplicate check at both thresholds, across projects, for done tickets, for
+  work filed under the ticket and for a small ask; retrieval's `created`
+  source and order; `asInput` in a dismissed thread; the reading (carried
+  over, twins, changed after execution, a named key, the triage's thread,
+  thread ignored with context, an older stored result); the mock-Jira AC of
+  FR-20.6. Eval: a thread case in `note-cases.ts`; "an epic the note already
+  made is not created again" in `cases.ts`, with `forbidden` expectations in
+  the scorer.
+
+Departures
+- The duplicate check skips a create filed under the candidate (its epic or
+  parent), holds siblings to 0.75, compares on `summaryTokens`, and checks a
+  small ask in the project code places it in.
+- The carried-over rule runs before the tick rule, and a ticked box finds
+  its unticked line on another recent day too.
+- The same new block on yesterday's and today's note is sent once; the copy
+  follows it.
+- "Acts on" leaves out superseded proposals as well as rejected ones.
+- The `created` window is local midnight 14 days before the item's day
+  (`askedOn`, else today) to the end of that day, on `decided_at`.
+- The classify eval case is typed input with the Epic made by another,
+  seeded thread.
+- An intake test's scripted "Open ledger firewall port" now gets a repair
+  turn: OPS-7 "Open firewall to ledger" is open, so version 17 sends it
+  back.
+- Review fixes before merge: the at-place match with nothing pending, the
+  numbers in the duplicate check, siblings, all threads for a named ticket,
+  a named ticket's block through the triage call, recurring to-dos, failed
+  continuations, failed first turns, untrusted thread summaries, and the
+  local-midnight windows.
+
+Known limits
+- Live evals: note triage 18/18 blocks (4 readings), and the new thread
+  reading passed 3 of 3 reruns. The classify run stopped after 6 cases when
+  the OpenRouter key hit its total spending limit (5 passed; the 6th and the
+  new created-epic case failed with 403 "Key limit exceeded"), so the new
+  case and a regression check of version 17 are still to run.
+- Not verified in the running app.
