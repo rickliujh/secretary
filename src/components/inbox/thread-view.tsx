@@ -24,7 +24,8 @@ import { sourceLabel } from "@/components/labels";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { dateTime, relativeTime } from "@/lib/time";
+import { localDate } from "@/lib/dates";
+import { dateTime, relativeTime, shortDate } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { inboxDetail, type ProposalView, type ThreadMessage } from "@/services/inbox/queries";
 import type { Source } from "@/services/intake";
@@ -347,6 +348,7 @@ export function ThreadView({ id }: { id: string }) {
   const last = d.messages.at(-1);
   const firstUser = d.messages.find((m) => m.role === "user");
   const origin = firstUser?.role === "user" ? firstUser.origin : null;
+  const noteDate = firstUser?.role === "user" ? firstUser.noteDate : null;
   const unanswered = !reply.isPending && last?.role === "user" && d.item.error;
 
   const send = (m: ComposerMessage) => {
@@ -394,7 +396,16 @@ export function ThreadView({ id }: { id: string }) {
     <div className="flex h-full min-h-0 flex-col gap-3">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Badge variant="outline">{sourceLabel(d.item.source)}</Badge>
+          {noteDate ? (
+            // A block of the daily note (D65): back to the note it came from.
+            <Badge variant="outline" asChild>
+              <Link to="/note" search={{ date: noteDate === localDate() ? undefined : noteDate }}>
+                Note · {shortDate(noteDate)}
+              </Link>
+            </Badge>
+          ) : (
+            <Badge variant="outline">{sourceLabel(d.item.source)}</Badge>
+          )}
           {d.item.senderName && <span>from {d.item.senderName}</span>}
           <span title={dateTime(d.item.receivedAt)}>{relativeTime(d.item.receivedAt)}</span>
           <Badge variant="secondary">{d.item.status}</Badge>

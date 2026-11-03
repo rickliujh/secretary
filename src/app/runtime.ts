@@ -13,6 +13,8 @@ import { IntakeLive } from "@/services/intake/live";
 import { JiraClientLive } from "@/services/jira/live";
 import { LearningLive } from "@/services/learning/live";
 import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
+import { NoteFileLive } from "@/services/note/file-live";
+import { DailyNoteLive } from "@/services/note/live";
 import { PlanningLive } from "@/services/planning/live";
 import { ProposalsLive } from "@/services/proposals/live";
 import { ReportsLive } from "@/services/report/live";
@@ -27,8 +29,10 @@ const Base = FetcherLive.pipe(
   Layer.provideMerge(Layer.mergeAll(SettingsLive, SecretsLive, DbLive)),
 );
 
-// Chat's propose_actions tool runs intake, so Chat sits above it.
+// Chat's propose_actions tool runs intake, so Chat sits above it; the daily
+// note reads into intake and the chat writes the note, so it sits between them.
 const AppLayer = ChatLive.pipe(
+  Layer.provideMerge(DailyNoteLive.pipe(Layer.provide(NoteFileLive))),
   Layer.provideMerge(
     Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive, LearningLive, PlanningLive, ReportsLive),
   ),

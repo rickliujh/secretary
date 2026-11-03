@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { ALL_PAGES, MAIN_NAV, PAGE_TABS } from "./nav";
 
 describe("navigation (D50)", () => {
-  test("eight pages in the sidebar, Drafts before Chat", () => {
+  test("nine pages in the sidebar, Note after Today, Drafts before Chat", () => {
     expect(MAIN_NAV.map((n) => n.label)).toEqual([
       "Today",
+      "Note",
       "Inbox",
       "Tickets",
       "Waiting on",

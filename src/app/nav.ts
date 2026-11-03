@@ -21,6 +21,7 @@ import { CONTEXT_TABS, type ContextTab, SPRINT_TABS, type SprintTab } from "./ta
 export type NavItem = {
   to:
     | "/"
+    | "/note"
     | "/inbox"
     | "/tickets"
     | "/waiting"
@@ -33,9 +34,10 @@ export type NavItem = {
   icon: LucideIcon;
 };
 
-/** The pages in the sidebar (D50; Drafts came back on 2026-10-15). */
+/** The pages in the sidebar (D50; Drafts came back on 2026-10-15; Note after Today, D65). */
 export const MAIN_NAV: NavItem[] = [
   { to: "/", label: "Today", icon: Sunrise },
+  { to: "/note", label: "Note", icon: NotebookPen },
   { to: "/inbox", label: "Inbox", icon: Inbox },
   { to: "/tickets", label: "Tickets", icon: ListTree },
   { to: "/waiting", label: "Waiting on", icon: Hourglass },

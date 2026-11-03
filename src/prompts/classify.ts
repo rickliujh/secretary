@@ -1175,7 +1175,8 @@ function validateDirectory(out: ItemOutput, s: ItemSnapshot): string[] {
   // Pasted text never adds people the user did not ask about (FR-18.2): from
   // pasted input, a new one must be needed here or named in the user's own typed
   // words in the thread (instructions, answers). Typed input, the chat's too, is theirs.
-  const pasted = s.source !== "typed";
+  // A daily note block is the user's words too, unless its input is a ">" quote (D65).
+  const pasted = s.source !== "typed" && !(s.source === "note" && s.ownInput);
   const typedWords = [...(s.thread?.instructions ?? []), s.clarification ?? ""].join("\n");
   const knownUsers = new Set(s.jiraUsers.map((u) => u.username));
   const names = new Map<string, number>();
@@ -1913,7 +1914,7 @@ ${
       from: s.sender ? line([s.sender.displayName, s.sender.title, s.sender.team]) : null,
     })}${
       // Typed input can hold a paste inside its lines too (D56).
-      s.source === "typed" ? rule([s.quote]) : ""
+      s.source === "typed" || s.source === "note" ? rule([s.quote]) : ""
     }\nReferences found by code: issues ${s.references.issueKeys.join(", ") || "none"}; tickets ${s.references.tickets.join(", ") || "none"}.`,
   );
   if (s.thread?.instructions.length) {

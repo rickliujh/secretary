@@ -21,6 +21,8 @@ export const SOURCE_LABELS: Record<Source | "secretary", string> = {
   meeting: "Meeting notes",
   typed: "Typed",
   other: "Other",
+  /** A block of the daily note (D65). */
+  note: "Note",
   /** An outcome card (Phase 25). */
   secretary: "Secretary",
 };

@@ -21,6 +21,7 @@ export const TASK_TYPES = [
   "chat",
   "attach_event",
   "update_work_state",
+  "note_triage",
 ] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 
@@ -149,6 +150,14 @@ export const TASK_DEFAULTS: Record<TaskType, TaskDefaults> = {
     timeoutMs: 120_000,
     label: "Update work state",
     description: "Fold new events into a work item's state",
+  },
+  note_triage: {
+    tier: "fast",
+    escalate: false,
+    confidenceThreshold: 0,
+    timeoutMs: 60_000,
+    label: "Note triage",
+    description: "Which blocks of the daily note lead to anything",
   },
 };
 

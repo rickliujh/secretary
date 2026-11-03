@@ -15,6 +15,7 @@ import { Route as ContextRouteImport } from './routes/context'
 import { Route as DraftsRouteImport } from './routes/drafts'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as MemoryRouteImport } from './routes/memory'
+import { Route as NoteRouteImport } from './routes/note'
 import { Route as PeopleRouteImport } from './routes/people'
 import { Route as PlanningRouteImport } from './routes/planning'
 import { Route as ReportRouteImport } from './routes/report'
@@ -52,6 +53,11 @@ const InboxRoute = InboxRouteImport.update({
 const MemoryRoute = MemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NoteRoute = NoteRouteImport.update({
+  id: '/note',
+  path: '/note',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PeopleRoute = PeopleRouteImport.update({
@@ -102,6 +108,7 @@ export interface FileRoutesByFullPath {
   '/drafts': typeof DraftsRoute
   '/inbox': typeof InboxRoute
   '/memory': typeof MemoryRoute
+  '/note': typeof NoteRoute
   '/people': typeof PeopleRoute
   '/planning': typeof PlanningRoute
   '/report': typeof ReportRoute
@@ -118,6 +125,7 @@ export interface FileRoutesByTo {
   '/drafts': typeof DraftsRoute
   '/inbox': typeof InboxRoute
   '/memory': typeof MemoryRoute
+  '/note': typeof NoteRoute
   '/people': typeof PeopleRoute
   '/planning': typeof PlanningRoute
   '/report': typeof ReportRoute
@@ -135,6 +143,7 @@ export interface FileRoutesById {
   '/drafts': typeof DraftsRoute
   '/inbox': typeof InboxRoute
   '/memory': typeof MemoryRoute
+  '/note': typeof NoteRoute
   '/people': typeof PeopleRoute
   '/planning': typeof PlanningRoute
   '/report': typeof ReportRoute
@@ -153,6 +162,7 @@ export interface FileRouteTypes {
     | '/drafts'
     | '/inbox'
     | '/memory'
+    | '/note'
     | '/people'
     | '/planning'
     | '/report'
@@ -169,6 +179,7 @@ export interface FileRouteTypes {
     | '/drafts'
     | '/inbox'
     | '/memory'
+    | '/note'
     | '/people'
     | '/planning'
     | '/report'
@@ -185,6 +196,7 @@ export interface FileRouteTypes {
     | '/drafts'
     | '/inbox'
     | '/memory'
+    | '/note'
     | '/people'
     | '/planning'
     | '/report'
@@ -202,6 +214,7 @@ export interface RootRouteChildren {
   DraftsRoute: typeof DraftsRoute
   InboxRoute: typeof InboxRoute
   MemoryRoute: typeof MemoryRoute
+  NoteRoute: typeof NoteRoute
   PeopleRoute: typeof PeopleRoute
   PlanningRoute: typeof PlanningRoute
   ReportRoute: typeof ReportRoute
@@ -254,6 +267,13 @@ declare module '@tanstack/react-router' {
       path: '/memory'
       fullPath: '/memory'
       preLoaderRoute: typeof MemoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/note': {
+      id: '/note'
+      path: '/note'
+      fullPath: '/note'
+      preLoaderRoute: typeof NoteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/people': {
@@ -322,6 +342,7 @@ const rootRouteChildren: RootRouteChildren = {
   DraftsRoute: DraftsRoute,
   InboxRoute: InboxRoute,
   MemoryRoute: MemoryRoute,
+  NoteRoute: NoteRoute,
   PeopleRoute: PeopleRoute,
   PlanningRoute: PlanningRoute,
   ReportRoute: ReportRoute,

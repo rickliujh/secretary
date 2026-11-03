@@ -15,6 +15,13 @@ import {
 } from "@/components/ui/card";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
   type AppSettings,
@@ -289,10 +296,135 @@ function DayEndCard() {
   );
 }
 
+/** Select value for "Not synced"; the setting stores "". */
+const NOT_SYNCED = "none";
+
+const NoteForm = z.object({
+  enabled: z.boolean(),
+  vaultSourceId: z.string(),
+  privateHeading: z.string().trim().min(1, "Enter a heading").max(80, "At most 80 characters"),
+});
+type NoteValues = z.infer<typeof NoteForm>;
+
+/**
+ * The daily note (FR-20, D65): whether the secretary reads it, the Obsidian
+ * vault whose daily note is the file of record, and the heading whose blocks
+ * are never sent to a model.
+ */
+function DailyNoteCard() {
+  const { data: settings } = useSettings();
+  const update = useUpdateSettings();
+  const form = useForm<NoteValues>({
+    resolver: zodResolver(NoteForm),
+    defaultValues: { enabled: true, vaultSourceId: "", privateHeading: "Private" },
+  });
+  useEffect(() => {
+    if (settings) form.reset(settings.secretary.dailyNote);
+  }, [settings, form]);
+  const vaults = (settings?.dataSources ?? []).filter((d) => d.enabled);
+  const error = form.formState.errors.privateHeading;
+  const save = form.handleSubmit((v) =>
+    update.mutate(
+      (s) => ({
+        ...s,
+        secretary: {
+          ...s.secretary,
+          dailyNote: {
+            enabled: v.enabled,
+            vaultSourceId: v.vaultSourceId,
+            privateHeading: v.privateHeading.trim(),
+          },
+        },
+      }),
+      { onSuccess: () => toast.success("Daily note saved") },
+    ),
+  );
+  return (
+    <Card>
+      <form onSubmit={save}>
+        <CardHeader>
+          <CardTitle>Daily note</CardTitle>
+          <CardDescription>
+            One free-form note a day on the Note page. The secretary reads what is new at each work
+            pass, a minute after you stop typing, and when you press Read now, and turns what needs
+            doing into cards in the Inbox. With a vault chosen, your Obsidian daily note is the
+            note: the page shows and edits it, and edits on both sides are merged.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FieldGroup>
+            <Controller
+              control={form.control}
+              name="enabled"
+              render={({ field }) => (
+                <Field orientation="horizontal">
+                  <Switch
+                    id="note-enabled"
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                  <FieldLabel htmlFor="note-enabled">Read my daily note</FieldLabel>
+                </Field>
+              )}
+            />
+            <Controller
+              control={form.control}
+              name="vaultSourceId"
+              render={({ field }) => (
+                <Field>
+                  <FieldLabel htmlFor="note-vault">Obsidian vault</FieldLabel>
+                  <Select
+                    value={
+                      field.value && vaults.some((v) => v.id === field.value)
+                        ? field.value
+                        : NOT_SYNCED
+                    }
+                    onValueChange={(v) => field.onChange(v === NOT_SYNCED ? "" : v)}
+                  >
+                    <SelectTrigger id="note-vault" className="w-64">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NOT_SYNCED}>Not synced</SelectItem>
+                      {vaults.map((v) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          {v.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    {vaults.length
+                      ? "Its daily note becomes the note. Choosing one later merges what the page holds into it."
+                      : "Add an Obsidian vault in Settings > Data sources to sync with it."}
+                  </FieldDescription>
+                </Field>
+              )}
+            />
+            <Field data-invalid={!!error}>
+              <FieldLabel htmlFor="note-private">Private heading</FieldLabel>
+              <Input id="note-private" className="w-64" {...form.register("privateHeading")} />
+              <FieldDescription>
+                Lines under a heading with this name are never sent to a model.
+              </FieldDescription>
+              <FieldError errors={[error]} />
+            </Field>
+          </FieldGroup>
+        </CardContent>
+        <CardFooter className="mt-4">
+          <Button type="submit" disabled={update.isPending}>
+            Save
+          </Button>
+        </CardFooter>
+      </form>
+    </Card>
+  );
+}
+
 /**
  * Settings > Secretary (D61): the work model's switch and budgets, where you
- * are (D62), the end of day (D63), the follow-up rules, and the standing
- * instructions below them.
+ * are (D62), the end of day (D63), the daily note (D65), the follow-up rules,
+ * and the standing instructions below them.
  */
 export function SecretarySection() {
   return (
@@ -300,6 +432,7 @@ export function SecretarySection() {
       <WorkCard />
       <WhereYouAre />
       <DayEndCard />
+      <DailyNoteCard />
       <RuleSwitches />
       <InstructionSwitches />
     </div>

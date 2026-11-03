@@ -69,7 +69,9 @@ export function Composer({
   compact?: boolean;
 }) {
   const [parts, setParts] = useState<MessagePart[]>([]);
-  const [source, setSource] = useState<Source>(defaultSource === "typed" ? "teams" : defaultSource);
+  const [source, setSource] = useState<Source>(
+    defaultSource === "typed" || defaultSource === "note" ? "teams" : defaultSource,
+  );
   const [sender, setSender] = useState<string | null>(null);
   const people = usePeople().data ?? [];
   const withInput = hasInput(parts, true);
@@ -163,7 +165,7 @@ export function Composer({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {SOURCES.filter((s) => s !== "typed").map((s) => (
+              {SOURCES.filter((s) => s !== "typed" && s !== "note").map((s) => (
                 <SelectItem key={s} value={s}>
                   {SOURCE_LABELS[s]}
                 </SelectItem>

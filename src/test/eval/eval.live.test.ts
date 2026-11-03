@@ -47,6 +47,7 @@ import { IntakeLive } from "@/services/intake/live";
 import { JiraClientLive } from "@/services/jira/live";
 import type { LlmErrorKind } from "@/services/llm/errors";
 import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
+import { dailyNoteTestLayer } from "@/services/note/test";
 import { Planning } from "@/services/planning";
 import { PlanningLive } from "@/services/planning/live";
 import { describePayload, type ProposalPayload } from "@/services/proposals/schema";
@@ -271,7 +272,7 @@ function layerFor(tiers: TierBindings, extraRoutes: StubRoute[] = []) {
     Layer.provideMerge(
       Layer.mergeAll(CommsLive, PlanningLive, ReportsLive),
       Layer.provideMerge(
-        IntakeLive,
+        Layer.provideMerge(dailyNoteTestLayer(), IntakeLive),
         Layer.provideMerge(
           Layer.merge(
             RetrievalLive,

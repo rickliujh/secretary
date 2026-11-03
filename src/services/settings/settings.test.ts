@@ -86,6 +86,7 @@ describe("Settings schema", () => {
         suggestions: true,
         parkInput: true,
         dayEnd: { enabled: false, at: "17:30" },
+        dailyNote: { enabled: true, vaultSourceId: "", privateHeading: "Private" },
       },
       network: {
         proxyMode: "system",
