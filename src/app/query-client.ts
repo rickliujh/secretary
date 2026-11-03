@@ -64,6 +64,13 @@ export const queryKeys = {
   ticketDetail: (key: string) => ["tickets", "detail", key] as const,
   /** The Work tab of a ticket (D61); under "tickets" so sync, decisions and passes refresh it. */
   workItem: (key: string) => ["tickets", "work", key] as const,
+  /** An item's next moves (D62); under "tickets" so sync, decisions and passes refresh them. */
+  workNext: (itemId: string, today: string) => ["tickets", "work-next", itemId, today] as const,
+  /** Today's "You're on" panel (D62). */
+  currentWork: (today: string) => ["tickets", "work-current", today] as const,
+  /** The Drafts page's work line for a draft's tickets (D62). */
+  workOfKeys: (keys: readonly string[], today: string) =>
+    ["tickets", "work-of", today, ...keys] as const,
   transitions: (key: string) => ["tickets", "transitions", key] as const,
   /** Transitions into a done status (D49), read when Done is pressed. */
   doneTransitions: (key: string) => ["tickets", "done-transitions", key] as const,
@@ -80,8 +87,10 @@ export const queryKeys = {
   contactsByUsername: ["directory", "by-username"] as const,
   confluenceSearch: (cql: string) => ["confluence", "search", cql] as const,
   inbox: ["inbox"] as const,
-  inboxList: (search: string) => ["inbox", "list", search] as const,
+  inboxList: (search: string, against = true) => ["inbox", "list", search, against] as const,
   inboxDetail: (id: string) => ["inbox", "detail", id] as const,
+  /** A thread against the current item, and whether Park applies (D62). */
+  threadAbout: (id: string, today: string) => ["inbox", "about", id, today] as const,
   pendingCount: ["inbox", "pending"] as const,
   /** "Make that the rule?" on a playbook card (Phase 26); under "inbox" so decisions refresh it. */
   instructionOffer: (playbook: string, kinds: readonly string[]) =>

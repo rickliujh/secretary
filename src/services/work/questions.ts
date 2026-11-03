@@ -160,13 +160,20 @@ export const postQuestion = (
         createdAt: now,
       }),
     );
+    // A thread the user parked stays parked (D62): the question waits in it.
     yield* query((d) =>
-      d.update(inboxItems).set({ status: "triaged" }).where(eq(inboxItems.id, inboxItemId)),
+      d
+        .update(inboxItems)
+        .set({ status: "triaged" })
+        .where(and(eq(inboxItems.id, inboxItemId), ne(inboxItems.status, "parked"))),
     );
     return id;
   });
 
-/** Work questions asked in work threads since `since` (the ration counts these). */
+/**
+ * Work questions asked in work threads since `since` (the ration counts these).
+ * A question in a thread the user parked does not count (D62).
+ */
 const askedSince = (since: string) =>
   Effect.map(
     query((d) =>
@@ -178,6 +185,7 @@ const askedSince = (since: string) =>
           and(
             eq(proposals.kind, "needs_clarification"),
             isNotNull(inboxItems.workItemId),
+            ne(inboxItems.status, "parked"),
             gte(proposals.createdAt, since),
             sql`json_extract(${proposals.payload}, '$.work.type') IS NOT NULL`,
           ),
@@ -335,9 +343,30 @@ export const askQuestions = (opts: {
     for (const d of opts.doubts)
       if (!done.has(doubtKey(d))) rationed.push({ type: "group", ask: d, rank: 3 });
 
+    // A work thread the user parked takes no new rationed question until it is
+    // back (D62): its questions do not count, so they would not be rationed.
+    const parked = new Set(
+      ids.length
+        ? (yield* query((d) =>
+            d
+              .select({ item: inboxItems.workItemId })
+              .from(inboxItems)
+              .where(
+                and(
+                  inArray(inboxItems.workItemId, ids),
+                  ne(inboxItems.source, "secretary"),
+                  eq(inboxItems.status, "parked"),
+                ),
+              )
+              .all(),
+          )).map((r) => r.item)
+        : [],
+    );
+    const target = (r: Ask) => (r.type === "meaning" ? r.ask.itemId : (r.ask.itemIds[0] ?? ""));
     let left = Math.max(0, opts.perDay - (yield* askedSince(opts.dayStart)));
     for (const r of rationed.sort((a, b) => a.rank - b.rank)) {
       if (left <= 0) break;
+      if (parked.has(target(r))) continue;
       left--;
       if (r.type === "attach") {
         const first = r.ask.itemIds[0] ?? "";

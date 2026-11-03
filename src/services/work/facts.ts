@@ -11,6 +11,7 @@ import { localDate } from "@/lib/dates";
 import { parseBlockers } from "@/services/blockers/logic";
 import { blockInfo } from "@/services/dashboard/sections";
 import { query } from "@/services/db";
+import { timing } from "@/services/dependencies/logic";
 import { listDependencies } from "@/services/dependencies/queries";
 import { parseIssueLinks } from "@/services/jira/schemas";
 import { getState, SYNC_KEYS } from "@/services/sync/state";
@@ -42,6 +43,11 @@ export type FactWait = {
   requestedAt: string | null;
   expectedAt: string | null;
   nextFollowupAt: string | null;
+  /**
+   * When the next follow-up is due by D47's timing: the back day while the
+   * owner is away or just back, else `nextFollowupAt` (D62 ranks on it).
+   */
+  followupOn?: string | null;
 };
 
 export type ItemFacts = {
@@ -124,6 +130,7 @@ export const loadItemFacts = (
           requestedAt: x.requestedAt,
           expectedAt: x.expectedAt,
           nextFollowupAt: x.nextFollowupAt,
+          followupOn: timing(x, opts.today ?? localDate()).followupOn,
         }),
       );
     const assignees = rows.map((r) => r.assignee).filter((a): a is string => !!a);

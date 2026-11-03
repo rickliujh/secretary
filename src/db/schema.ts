@@ -348,7 +348,8 @@ export const inboxItems = sqliteTable(
     }),
     rawText: text("raw_text").notNull(),
     receivedAt: text("received_at").notNull(),
-    status: text("status", { enum: ["new", "triaged", "filed", "dismissed"] })
+    /** `parked` (D62): set aside by the user while they are on another work item. */
+    status: text("status", { enum: ["new", "triaged", "filed", "dismissed", "parked"] })
       .notNull()
       .default("new"),
     /** One-line triage summary (FR-2.2). */
@@ -365,6 +366,16 @@ export const inboxItems = sqliteTable(
      * makes a new key. Null for every other thread.
      */
     situationKey: text("situation_key"),
+    /**
+     * Why the user parked the thread (D62): "on <item name>" or their own words.
+     * Kept after it returns, so the Inbox can say why it was set aside.
+     */
+    parkedReason: text("parked_reason"),
+    /**
+     * The local day (YYYY-MM-DD) a parked thread returns at the latest; it
+     * returns sooner when the current item changes or closes. Null once back.
+     */
+    parkedUntil: text("parked_until"),
   },
   (t) => [
     index("inbox_items_received_idx").on(t.receivedAt),
@@ -531,6 +542,8 @@ export const workItems = sqliteTable(
     needsLook: bool("needs_look").notNull().default(false),
     /** The item the user said they are on; at most one. */
     current: bool("current").notNull().default(false),
+    /** The local day (YYYY-MM-DD) the user said they are on it (D62): current for that day only. */
+    currentOn: text("current_on"),
     /** The item this one was merged into (status dismissed). */
     mergedInto: text("merged_into"),
     createdAt: text("created_at").notNull(),

@@ -41,6 +41,7 @@ import { appendEvents, eventsOfItems } from "./events";
 import { loadItemFacts } from "./facts";
 import { waitingFor } from "./playbooks/expand";
 import {
+  heldSituations,
   quietRules,
   RULE_LABELS,
   RULE_NAMES,
@@ -73,6 +74,64 @@ const NEW_ITEM_HOURS = 48;
 /** Events of an item the rules read for "nothing sent since" checks. */
 const HISTORY_LIMIT = 300;
 
+/** A situation a switched-off or quiet rule would raise, and the local day it was last seen. */
+export const HeldSchema = z.object({
+  rule: z.enum(RULE_NAMES),
+  key: z.string(),
+  title: z.string(),
+  why: z.string(),
+  keys: z.array(z.string()).default([]),
+  waits: z.array(z.string()).default([]),
+  facts: z.record(z.string(), z.unknown()).default({}),
+  seenOn: z.string(),
+});
+export type Held = z.infer<typeof HeldSchema>;
+
+/**
+ * Rules that fire on a change (an event, a moved date) rather than on a state
+ * that holds: what they raised stays a held line for the rest of that day,
+ * since the next pass no longer sees the change.
+ */
+const ON_CHANGE: ReadonlySet<RuleName> = new Set([
+  "expected_date_moved",
+  "blocker_closed",
+  "teammate_touched",
+  "ticket_done",
+]);
+
+/**
+ * The held lines of an item after a pass: those found now, and those an
+ * earlier pass found today for a change-driven rule that is still off or quiet.
+ */
+export function mergeHeld(
+  found: readonly Situation[],
+  previous: readonly Held[],
+  stillHeld: (rule: RuleName) => boolean,
+  today: string,
+): Held[] {
+  const now: Held[] = found.flatMap((x) =>
+    (RULE_NAMES as readonly string[]).includes(x.rule)
+      ? [
+          {
+            rule: x.rule as RuleName,
+            key: x.key,
+            title: x.title,
+            why: x.why,
+            keys: x.keys,
+            waits: x.waits,
+            facts: x.facts,
+            seenOn: today,
+          },
+        ]
+      : [],
+  );
+  const keys = new Set(now.map((h) => h.key));
+  const kept = previous.filter(
+    (h) => !keys.has(h.key) && h.seenOn === today && ON_CHANGE.has(h.rule) && stillHeld(h.rule),
+  );
+  return [...now, ...kept];
+}
+
 const MemorySchema = z.object({
   items: z
     .record(
@@ -86,6 +145,11 @@ const MemorySchema = z.object({
         known: z.array(z.string()).default([]),
         /** Situations found but not offered yet (the cap): offered in a later pass. */
         deferred: z.array(SituationSchema).default([]),
+        /**
+         * What a rule that is off or quiet here would raise (D62, Phase 27):
+         * shown as a line among the item's next moves, never as a card.
+         */
+        held: z.array(HeldSchema).default([]),
       }),
     )
     .default({}),
@@ -488,7 +552,7 @@ export const runOutcomes = (opts: { now: Date; settings: AppSettings }) =>
     const cutoff = new Date(opts.now.getTime() - NEW_ITEM_HOURS * 3_600_000).toISOString();
 
     const found: { item: (typeof items)[number]; index: number; s: Situation }[] = [];
-    const seen = new Map<string, RuleMemory & { known: string[] }>();
+    const seen = new Map<string, RuleMemory & { known: string[]; held: Held[] }>();
     for (const [index, item] of items.entries()) {
       const facts = yield* loadItemFacts(item.id, { today });
       const keys = new Set(facts.tickets.map((t) => t.key));
@@ -552,6 +616,15 @@ export const runOutcomes = (opts: { now: Date; settings: AppSettings }) =>
       };
       // A finished item only tidies up after its done ticket.
       const ruled = item.status === "active" ? runRules(input) : [];
+      const held =
+        item.status === "active"
+          ? mergeHeld(
+              heldSituations(input),
+              prev?.held ?? [],
+              (rule) => !opts.settings.secretary.rules[rule] || input.quiet.has(rule),
+              today,
+            )
+          : [];
       const situations =
         item.status === "active"
           ? [
@@ -582,6 +655,7 @@ export const runOutcomes = (opts: { now: Date; settings: AppSettings }) =>
         waits: Object.fromEntries(waits.map((w) => [w.id, w.expectedAt])),
         lastEventId,
         known,
+        held,
       });
     }
 
@@ -689,6 +763,7 @@ export const pendingOutcomes = Effect.gen(function* () {
         keys: record.keys,
         waits: record.waits,
         comments: record.comments,
+        facts: record.facts,
         at: c.receivedAt,
       } satisfies OutcomeRef,
     ];
@@ -710,8 +785,20 @@ export type OutcomeRef = {
   waits: string[];
   /** The comments it is about (`teammate_touched`): Today hides their comment rows. */
   comments: string[];
+  /** The facts the rule used (a promise's due date, a chase's day), for next moves (D62). */
+  facts: Record<string, unknown>;
   at: string;
 };
 
 /** The rules quiet on an item, for the Work tab's "Ask again about ..." */
 export const quietRulesOf = (itemId: string) => Effect.map(quietOfItem(itemId), (s) => [...s]);
+
+/** The held lines of an item (D62): what an off or quiet rule would raise, as the last pass saw it. */
+export const heldOfItem = (itemId: string, today: string) =>
+  Effect.map(getState(SYNC_KEYS.outcomes), (raw) => {
+    const memory: OutcomeMemory = readJson(raw, MemorySchema, { items: {} });
+    // A change-driven line is for the day it was seen; the rest held at the last pass.
+    return (memory.items[itemId]?.held ?? []).filter(
+      (h) => !ON_CHANGE.has(h.rule) || h.seenOn === today,
+    );
+  });

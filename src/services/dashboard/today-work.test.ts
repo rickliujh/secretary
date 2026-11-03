@@ -45,6 +45,7 @@ describe("Today and outcome cards (Phase 25)", () => {
     keys: p.keys ?? [],
     waits: p.waits ?? [],
     comments: p.comments ?? [],
+    facts: {},
     at: NOW,
   });
   const ticketKeys = (rows: readonly object[]) =>

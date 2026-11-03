@@ -13,6 +13,10 @@
  * 7. The consequence rules run for the active items and offer outcome cards
  *    (Phase 25, `outcomes.ts`), even when no model call was made.
  *
+ * Right after the grouping, an item current since an earlier day stops being
+ * current, and parked Inbox threads come back when the current item changed
+ * or closed, or their day is over (D62, `park.ts`).
+ *
  * Nothing here writes to Jira. A pass with no new events makes no model call.
  */
 import { and, asc, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
@@ -38,6 +42,7 @@ import { appendEvents } from "./events";
 import { loadItemFacts } from "./facts";
 import { noteStillHolds } from "./note";
 import { runOutcomes } from "./outcomes";
+import { returnParked, settleCurrent } from "./park";
 import { regroup } from "./queries";
 import { askQuestions, expireQuestions, type MeaningAsk } from "./questions";
 import {
@@ -63,6 +68,8 @@ export type PassResult = {
   asked: number;
   /** Outcome cards offered (Phase 25). */
   offered: number;
+  /** Parked Inbox threads that came back (D62). */
+  returned: number;
 };
 
 /** Start of the local day `now` is in, as an ISO time (the budgets count from here). */
@@ -317,11 +324,21 @@ export const runWorkPass = (opts: { now?: Date } = {}) =>
       deferred: 0,
       asked: 0,
       offered: 0,
+      returned: 0,
     };
-    if (!settings.work.enabled) return { ...result, skipped: "disabled" } satisfies PassResult;
+    if (!settings.work.enabled) {
+      // Nothing is current while the work model is off: parked threads come back.
+      result.returned = yield* returnParked(now);
+      return { ...result, skipped: "disabled" } satisfies PassResult;
+    }
 
     const grouping = yield* regroup(settings, now);
     result.created = grouping.created.length;
+    // An item is current for the day it was set; parked threads come back
+    // when it changes or closes (the grouping just closed what is done), or
+    // on the first pass of the next day (D62).
+    yield* settleCurrent(today);
+    result.returned = yield* returnParked(now);
     yield* expireQuestions(now);
     const attach = yield* attachPending(now);
     result.attached = attach.attached;
@@ -360,9 +377,9 @@ export const runWorkPass = (opts: { now?: Date } = {}) =>
     });
     result.asked = asked.length;
     result.offered = (yield* runOutcomes({ now, settings })).offered;
-    if (result.calls || result.created || result.asked || result.offered)
+    if (result.calls || result.created || result.asked || result.offered || result.returned)
       logger.info(
-        `Work pass: ${result.created} new items, ${result.attached} attached, ${result.calls} state updates, ${result.asked} questions, ${result.offered} outcome cards`,
+        `Work pass: ${result.created} new items, ${result.attached} attached, ${result.calls} state updates, ${result.asked} questions, ${result.offered} outcome cards${result.returned ? `, ${result.returned} parked threads back` : ""}`,
       );
     return result;
   });

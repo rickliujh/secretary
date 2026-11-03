@@ -55,6 +55,7 @@ import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sync } from "@/services/sync";
 import { deletedKeys } from "@/services/sync/deleted";
 import { EVENT_TEXT_CHARS, recordEvents } from "@/services/work/events";
+import { takeUp } from "@/services/work/park";
 import { expandTurn } from "@/services/work/playbooks/expand";
 import { revisionPayload } from "@/services/work/playbooks/waiting";
 import { answerWorkQuestion, postMessage } from "@/services/work/questions";
@@ -1076,6 +1077,8 @@ const make = Effect.gen(function* () {
           createdAt: now,
         }),
       );
+      // A reply in a parked thread takes it up: it is back, saying so (D62).
+      yield* withDb(takeUp(input.inboxItemId, "replied"));
       if (input.answers) {
         yield* q((d) =>
           d
@@ -1136,6 +1139,8 @@ const make = Effect.gen(function* () {
             message:
               "This thread holds questions about a work item; there is nothing to read again.",
           });
+        // Reading it again takes a parked thread up (D62).
+        yield* withDb(takeUp(inboxItemId, "replied"));
         const progress: Progress = () => undefined;
         const last = thread.messages.at(-1);
         const firstUser = thread.messages.find((m) => m.role === "user");

@@ -7,6 +7,7 @@ import { SprintWork, TheirMove, YourMove } from "@/components/today/lists";
 import { PlanCard } from "@/components/today/plan-card";
 import { SweepButton } from "@/components/today/sweep";
 import { useToday } from "@/components/today/use-today";
+import { YoureOn } from "@/components/today/youre-on";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({ component: TodayPage });
@@ -40,6 +41,7 @@ function TodayPage() {
           </>
         )}
       </header>
+      <YoureOn />
       <PlanCard />
       <QuickThread />
       {t ? (

@@ -1018,6 +1018,21 @@ export function runRules(input: RuleInput): Situation[] {
 }
 
 /**
+ * What the rules that are switched off, or quiet on this item, would raise
+ * (D62): no card, only a line among the item's next moves, so the user still
+ * sees it. Run like `runRules`, each with what the earlier ones would offer.
+ */
+export function heldSituations(input: RuleInput): Situation[] {
+  const out: Situation[] = [];
+  for (const name of RULE_NAMES) {
+    if (input.settings.secretary.rules[name] && !input.quiet.has(name)) continue;
+    const pending = [...input.pending, ...out.flatMap((s) => s.steps.map((x) => x.payload))];
+    out.push(...RULES[name]({ ...input, pending }));
+  }
+  return out;
+}
+
+/**
  * Rules gone quiet on an item (D61): dismissed twice there since the user last
  * asked again. Derived from the item's `outcome_dismissed` and `rule_resumed`
  * events, so no counter is stored.
