@@ -3,7 +3,7 @@
  * actions; a list longer than `SHOWN` folds the rest behind "Show all".
  */
 import { Link } from "@tanstack/react-router";
-import { CheckCheck, Clock, MessagesSquare, Pin, Send } from "lucide-react";
+import { CheckCheck, Clock, MessagesSquare, Pin, Send, Star } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { FollowupDialog } from "@/components/dependencies/followup-dialog";
 import { useChaseDraft } from "@/components/drafts/use-drafts";
@@ -34,6 +34,7 @@ import {
   type TicketRow,
   type Today,
   type WaitRow,
+  type WorkItemRef,
   waitSnoozeAfter,
 } from "@/services/dashboard/today";
 import {
@@ -116,7 +117,18 @@ function Rows<T>({
 }
 
 /** One row: what it is on the first line with its actions, why it is here on the second. */
-function Row({ head, why, actions }: { head: ReactNode; why: ReactNode; actions?: ReactNode }) {
+function Row({
+  head,
+  why,
+  actions,
+  workItem,
+}: {
+  head: ReactNode;
+  why: ReactNode;
+  actions?: ReactNode;
+  /** The work item the row's ticket belongs to (D61). */
+  workItem?: WorkItemRef;
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <div className="flex min-w-0 items-center gap-1.5">
@@ -124,6 +136,20 @@ function Row({ head, why, actions }: { head: ReactNode; why: ReactNode; actions?
         {actions && <div className="flex shrink-0 items-center">{actions}</div>}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+        {workItem && (
+          <Badge
+            variant="outline"
+            className="max-w-48 gap-1 font-normal"
+            title={
+              workItem.current ? `You are on: ${workItem.name}` : `Work item: ${workItem.name}`
+            }
+          >
+            {workItem.current && (
+              <Star className="size-3 fill-current" aria-label="You are on this" />
+            )}
+            <span className="truncate">{workItem.name}</span>
+          </Badge>
+        )}
         {why}
       </div>
     </div>
@@ -215,6 +241,7 @@ function TicketItem({ row, sprintEnd }: { row: TicketRow; sprintEnd: string | nu
   const badge = KIND_BADGE[row.kind];
   return (
     <Row
+      workItem={row.workItem}
       head={<IssueHead issue={row.issue} />}
       actions={<TicketActions issue={row.issue} sprintEnd={sprintEnd} />}
       why={
@@ -239,6 +266,7 @@ function ThreadItem({ row }: { row: ThreadRow }) {
   const t = row.thread;
   return (
     <Row
+      workItem={row.workItem}
       head={
         <>
           <MessagesSquare className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -321,6 +349,7 @@ function WaitItem({ row, sprintEnd }: { row: WaitRow; sprintEnd: string | null }
   return (
     <>
       <Row
+        workItem={row.workItem}
         head={
           <>
             <Link
@@ -406,6 +435,7 @@ function WaitItem({ row, sprintEnd }: { row: WaitRow; sprintEnd: string | null }
 function BlockedItem({ row, sprintEnd }: { row: BlockedRow; sprintEnd: string | null }) {
   return (
     <Row
+      workItem={row.workItem}
       head={<IssueHead issue={row.issue} />}
       actions={<TicketActions issue={row.issue} sprintEnd={sprintEnd} done={false} reply={false} />}
       why={
@@ -458,6 +488,7 @@ function SprintItem({ row, sprintEnd }: { row: SprintRow; sprintEnd: string | nu
   const late = row.daysLeft !== null && row.daysLeft < 0;
   return (
     <Row
+      workItem={row.workItem}
       head={<IssueHead issue={i} />}
       actions={
         <>

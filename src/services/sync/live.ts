@@ -31,7 +31,7 @@ import {
   SYNC_KEYS,
   setState,
 } from "./state";
-import { replaceComments, upsertIssues } from "./upsert";
+import { replaceComments, upsertIssues, type WriteOrigin } from "./upsert";
 
 const PAGE_SIZE = 100;
 const MAX_PROJECTS_WITH_META = 30;
@@ -167,13 +167,14 @@ const make = Effect.gen(function* () {
           comments.push(...(m.commentsComplete ? m.comments : yield* allComments(m.issue.key)));
           if (!maxUpdated || m.issue.updated > maxUpdated) maxUpdated = m.issue.updated;
         }
-        yield* withDb(upsertIssues(mapped.map((m) => m.issue)));
+        const cachedBefore = yield* withDb(upsertIssues(mapped.map((m) => m.issue)));
         // A ticket a revoke closed that is open again is no longer marked revoked.
         yield* withDb(clearReopened(mapped.map((m) => m.issue)));
         yield* withDb(
           replaceComments(
             mapped.map((m) => m.issue.key),
             comments,
+            { cachedBefore },
           ),
         );
         fetched += page.issues.length;
@@ -510,7 +511,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const refreshIssue = (key: string, opts: { candidate?: boolean } = {}) =>
+  const refreshIssue = (key: string, opts: { candidate?: boolean; origin?: WriteOrigin } = {}) =>
     Effect.gen(function* () {
       const settings = yield* settingsOrDefault(settingsSvc);
       const { effective: fieldIds } = yield* withDb(fieldInfo);
@@ -538,8 +539,10 @@ const make = Effect.gen(function* () {
       }
       const issue = { ...m.issue, stale: cached ? cached.stale : !!opts.candidate };
       const comments = m.commentsComplete ? m.comments : yield* allComments(m.issue.key);
-      yield* withDb(upsertIssues([issue]));
-      yield* withDb(replaceComments([m.issue.key], comments));
+      // A candidate read is no change anyone made; the rest say why the issue was read (D61).
+      const origin: WriteOrigin = opts.candidate ? "none" : (opts.origin ?? "sync");
+      const cachedBefore = yield* withDb(upsertIssues([issue], origin));
+      yield* withDb(replaceComments([m.issue.key], comments, { origin, cachedBefore }));
       // A revoke that deleted it between the check and the write wins (FR-14.6).
       yield* withDb(sweepDeleted);
       yield* withDb(clearReopened([issue]));

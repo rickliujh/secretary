@@ -2,6 +2,9 @@ import { Context, Data, type Effect, type Stream } from "effect";
 import type { DbError } from "@/services/db";
 import type { JiraError } from "@/services/jira";
 import type { FieldIds } from "@/services/jira/fields";
+import type { WriteOrigin } from "./upsert";
+
+export type { WriteOrigin } from "./upsert";
 
 export class SyncError extends Data.TaggedError("SyncError")<{
   readonly kind: "busy" | "scope";
@@ -52,7 +55,17 @@ export interface SyncShape {
    */
   readonly refreshIssue: (
     key: string,
-    opts?: { candidate?: boolean },
+    opts?: {
+      candidate?: boolean;
+      /**
+       * Why it is read again, for the work events its changes become (D61):
+       * after the app's own write, what that write did (`by` the user, recorded
+       * as their edit, or by an approved proposal, recorded as its event);
+       * "sync" (the default) for a plain re-read. Changes the write did not make
+       * are recorded by their real author either way.
+       */
+      origin?: WriteOrigin;
+    },
   ) => Effect.Effect<void, JiraError | DbError>;
 }
 

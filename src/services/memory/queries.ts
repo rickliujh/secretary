@@ -59,7 +59,9 @@ export const listMemories = Effect.gen(function* () {
                 ? (m.subjectId ?? "").replace("_", " ")
                 : m.subjectType === "revision"
                   ? "a requested change"
-                  : null,
+                  : m.subjectType === "work_item"
+                    ? "a work item"
+                    : null,
       source: m.source,
       sourceInboxItemId: m.sourceInboxItemId,
       confirmed: m.confirmed,
@@ -68,7 +70,7 @@ export const listMemories = Effect.gen(function* () {
       lastUsedAt: m.lastUsedAt,
       createdAt: m.createdAt,
       example:
-        m.kind === "example"
+        m.kind === "example" && m.subjectType !== "work_item"
           ? {
               input: m.exampleInput ?? "",
               before: describeStoredPayload(m.exampleBefore),

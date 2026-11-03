@@ -120,6 +120,13 @@
       "when": 1792151221474,
       "tag": "0016_needy_killer_shrike",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792358046620,
+      "tag": "0017_wakeful_professor_monster",
+      "breakpoints": true
     }
   ]
 }

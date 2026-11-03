@@ -6,6 +6,7 @@ import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
 import { logFollowup } from "@/services/dependencies/queries";
+import { EVENT_TEXT_CHARS, recordEvent } from "@/services/work/events";
 import {
   CommsError,
   type DraftEdit,
@@ -181,6 +182,29 @@ export const markSent = (id: string, today = localDate()) =>
         .set({ status: "sent", sentAt: nowIso() })
         .where(eq(communications.id, id)),
     );
+    // A sent message is a work event on the tickets it is about (D61).
+    const to = c.recipientPersonId
+      ? (yield* query((d) =>
+          d
+            .select({ name: people.displayName })
+            .from(people)
+            .where(eq(people.id, c.recipientPersonId ?? ""))
+            .get(),
+        ))?.name
+      : null;
+    yield* recordEvent({
+      kind: "draft_sent",
+      actor: "me",
+      issueKey: c.issueKeys[0] ?? null,
+      ref: id,
+      summary: `Sent ${c.kind === "email" ? "an email" : "a Teams message"}${to ? ` to ${to}` : ""}: ${(c.subject || c.bodyMd.split("\n").find((l) => l.trim()) || c.intent).slice(0, 120)}`,
+      data: {
+        text: c.bodyMd.slice(0, EVENT_TEXT_CHARS),
+        keys: c.issueKeys,
+        ...(c.recipientPersonId ? { contactIds: [c.recipientPersonId] } : {}),
+        ...(c.dependencyId ? { dependencyId: c.dependencyId } : {}),
+      },
+    });
     if (c.dependencyId) {
       const first = c.bodyMd.split("\n").find((l) => l.trim()) ?? "";
       yield* logFollowup(
@@ -191,6 +215,8 @@ export const markSent = (id: string, today = localDate()) =>
           communicationId: id,
         },
         today,
+        // The sent message is the event (above), not a second one for the chase.
+        { event: false },
       );
     }
   });

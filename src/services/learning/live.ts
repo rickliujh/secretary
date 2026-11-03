@@ -33,7 +33,10 @@ const make = Effect.gen(function* () {
 
   const consolidate = Effect.gen(function* () {
     const all = yield* withDb(listMemories);
-    const examples = all.filter((m) => m.kind === "example" && m.example).slice(0, MAX_CORRECTIONS);
+    // Work item corrections teach the grouping, not intake (D61).
+    const examples = all
+      .filter((m) => m.kind === "example" && m.example && m.subjectType !== "work_item")
+      .slice(0, MAX_CORRECTIONS);
     if (examples.length < 2)
       return yield* new LearningError({
         kind: "not_enough",

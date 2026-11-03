@@ -6,6 +6,7 @@
  */
 import { z } from "zod";
 import { ProfileSchema, SUBJECT_TYPES } from "@/services/directory/schema";
+import { WorkQuestionSchema } from "@/services/work/questions-schema";
 
 export const ISSUE_KEY_RE = /^[A-Z][A-Z0-9_]+-\d+$/;
 export const NEW_REF_RE = /^\$new:\d+$/;
@@ -251,6 +252,10 @@ export const DraftMessage = z.object({
 export const NeedsClarification = z.object({
   kind: z.literal("needs_clarification"),
   question: z.string().trim().min(1),
+  /** Answers the user can pick with one click; any typed reply still answers (D61). */
+  choices: z.array(z.string().trim().min(1)).default([]),
+  /** Set on a work model question (D61): its answer goes to the work model, not to classify. */
+  work: WorkQuestionSchema.optional(),
 });
 
 export const ProposalPayloadSchema = z.discriminatedUnion("kind", [

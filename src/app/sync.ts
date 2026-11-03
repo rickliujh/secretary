@@ -8,6 +8,7 @@ import { Sync, type SyncStatus } from "@/services/sync";
 import { useSettings } from "./hooks";
 import { queryClient, queryKeys } from "./query-client";
 import { run, runtime } from "./runtime";
+import { requestWorkPass } from "./work";
 
 let current: SyncStatus | null = null;
 const listeners = new Set<() => void>();
@@ -24,7 +25,11 @@ function start() {
           current = status;
           for (const l of listeners) l();
           // New data after every run, successful or partial.
-          if (finished) void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
+          if (finished) {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
+            // New data may be news for a work item (D61).
+            requestWorkPass();
+          }
         }),
       ),
     ),

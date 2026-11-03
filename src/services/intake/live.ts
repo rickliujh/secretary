@@ -51,6 +51,9 @@ import { Retrieval } from "@/services/retrieval";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { Sync } from "@/services/sync";
 import { deletedKeys } from "@/services/sync/deleted";
+import { EVENT_TEXT_CHARS, recordEvents } from "@/services/work/events";
+import { answerWorkQuestion, postMessage } from "@/services/work/questions";
+import type { Actor, MessageData } from "@/services/work/schema";
 import {
   Intake,
   IntakeError,
@@ -116,6 +119,8 @@ type Classified = {
   mapped: MappedProposal[];
   question: string | null;
   summary: string | null;
+  /** The work event this item becomes (D61): one per intake item and revision. */
+  event: Omit<MessageData, "inboxItemId"> & { at: string };
 };
 
 const noRefs: References = { issueKeys: [], tickets: [], emails: [], urls: [], contactIds: [] };
@@ -416,6 +421,28 @@ const make = Effect.gen(function* () {
       ];
       yield* readMissingKeys(references.issueKeys);
       const source = job.source ?? ctx.source;
+      // What the item itself names, for attaching its work event (D61).
+      const own = mergeRefs(
+        extractReferences(job.quote, contacts, site),
+        extractReferences(job.instructions.join("\n"), contacts, site),
+      );
+      const instruction = job.instructions.join("\n").trim();
+      const eventOf = (itemId: string): Classified["event"] => ({
+        at: nowIso(),
+        intakeItemId: itemId,
+        quote: job.quote.slice(0, EVENT_TEXT_CHARS),
+        instruction: instruction ? instruction.slice(0, EVENT_TEXT_CHARS) : null,
+        keys: own.issueKeys.filter((k) => !deleted.has(k)),
+        contactIds: [
+          ...new Set([...own.contactIds, ...(ctx.senderPersonId ? [ctx.senderPersonId] : [])]),
+        ],
+        senderPersonId: ctx.senderPersonId,
+        source,
+        ownWords: job.ownInput,
+        // The chat wrote the first message for the user (propose_actions): their request, not a paste.
+        byChat: ctx.thread.chatAuthored && job.idx === 0,
+        revision: job.revising.length > 0,
+      });
       const snapshot: ItemSnapshot = {
         ...(yield* retrieval.snapshot({
           // Typed input from before the message box keeps its « and » as plain quotes (D56).
@@ -464,6 +491,7 @@ const make = Effect.gen(function* () {
           mapped: [],
           question: `${FAILED_QUESTION}: "${job.quote.slice(0, 200)}". What should happen?`,
           summary: null,
+          event: eventOf(itemId),
         } satisfies Classified;
       }
       const { value, tier, model, escalated, lowConfidence } = result.right;
@@ -488,6 +516,7 @@ const make = Effect.gen(function* () {
         mapped: mapItemOutput(value, job.quote, snapshot),
         question,
         summary: value.summary,
+        event: eventOf(itemId),
       } satisfies Classified;
     });
 
@@ -569,6 +598,37 @@ const make = Effect.gen(function* () {
         })),
       ];
       if (rows.length) yield* q((d) => d.insert(proposals).values(rows));
+      // Each item read or revised is a work event (D61), attached later by the pass.
+      yield* withDb(
+        recordEvents(
+          results.map(({ event: { at, ...data }, summary }) => ({
+            kind: "message" as const,
+            at,
+            // Only the user's own words and their chat requests are by "me"; a paste is
+            // by its sender, or by someone unknown (D61): never the user's promise.
+            actor: (data.ownWords || data.byChat
+              ? "me"
+              : data.senderPersonId
+                ? `contact:${data.senderPersonId}`
+                : "unknown") as Actor,
+            ref: data.intakeItemId,
+            // Never the pasted words themselves: a summary is shown outside the untrusted block.
+            summary: (
+              summary ??
+              (data.ownWords
+                ? "Your message"
+                : data.byChat
+                  ? "Your request in the chat"
+                  : data.senderPersonId
+                    ? "A message from a contact"
+                    : "A pasted message")
+            )
+              .replace(/\s+/g, " ")
+              .slice(0, 200),
+            data: { ...data, inboxItemId } satisfies MessageData,
+          })),
+        ),
+      );
       if (superseded.size) {
         yield* q((d) =>
           d
@@ -897,6 +957,18 @@ const make = Effect.gen(function* () {
         return yield* new IntakeError({ kind: "empty", message: "Type or paste something first." });
       const thread = yield* loadThread(input.inboxItemId);
       yield* refuseFeatureThread(thread);
+      // A work model question's answer goes to the work model, not to classify (D61).
+      const asked = input.answers ? thread.rows.find((r) => r.id === input.answers) : undefined;
+      const workAnswer =
+        asked?.status === "pending" && (asked.payload as { work?: unknown }).work && !text
+          ? asked
+          : null;
+      if (thread.item.workItemId && !workAnswer)
+        return yield* new IntakeError({
+          kind: "read_only",
+          message:
+            "This thread holds questions about a work item. Answer one of them here; to tell me something new, start a new message in the Inbox.",
+        });
       // Pasted text is never "typed": only the user's own words state points without
       // a cue (D55 answers), so a paste that would be "typed" is "other".
       const named = input.source ?? (thread.item.source as Source);
@@ -932,6 +1004,33 @@ const make = Effect.gen(function* () {
             ),
         );
       }
+      // A work model question's answer goes to the work model, not to classify (D61).
+      if (workAnswer) {
+        const answer = yield* withDb(answerWorkQuestion(workAnswer, instruction ?? ""));
+        if (!answer.reask) yield* withDb(postMessage(input.inboxItemId, answer.message));
+        const open = yield* q((d) =>
+          d
+            .select({ id: proposals.id })
+            .from(proposals)
+            .where(
+              and(eq(proposals.inboxItemId, input.inboxItemId), eq(proposals.status, "pending")),
+            )
+            .all(),
+        );
+        if (open.length === 0)
+          yield* q((d) =>
+            d
+              .update(inboxItems)
+              .set({ status: "filed" })
+              .where(eq(inboxItems.id, input.inboxItemId)),
+          );
+        return {
+          inboxItemId: input.inboxItemId,
+          items: 0,
+          proposals: 0,
+          questions: answer.reask ? 1 : 0,
+        } satisfies TriageResult;
+      }
       return yield* recordFailure(
         input.inboxItemId,
         runReply(input.inboxItemId, messageId, input.today, input.onProgress ?? (() => undefined)),
@@ -944,6 +1043,13 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const thread = yield* loadThread(inboxItemId);
         yield* refuseFeatureThread(thread);
+        // A work item's thread holds the secretary's questions, no input to read again (D61).
+        if (thread.item.workItemId)
+          return yield* new IntakeError({
+            kind: "read_only",
+            message:
+              "This thread holds questions about a work item; there is nothing to read again.",
+          });
         const progress: Progress = () => undefined;
         const last = thread.messages.at(-1);
         const firstUser = thread.messages.find((m) => m.role === "user");

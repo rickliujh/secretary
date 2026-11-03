@@ -27,6 +27,9 @@ import {
   proposals,
   syncState,
   teams,
+  workEvents,
+  workItemIssues,
+  workItems,
 } from "@/db/schema";
 import { nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
@@ -53,6 +56,10 @@ const EXPORTED_TABLES = [
   actionsLog,
   memories,
   chatConversations,
+  // The work model (D61): items before their tickets and events.
+  workItems,
+  workItemIssues,
+  workEvents,
 ] as const satisfies readonly SQLiteTable[];
 
 export class TransferError extends Data.TaggedError("TransferError")<{

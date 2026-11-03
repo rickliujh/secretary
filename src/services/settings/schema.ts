@@ -160,6 +160,19 @@ export const MAX_DAYS_PER_POINT = 10;
 
 export const DEFAULT_CAPTURE_SHORTCUT = "CommandOrControl+Shift+Space";
 
+/** The work model (FR-19, D61): Settings > Secretary. */
+export const WorkSettingsSchema = z.object({
+  /** Groups tickets into work items, records events and keeps each item's state. */
+  enabled: z.boolean().default(true),
+  /** Questions a day in work threads (FR-19.4); a question in the thread the user is in is free. */
+  questionsPerDay: z.number().int().min(0).max(50).default(3),
+  /** State updates (`update_work_state` calls) a day; the rest wait for the next day. */
+  stateCallsPerDay: z.number().int().min(0).max(1000).default(60),
+  /** A group of tickets is not merged past this size; the secretary asks instead. */
+  groupSizeCap: z.number().int().min(2).max(50).default(8),
+});
+export type WorkSettings = z.infer<typeof WorkSettingsSchema>;
+
 export const SettingsSchema = z.object({
   version: z.literal(1).default(1),
   providers: z.array(ProviderSchema).default([]),
@@ -209,6 +222,7 @@ export const SettingsSchema = z.object({
       lastDay: z.enum(LAST_DAY_MODES).default("jira"),
     })
     .prefault({}),
+  work: WorkSettingsSchema.prefault({}),
   dataSources: z.array(DataSourceSchema).default([]),
   /** Suggested questions for the chat, in order (D42). */
   suggestedPrompts: z.array(SuggestedPromptSchema).max(12).default(DEFAULT_SUGGESTED_PROMPTS),

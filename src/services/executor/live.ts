@@ -63,6 +63,7 @@ import {
   type ExecutorShape,
   type JiraAction,
   JiraActionSchema,
+  ownChanges,
   type ProposalResult,
 } from ".";
 import {
@@ -328,7 +329,17 @@ const make = Effect.gen(function* () {
         action.kind !== "delete_remote_link" &&
         action.kind !== "delete_issue";
       const refreshed = yield* (
-        touchesIssue ? sync.refreshIssue(action.issueKey) : Effect.void
+        touchesIssue
+          ? // What this write changed is the user's edit of the ticket (D61), or the
+            // approved proposal's (its own event); anything else the re-read shows
+            // is someone else's, recorded by its author.
+            sync.refreshIssue(action.issueKey, {
+              origin: {
+                by: opts.proposalId ? "proposal" : "user",
+                ...ownChanges(action, response),
+              },
+            })
+          : Effect.void
       ).pipe(
         Effect.as(true),
         Effect.catchAll((e) =>
@@ -766,7 +777,9 @@ const make = Effect.gen(function* () {
         followupId: null,
       });
       if (p.action !== "resolve" && p.expectedAt && p.expectedAt !== dep.expectedAt)
-        yield* local(setDates(dep.id, { expectedAt: p.expectedAt }, { mirror: false }));
+        yield* local(
+          setDates(dep.id, { expectedAt: p.expectedAt }, { mirror: false, event: false }),
+        );
       const summary = (
         p.summary ?? describeWaitUpdate({ ...p, issueKey: dep.issueKey, label: dep.label })
       ).trim();
@@ -808,14 +821,17 @@ const make = Effect.gen(function* () {
               nextFollowupAt:
                 nextFollowupAt === undefined ? addBusinessDays(localDate(), days) : nextFollowupAt,
             },
-            { mirror: false },
+            { mirror: false, event: false },
           ),
         );
       } else
         followupId = yield* local(
-          logFollowup(dep.id, { channel: p.channel, summary, nextFollowupAt }),
+          logFollowup(dep.id, { channel: p.channel, summary, nextFollowupAt }, undefined, {
+            event: false,
+          }),
         );
-      if (p.action === "resolve") yield* local(setStatus(dep.id, "resolved", { mirror: false }));
+      if (p.action === "resolve")
+        yield* local(setStatus(dep.id, "resolved", { mirror: false, event: false }));
       const warning = yield* local(mirror(dep.id, "refresh", { proposalId })).pipe(
         Effect.as(null),
         Effect.catchAll((e) =>

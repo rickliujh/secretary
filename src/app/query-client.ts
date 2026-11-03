@@ -62,6 +62,8 @@ export const queryKeys = {
   sweepStale: ["sweep", "stale"] as const,
   ticketSearch: (q: string) => ["tickets", "search", q] as const,
   ticketDetail: (key: string) => ["tickets", "detail", key] as const,
+  /** The Work tab of a ticket (D61); under "tickets" so sync, decisions and passes refresh it. */
+  workItem: (key: string) => ["tickets", "work", key] as const,
   transitions: (key: string) => ["tickets", "transitions", key] as const,
   /** Transitions into a done status (D49), read when Done is pressed. */
   doneTransitions: (key: string) => ["tickets", "done-transitions", key] as const,

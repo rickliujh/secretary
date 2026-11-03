@@ -18,6 +18,7 @@ import { Executor, ExecutorError, undoOf } from "@/services/executor";
 import { JiraClient } from "@/services/jira";
 import { Sync } from "@/services/sync";
 import { deletedKeys } from "@/services/sync/deleted";
+import { recordEvent } from "@/services/work/events";
 import {
   createdIds,
   type DecisionResult,
@@ -144,6 +145,38 @@ const make = Effect.gen(function* () {
       // A contact or team that existed by approval maps its ref to that one (FR-18.4).
       return { made: createdIds(rows), names: threadRefs(rows) };
     });
+
+  /**
+   * A proposal executed, failed or was revoked: a work event by the user (D61),
+   * on the ticket it acted on (or created), with the tickets it names.
+   */
+  const proposalEvent = (
+    row: Row,
+    kind: "proposal_executed" | "proposal_failed" | "proposal_revoked",
+    summary: string,
+    createdKey?: string,
+    payload: ProposalPayload = effectivePayload(row),
+  ) => {
+    const keys = [
+      ...new Set([...(createdKey ? [createdKey] : []), ...issueRefs(payload, { only: "keys" })]),
+    ];
+    const made = (row.result as { issueKey?: string } | null)?.issueKey;
+    return withDb(
+      recordEvent({
+        kind,
+        actor: "me",
+        issueKey: createdKey ?? made ?? keys[0] ?? null,
+        ref: row.id,
+        summary,
+        data: {
+          proposalKind: row.kind,
+          keys,
+          ...(row.inboxItemId ? { inboxItemId: row.inboxItemId } : {}),
+          ...(payload.kind === "update_dependency" ? { dependencyId: payload.dependencyId } : {}),
+        },
+      }),
+    );
+  };
 
   /** Files the inbox item once nothing is left to decide. */
   const settleInbox = (inboxItemId: string | null) =>
@@ -277,6 +310,15 @@ const make = Effect.gen(function* () {
           .where(eq(proposals.id, id)),
       );
       if (result.status === "failed") logger.warn(`Proposal ${id} failed`, result.message);
+      yield* proposalEvent(
+        { ...row, editedPayload: payload },
+        result.status === "executed" ? "proposal_executed" : "proposal_failed",
+        result.status === "executed"
+          ? `Approved: ${describePayload(resolved)}`
+          : `Failed: ${describePayload(resolved)}: ${result.message}`,
+        result.issueKey,
+        resolved,
+      );
       yield* settleInbox(row.inboxItemId);
       return result;
     });
@@ -664,6 +706,7 @@ const make = Effect.gen(function* () {
             .set({ status: "revoked", result: { ...kept, revoked: record } })
             .where(eq(proposals.id, entry.proposalId)),
         );
+        yield* proposalEvent(current, "proposal_revoked", `Revoked: ${record.message}`);
         // Every later thread is told a closed ticket was revoked (FR-14.6); a deleted
         // one has its tombstone from the delete.
         if (ticket?.state === "closed") {

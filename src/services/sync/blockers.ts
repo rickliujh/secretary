@@ -33,6 +33,7 @@ import { query } from "@/services/db";
 import { JiraClient, type RawIssue, type SearchResult } from "@/services/jira";
 import { jiraDateToIsoOrNull } from "@/services/jira/dates";
 import { parseIssueLinks } from "@/services/jira/schemas";
+import { recordEvents } from "@/services/work/events";
 import { chunk } from "./jql";
 import { getState, SYNC_KEYS, setState } from "./state";
 
@@ -272,6 +273,23 @@ export const syncBlockers = (opts: {
       } else missing.push(key);
     }
     const fresh = yield* readBlockers(missing);
+    // A blocker read here (not returned by the run, so not diffed by the upsert)
+    // whose status changed is a change seen in Jira (D61), e.g. PLAT-812 closed.
+    yield* recordEvents(
+      [...fresh.read].flatMap(([key, s]) => {
+        const was = previous[key];
+        if (!was || was.status === s.status) return [];
+        return [
+          {
+            kind: "jira_change" as const,
+            actor: "sync" as const,
+            issueKey: key,
+            summary: `${key} moved from ${was.status} to ${s.status}`,
+            data: { field: "status", from: was.status, to: s.status },
+          },
+        ];
+      }),
+    );
     for (const [k, s] of fresh.read) read.set(k, s);
     for (const k of fresh.gone) gone.add(k);
     for (const k of fresh.forbidden) forbidden.add(k);

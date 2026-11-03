@@ -12,6 +12,7 @@ import { NetworkSection } from "@/components/settings/network-section";
 import { PromptsCard } from "@/components/settings/prompts-card";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RankingSection } from "@/components/settings/ranking-section";
+import { SecretarySection } from "@/components/settings/secretary-section";
 import { SmallAsksSection } from "@/components/settings/small-asks-section";
 import { SourcesSection } from "@/components/settings/sources-section";
 import { UsageSection } from "@/components/settings/usage-section";
@@ -57,6 +58,9 @@ function SettingsPage() {
           <CaptureSection />
           <PromptsCard />
           <NetworkSection />
+        </TabsContent>
+        <TabsContent value="secretary">
+          <SecretarySection />
         </TabsContent>
         <TabsContent value="providers">
           <ProvidersSection />

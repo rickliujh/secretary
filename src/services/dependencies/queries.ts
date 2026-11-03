@@ -10,6 +10,7 @@ import { newId, nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
 import { Executor, ExecutorError } from "@/services/executor";
 import { Settings, settingsOrDefault } from "@/services/settings";
+import { recordEvent } from "@/services/work/events";
 import {
   chaseNotes,
   type DependencyStatus,
@@ -269,16 +270,89 @@ export const mirror = (id: string, on: boolean | "refresh", opts: LogOption = {}
     return linkId ?? null;
   });
 
-export const createDependency = (input: DependencyInput) =>
+/**
+ * Whether a write is the user's own (the default), recorded as a work event
+ * (D61); the Executor passes `event: false`, since its approved proposal is
+ * the event.
+ */
+type EventOption = { event?: boolean };
+
+const ownerName = (ownerPersonId: string | null, ownerTeamId: string | null) =>
+  Effect.gen(function* () {
+    if (ownerPersonId) {
+      const p = yield* query((d) =>
+        d
+          .select({ name: people.displayName })
+          .from(people)
+          .where(eq(people.id, ownerPersonId))
+          .get(),
+      );
+      if (p) return p.name;
+    }
+    if (ownerTeamId) {
+      const t = yield* query((d) =>
+        d.select({ name: teams.name }).from(teams).where(eq(teams.id, ownerTeamId)).get(),
+      );
+      if (t) return t.name;
+    }
+    return null;
+  });
+
+/** A wait opened, chased, rescheduled or resolved, as a work event on its ticket (D61). */
+const waitEvent = (
+  dep: Pick<Dependency, "id" | "issueKey" | "label" | "ownerPersonId" | "ownerTeamId">,
+  kind: "wait_opened" | "wait_chased" | "wait_rescheduled" | "wait_resolved" | "wait_dropped",
+  what: (owner: string) => string,
+  text?: string | null,
+) =>
+  Effect.gen(function* () {
+    const owner = (yield* ownerName(dep.ownerPersonId, dep.ownerTeamId)) ?? "someone";
+    yield* recordEvent({
+      kind,
+      actor: "me",
+      issueKey: dep.issueKey,
+      ref: dep.id,
+      summary: what(owner),
+      data: {
+        dependencyId: dep.id,
+        ...(text ? { text } : {}),
+        ...(dep.ownerPersonId ? { contactIds: [dep.ownerPersonId] } : {}),
+      },
+    });
+  });
+
+const datesText = (d: { expectedAt?: string | null; nextFollowupAt?: string | null }) =>
+  [
+    d.expectedAt !== undefined && (d.expectedAt ? `expected ${d.expectedAt}` : "no expected date"),
+    d.nextFollowupAt !== undefined &&
+      (d.nextFollowupAt ? `next chase ${d.nextFollowupAt}` : "no next chase"),
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+export const createDependency = (input: DependencyInput, opts: EventOption = {}) =>
   Effect.gen(function* () {
     const v = DependencyInputSchema.parse(input);
     const id = newId();
     yield* query((d) => d.insert(dependencies).values({ id, ...v, requestedAt: nowIso() }));
+    if (opts.event !== false)
+      yield* waitEvent(
+        {
+          id,
+          issueKey: v.issueKey,
+          label: v.label,
+          ownerPersonId: v.ownerPersonId ?? null,
+          ownerTeamId: v.ownerTeamId ?? null,
+        },
+        "wait_opened",
+        (owner) =>
+          `Waiting on ${owner} for ${v.label} on ${v.issueKey}${v.expectedAt ? `, expected ${v.expectedAt}` : ""}`,
+      );
     return id;
   });
 
 /** Whether a write refreshes the Jira remote link of a mirrored dependency (default yes). */
-type MirrorOption = { mirror?: boolean };
+type MirrorOption = { mirror?: boolean } & EventOption;
 
 /**
  * Updates fields; a mirrored dependency's remote link is refreshed unless
@@ -299,6 +373,21 @@ export const updateDependency = (id: string, input: DependencyInput, opts: Mirro
         .set({ ...v, resolvedAt })
         .where(eq(dependencies.id, id)),
     );
+    if (opts.event !== false) {
+      const dep = { ...existing, ...v };
+      if (v.status === "resolved" && existing.status !== "resolved")
+        yield* waitEvent(dep, "wait_resolved", (o) => `${o} delivered ${v.label} (resolved)`);
+      else if (
+        (v.expectedAt ?? null) !== existing.expectedAt ||
+        (v.nextFollowupAt ?? null) !== existing.nextFollowupAt
+      )
+        yield* waitEvent(
+          dep,
+          "wait_rescheduled",
+          (o) =>
+            `Wait on ${o} for ${v.label}: ${datesText({ expectedAt: v.expectedAt ?? null, nextFollowupAt: v.nextFollowupAt ?? null })}`,
+        );
+    }
     if (opts.mirror !== false) yield* mirror(id, "refresh");
   });
 
@@ -316,7 +405,7 @@ export const setDates = (
     const set = Object.fromEntries(Object.entries(dates).filter(([, v]) => v !== undefined));
     if (Object.keys(set).length === 0) return;
     const existing = yield* query((d) =>
-      d.select({ id: dependencies.id }).from(dependencies).where(eq(dependencies.id, id)).get(),
+      d.select().from(dependencies).where(eq(dependencies.id, id)).get(),
     );
     if (!existing) return yield* notFound();
     // A new follow-up date is a new reminder.
@@ -327,17 +416,47 @@ export const setDates = (
         .set({ ...set, ...notified })
         .where(eq(dependencies.id, id)),
     );
+    if (opts.event !== false)
+      yield* waitEvent(
+        existing,
+        "wait_rescheduled",
+        (o) => `Wait on ${o} for ${existing.label}: ${datesText(dates)}`,
+      );
     if (opts.mirror !== false) yield* mirror(id, "refresh");
   });
 
-export const setStatus = (id: string, status: DependencyStatus, opts: MirrorOption = {}) =>
+/**
+ * `dropped`: the user stopped waiting (no longer needed), with their reason; it
+ * is recorded as such, not as the owner delivering (D61).
+ */
+export const setStatus = (
+  id: string,
+  status: DependencyStatus,
+  opts: MirrorOption & { dropped?: string } = {},
+) =>
   Effect.gen(function* () {
+    const existing = yield* query((d) =>
+      d.select().from(dependencies).where(eq(dependencies.id, id)).get(),
+    );
     yield* query((d) =>
       d
         .update(dependencies)
         .set({ status, resolvedAt: status === "resolved" ? nowIso() : null })
         .where(eq(dependencies.id, id)),
     );
+    if (opts.event !== false && existing && status === "resolved" && existing.status !== "resolved")
+      yield* opts.dropped
+        ? waitEvent(
+            existing,
+            "wait_dropped",
+            (o) => `You stopped waiting on ${o} for ${existing.label}`,
+            opts.dropped,
+          )
+        : waitEvent(
+            existing,
+            "wait_resolved",
+            (o) => `${o} delivered ${existing.label} (resolved)`,
+          );
     if (opts.mirror !== false) yield* mirror(id, "refresh");
   });
 
@@ -358,7 +477,12 @@ export const deleteDependency = (id: string, opts: LogOption = {}) =>
   });
 
 /** Records a chase and schedules the next one (FR-3.1 timeline). */
-export const logFollowup = (id: string, input: FollowupInput, today = localDate()) =>
+export const logFollowup = (
+  id: string,
+  input: FollowupInput,
+  today = localDate(),
+  opts: EventOption = {},
+) =>
   Effect.gen(function* () {
     const v = FollowupInputSchema.parse(input);
     const days = (yield* settingsOrDefault(yield* Settings)).dependencies.followupDays;
@@ -388,6 +512,13 @@ export const logFollowup = (id: string, input: FollowupInput, today = localDate(
         })
         .where(eq(dependencies.id, id)),
     );
+    if (opts.event !== false)
+      yield* waitEvent(
+        dep,
+        "wait_chased",
+        (o) => `Followed up with ${o} on ${dep.label}${next ? `; next chase ${next}` : ""}`,
+        v.summary,
+      );
     return followupId;
   });
 

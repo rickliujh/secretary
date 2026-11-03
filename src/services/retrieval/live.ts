@@ -406,7 +406,11 @@ const make = Effect.gen(function* () {
         d.select().from(memories).where(eq(memories.confirmed, true)).all(),
       )).filter(
         (m) =>
-          m.kind !== "example" || !m.sourceInboxItemId || !revokedThreads.has(m.sourceInboxItemId),
+          // Work item corrections teach the grouping, not classify (D61).
+          m.subjectType !== "work_item" &&
+          (m.kind !== "example" ||
+            !m.sourceInboxItemId ||
+            !revokedThreads.has(m.sourceInboxItemId)),
       );
       const about = new Set([
         ...candidates.map((c) => `issue:${c.key}`),

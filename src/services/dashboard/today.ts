@@ -47,10 +47,16 @@ export type TodayInputs = DashboardInputs & {
   threads: readonly InboxThread[];
   /** The small-asks home's label (D44); null while no home is set. */
   smallAskLabel: string | null;
+  /** The active work item of each ticket (D61), so rows name it. */
+  workItems?: ReadonlyMap<string, WorkItemRef>;
 };
+
+/** The work item a row's ticket belongs to (D61); `current`: the user is on it. */
+export type WorkItemRef = { id: string; name: string; current: boolean };
 
 /** A ticket waiting on the user. */
 export type TicketRow = {
+  workItem?: WorkItemRef;
   kind: "woken" | "ask" | "comment";
   issue: DashIssue;
   /** Why it is here, in a few words: the wake reason, "Dana commented", "asked by Priya 3 days ago". */
@@ -61,7 +67,12 @@ export type TicketRow = {
   smallAsk: boolean;
 };
 
-export type ThreadRow = { kind: "thread"; thread: InboxThread; reason: string };
+export type ThreadRow = {
+  kind: "thread";
+  thread: InboxThread;
+  reason: string;
+  workItem?: WorkItemRef;
+};
 
 export type YourMoveRow = TicketRow | ThreadRow;
 
@@ -70,6 +81,7 @@ export type WaitState = "overdue" | "followup" | "back" | "open" | "asleep";
 const WAIT_ORDER: readonly WaitState[] = ["overdue", "followup", "back", "open", "asleep"];
 
 export type WaitRow = {
+  workItem?: WorkItemRef;
   kind: "wait";
   dependency: DashDependency;
   timing: DependencyTiming;
@@ -86,6 +98,7 @@ export type WaitRow = {
 };
 
 export type BlockedRow = {
+  workItem?: WorkItemRef;
   kind: "blocked";
   issue: DashIssue;
   /** Open blockers. */
@@ -101,6 +114,7 @@ export type TheirMoveRow = WaitRow | BlockedRow;
 export type SmallAskState = { issue: DashIssue; state: string };
 
 export type SprintRow = {
+  workItem?: WorkItemRef;
   issue: FocusItem;
   reason: string;
   /** One of the ten ranked first (Top focus); else joined in for being due soon or at risk. */
@@ -502,13 +516,30 @@ export function buildToday(
   );
   const sprintEnd = userActiveSprints(sprints, input.issues, me)[0]?.end ?? null;
 
+  // Rows name their work item, and the item the user is on comes first (D61).
+  const items = input.workItems ?? new Map<string, WorkItemRef>();
+  const keyOf = (r: YourMoveRow | TheirMoveRow | SprintRow) =>
+    "issue" in r && r.issue ? r.issue.key : "dependency" in r ? r.dependency.issueKey : null;
+  const named = <R extends YourMoveRow | TheirMoveRow | SprintRow>(rows: R[]): R[] => {
+    const out = rows.map((r) => {
+      const key = keyOf(r);
+      const item = key ? items.get(key) : undefined;
+      return item ? { ...r, workItem: item } : r;
+    });
+    const current = (r: R) => Number(!!(r as { workItem?: WorkItemRef }).workItem?.current);
+    return out
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => current(b.r) - current(a.r) || a.i - b.i)
+      .map((x) => x.r);
+  };
+
   return {
-    yourMove: [...woken, ...asks, ...comments, ...threads],
-    theirMove,
-    sprintWork: [
+    yourMove: named([...woken, ...asks, ...comments, ...threads]),
+    theirMove: named(theirMove),
+    sprintWork: named([
       ...focusRows.map((r) => sprintRow(r, true)),
       ...extras.map((r) => sprintRow(r, false)),
-    ],
+    ]),
     focus: work.focus,
     sprintEnd,
     blocked: allBlocked,

@@ -6,6 +6,7 @@ import { nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
 import { ISSUE_KEY_RE } from "@/services/proposals/schema";
 import { getState, SYNC_KEYS } from "@/services/sync/state";
+import { recordView } from "@/services/work/events";
 import { ftsQuery, type TicketRow } from "./tree";
 
 const listColumns = {
@@ -79,12 +80,16 @@ export const ticketDetail = (key: string) =>
 
 export type TicketDetail = NonNullable<Effect.Effect.Success<ReturnType<typeof ticketDetail>>>;
 
+/** Opening a ticket: its last view, and a view event on its work item's timeline (D61). */
 export const markViewed = (key: string) =>
-  query((db) =>
-    db
-      .insert(issueMeta)
-      .values({ issueKey: key, lastViewedAt: nowIso() })
-      .onConflictDoUpdate({ target: issueMeta.issueKey, set: { lastViewedAt: nowIso() } }),
+  Effect.zipRight(
+    query((db) =>
+      db
+        .insert(issueMeta)
+        .values({ issueKey: key, lastViewedAt: nowIso() })
+        .onConflictDoUpdate({ target: issueMeta.issueKey, set: { lastViewedAt: nowIso() } }),
+    ),
+    recordView(key),
   );
 
 export const epicsInProject = (projectKey: string) =>

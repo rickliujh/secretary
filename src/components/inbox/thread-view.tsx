@@ -166,10 +166,21 @@ function ReadOnlyNote({ origin }: { origin: "planner" | "rules" }) {
   );
 }
 
-function QuestionCard({ proposal, answering }: { proposal: ProposalView; answering: boolean }) {
+function QuestionCard({
+  proposal,
+  answering,
+  onChoose,
+}: {
+  proposal: ProposalView;
+  answering: boolean;
+  /** Answers with one of the question's choices (D61). */
+  onChoose?: (proposalId: string, choice: string) => void;
+}) {
   const { reject } = useDecisions();
   const question = proposal.payload.kind === "needs_clarification" ? proposal.payload.question : "";
-  const answer = (proposal.result as { answer?: string } | null)?.answer;
+  const choices = proposal.payload.kind === "needs_clarification" ? proposal.payload.choices : [];
+  const answer = (proposal.result as { answer?: string; expired?: boolean } | null)?.answer;
+  const expired = !!(proposal.result as { expired?: boolean } | null)?.expired;
   const pending = proposal.status === "pending";
   return (
     <div
@@ -183,6 +194,22 @@ function QuestionCard({ proposal, answering }: { proposal: ProposalView; answeri
         {question}
       </p>
       {answer && <p>You answered: {answer}</p>}
+      {expired && <p>No answer after a week; I left it as it was.</p>}
+      {pending && choices.length > 0 && onChoose && (
+        <div className="flex flex-wrap gap-2 pt-1">
+          {choices.map((c) => (
+            <Button
+              key={c}
+              size="sm"
+              variant="outline"
+              className="h-7"
+              onClick={() => onChoose(proposal.id, c)}
+            >
+              {c}
+            </Button>
+          ))}
+        </div>
+      )}
       {pending && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>{answering ? "Your next message answers this." : "Reply below to answer."}</span>
@@ -206,6 +233,7 @@ function AssistantTurn({
   lookups,
   answeringId,
   created,
+  onChoose,
 }: {
   summary: string | null;
   proposals: ProposalView[];
@@ -213,6 +241,7 @@ function AssistantTurn({
   answeringId: string | null;
   /** `$new` refs the thread already created, from any turn. */
   created: ReadonlySet<string>;
+  onChoose?: (proposalId: string, choice: string) => void;
 }) {
   const shown = proposals.filter((p) => p.status !== "superseded");
   const replaced = proposals.filter((p) => p.status === "superseded");
@@ -234,7 +263,12 @@ function AssistantTurn({
           );
         const p = entry.proposal;
         return p.kind === "needs_clarification" ? (
-          <QuestionCard key={p.id} proposal={p} answering={p.id === answeringId} />
+          <QuestionCard
+            key={p.id}
+            proposal={p}
+            answering={p.id === answeringId}
+            onChoose={onChoose}
+          />
         ) : (
           <ProposalCard key={p.id} proposal={p} lookups={lookups} />
         );
@@ -298,6 +332,13 @@ export function ThreadView({ id }: { id: string }) {
       answers: answering && !withInput ? answering.id : null,
     });
   };
+  // A one-click answer: the choice, typed, as the reply to that question (D61).
+  const choose = (proposalId: string, choice: string) =>
+    reply.mutate({
+      inboxItemId: id,
+      parts: [{ type: "typed", text: choice }],
+      answers: proposalId,
+    });
   const sending = reply.isPending ? reply.variables : null;
 
   const turn = (m: ThreadMessage) =>
@@ -317,6 +358,7 @@ export function ThreadView({ id }: { id: string }) {
         lookups={threadLookups}
         answeringId={answering?.id ?? null}
         created={created}
+        onChoose={reply.isPending ? undefined : choose}
       />
     );
 
@@ -368,6 +410,7 @@ export function ThreadView({ id }: { id: string }) {
               lookups={lookups}
               answeringId={answering?.id ?? null}
               created={created}
+              onChoose={reply.isPending ? undefined : choose}
             />
           )}
           {sending && (
