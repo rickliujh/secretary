@@ -129,6 +129,12 @@ export const LinkDependency = z.object({
   externalUrl: z.string().nullable().default(null),
   expectedAt: IsoDate.nullable().default(null),
   nextFollowupAt: IsoDate.nullable().default(null),
+  /**
+   * Mirror the new wait into Jira as a remote link on the ticket (D18), set by
+   * the "waiting on someone" playbook from the `mirrorWaits` instruction
+   * (Phase 26); code's field, never the model's.
+   */
+  mirror: z.boolean().default(false),
 });
 
 /**

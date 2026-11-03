@@ -1,6 +1,8 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { Effect, Either, Layer } from "effect";
 import {
+  bundles,
+  dependencies,
   inboxItems,
   intakeItems,
   issueMeta,
@@ -13,13 +15,18 @@ import {
 import { newId, nowIso } from "@/lib/ids";
 import { logger } from "@/lib/log";
 import { redact } from "@/lib/redact";
+import { parseBlockers } from "@/services/blockers/logic";
+import { blockInfo } from "@/services/dashboard/sections";
 import { bindDb, Db } from "@/services/db";
 import { Executor, ExecutorError, undoOf } from "@/services/executor";
 import { JiraClient } from "@/services/jira";
+import { parseIssueLinks } from "@/services/jira/schemas";
 import { Sync } from "@/services/sync";
 import { deletedKeys } from "@/services/sync/deleted";
+import { getState, SYNC_KEYS } from "@/services/sync/state";
 import { recordEvent } from "@/services/work/events";
-import { situationOf } from "@/services/work/schema";
+import { correctionAfter, foundEdits, waitingFactsOf } from "@/services/work/playbooks/waiting";
+import { bundleRecordOf, type SituationRecord, situationOf } from "@/services/work/schema";
 import {
   createdIds,
   type DecisionResult,
@@ -97,11 +104,16 @@ const make = Effect.gen(function* () {
    * FR-7.2: a rejection or an edit becomes an example memory for later prompts.
    * Sprint moves come from the planner, not intake, so they teach intake nothing.
    */
-  const captureCorrection = (row: Row, edited: ProposalPayload | null) =>
+  const captureCorrection = (
+    row: Row,
+    edited: ProposalPayload | null,
+    /** The proposal as the model made it, when code changed it since (a playbook, Phase 26). */
+    made?: ProposalPayload,
+  ) =>
     Effect.gen(function* () {
       if (row.kind === "needs_clarification" || row.kind === "move_to_sprint") return;
       // The sprint switch is code's field, not something to learn from (D57).
-      const before = withoutCodeFields(parsePayload(row.payload));
+      const before = withoutCodeFields(made ?? parsePayload(row.payload));
       const after = edited ? withoutCodeFields(edited) : null;
       const input = (yield* inputFor(row)).slice(0, 1000);
       yield* q((d) =>
@@ -273,14 +285,39 @@ const make = Effect.gen(function* () {
           message: `${gone.join(", ")} ${gone.length > 1 ? "were" : "was"} deleted when you revoked ${gone.length > 1 ? "them" : "it"}, so this can no longer run. Reject it instead.`,
         });
       // A change of the sprint switch alone is no correction (D57). A step of an
-      // outcome card is code's template, so an edit of it teaches classify nothing.
+      // outcome card or a playbook's chore is code's template, so an edit of it
+      // teaches classify nothing; the proposal a playbook expanded is classify's
+      // own and teaches as it was made (Phase 26, D46).
       const taught = withoutCodeFields(payload);
+      const origin = isOrigin(row) ? yield* originOf(row) : null;
       if (
-        !row.bundleId &&
+        (!row.bundleId || isOrigin(row)) &&
         !same(taught, withoutCodeFields(original)) &&
         !same(taught, withoutCodeFields(recorded))
       )
-        yield* captureCorrection(row, payload);
+        yield* origin
+          ? captureCorrection(
+              row,
+              correctionAfter({ stored: original, edited: payload, origin }),
+              origin,
+            )
+          : captureCorrection(row, payload);
+      // Moving back out of Blocked only while the ticket is still where the playbook put it.
+      const stay = yield* stillBlocked(row, resolved);
+      if (stay) {
+        yield* q((d) =>
+          d
+            .update(proposals)
+            .set({
+              status: "rejected",
+              decidedAt: nowIso(),
+              result: { leftOut: true, skipped: true, reason: stay },
+            })
+            .where(eq(proposals.id, id)),
+        );
+        yield* settleInbox(row.inboxItemId);
+        return { status: "executed", message: stay } satisfies DecisionResult;
+      }
       yield* q((d) =>
         d
           .update(proposals)
@@ -326,6 +363,8 @@ const make = Effect.gen(function* () {
           .where(eq(proposals.id, id)),
       );
       if (result.status === "failed") logger.warn(`Proposal ${id} failed`, result.message);
+      // A playbook's bookkeeping follows each step, however it was approved (a Retry too).
+      if (result.status === "executed" && row.bundleId) yield* afterStep(row);
       yield* proposalEvent(
         { ...row, editedPayload: payload },
         result.status === "executed" ? "proposal_executed" : "proposal_failed",
@@ -348,7 +387,11 @@ const make = Effect.gen(function* () {
           message: `This proposal is already ${row.status}.`,
         });
       }
-      if (row.bundleId) yield* leaveOut(row);
+      // Rejecting the proposal a playbook expanded rejects the playbook: classify
+      // learns from it as it made it, and its chores go without corrections (Phase 26).
+      const origin = isOrigin(row) ? yield* originOf(row) : null;
+      if (isOrigin(row)) yield* captureCorrection(row, null, origin ?? undefined);
+      else if (row.bundleId) yield* leaveOut(row);
       else yield* captureCorrection(row, null);
       yield* q((d) =>
         d
@@ -356,6 +399,22 @@ const make = Effect.gen(function* () {
           .set({ status: "rejected", decidedAt: nowIso() })
           .where(eq(proposals.id, id)),
       );
+      if (isOrigin(row))
+        yield* q((d) =>
+          d
+            .update(proposals)
+            .set({
+              status: "rejected",
+              decidedAt: nowIso(),
+              result: { dismissed: true, reason: "The proposal it belongs to was rejected." },
+            })
+            .where(
+              and(
+                eq(proposals.bundleId, row.bundleId ?? ""),
+                inArray(proposals.status, ["pending", "failed"]),
+              ),
+            ),
+        );
       // What needs a rejected create can never run: dropped as after a revoke (D60).
       if (CREATE_KINDS.includes(row.kind)) yield* rejectOrphans(row, [toSubject(row)], "rejected");
       yield* settleInbox(row.inboxItemId);
@@ -393,8 +452,17 @@ const make = Effect.gen(function* () {
           .all(),
       );
       const results: DecisionResult[] = [];
+      const bundled = new Set<string>();
       for (const row of pending) {
         if (row.kind === "needs_clarification") continue;
+        // A playbook's bundle runs as one (Phase 26): in order, its choice as code made it.
+        if (row.bundleId) {
+          if (bundled.has(row.bundleId)) continue;
+          bundled.add(row.bundleId);
+          const ids = pending.filter((p) => p.bundleId === row.bundleId).map((p) => p.id);
+          results.push(...(yield* approveBundle(row.bundleId, ids)));
+          continue;
+        }
         results.push(yield* approve(row.id));
       }
       return results;
@@ -471,16 +539,8 @@ const make = Effect.gen(function* () {
    */
   const leaveOut = (row: Row) =>
     Effect.gen(function* () {
-      const card = row.bundleId
-        ? yield* q((d) =>
-            d
-              .select()
-              .from(inboxItems)
-              .where(eq(inboxItems.id, row.bundleId ?? ""))
-              .get(),
-          )
-        : undefined;
-      const situation = situationOf(card?.triage);
+      const card = row.bundleId ? yield* loadBundle(row.bundleId) : null;
+      const situation = card?.situation ?? null;
       const label = situation?.steps.find((x) => x.seq === row.seq)?.label ?? row.rationale ?? "";
       const payload = parsePayload(row.payload);
       yield* q((d) =>
@@ -509,11 +569,10 @@ const make = Effect.gen(function* () {
     bundleId: string,
     keep: readonly string[],
     edits: Readonly<Record<string, ProposalPayload>> = {},
+    opts: { found?: string | null } = {},
   ) =>
     Effect.gen(function* () {
-      const card = yield* q((d) =>
-        d.select().from(inboxItems).where(eq(inboxItems.id, bundleId)).get(),
-      );
+      const card = yield* loadBundle(bundleId);
       if (!card)
         return yield* new ProposalError({
           kind: "not_found",
@@ -521,7 +580,7 @@ const make = Effect.gen(function* () {
         });
       if (card.status === "dismissed")
         return yield* new ProposalError({ kind: "decided", message: "This card was dismissed." });
-      const situation = situationOf(card.triage);
+      const situation = card.situation;
       const required = new Set(situation?.steps.filter((x) => x.required).map((x) => x.seq) ?? []);
       const steps = yield* q((d) =>
         d
@@ -532,12 +591,29 @@ const make = Effect.gen(function* () {
           .all(),
       );
       const open = steps.filter((x) => x.status === "pending" || x.status === "failed");
+      // The found ticket (Phase 26): the user's pick, else the one code pre-selected.
+      const choice = choiceEdits(situation, open, opts.found);
       const wanted = new Set(keep);
+      const decidable = open.filter((x) => !choice.silent.has(x.id));
       // Leaving out a step the others hang on leaves them out too.
       // Pending or failed alike: a required step not kept takes its dependents with it.
-      const requiredOut = open.some((x) => required.has(x.seq) && !wanted.has(x.id));
-      const run = open.filter((x) => wanted.has(x.id) && (!requiredOut || required.has(x.seq)));
-      const leftOut = open.filter((x) => !run.includes(x));
+      const requiredOut = decidable.some((x) => required.has(x.seq) && !wanted.has(x.id));
+      const run = decidable.filter(
+        (x) => wanted.has(x.id) && (!requiredOut || required.has(x.seq)),
+      );
+      const leftOut = decidable.filter((x) => !run.includes(x));
+      // No ticket picked: the link to it is skipped, which is no correction.
+      for (const x of open.filter((o) => choice.silent.has(o.id)))
+        yield* q((d) =>
+          d
+            .update(proposals)
+            .set({
+              status: "rejected",
+              decidedAt: nowIso(),
+              result: { leftOut: true, reason: "None of the found tickets was picked." },
+            })
+            .where(and(eq(proposals.id, x.id), inArray(proposals.status, ["pending", "failed"]))),
+        );
       for (const x of leftOut) {
         yield* leaveOut(x);
         yield* q((d) =>
@@ -553,17 +629,272 @@ const make = Effect.gen(function* () {
       }
       const results: DecisionResult[] = [];
       for (const x of run) {
-        const result = yield* approve(x.id, edits[x.id]);
+        const result = yield* approve(x.id, edits[x.id] ?? choice.edits[x.id]);
         results.push(result);
         if (result.status === "failed" && required.has(x.seq)) break;
       }
       // A card with no steps (a reminder) is done once seen.
-      if (steps.length === 0)
+      if (card.outcome && steps.length === 0)
         yield* q((d) =>
           d.update(inboxItems).set({ status: "filed" }).where(eq(inboxItems.id, bundleId)),
         );
-      else yield* settleInbox(bundleId);
+      else yield* settleInbox(card.inboxItemId);
       return results;
+    });
+
+  /**
+   * What the found-ticket choice changes in a "waiting on someone" bundle
+   * (Phase 26): edits by proposal id, and the link step to skip when nothing
+   * is picked. `found` undefined keeps code's pre-selection.
+   */
+  const choiceEdits = (
+    situation: SituationRecord | null,
+    open: readonly Row[],
+    found: string | null | undefined,
+  ) => {
+    const edits: Record<string, ProposalPayload> = {};
+    const silent = new Set<string>();
+    const facts = situation?.found ? waitingFactsOf(situation.facts) : null;
+    if (!situation?.found || !facts || situation.rule !== "waiting_on_someone")
+      return { edits, silent };
+    const meta = new Map(situation.steps.map((x) => [x.seq, x]));
+    const r = foundEdits({
+      facts,
+      found: situation.found,
+      choice: found === undefined ? situation.found.picked : found,
+      steps: open.map((x) => ({
+        seq: x.seq,
+        payload: effectivePayload(x),
+        choice: !!meta.get(x.seq)?.choice,
+      })),
+    });
+    for (const x of open) {
+      const e = r.edits.get(x.seq);
+      if (e) edits[x.id] = e;
+      if (r.skip.includes(x.seq)) silent.add(x.id);
+    }
+    return { edits, silent };
+  };
+
+  /** The proposal a playbook bundle in a thread expanded: its id is the bundle's (Phase 26). */
+  const isOrigin = (row: Row) => !!row.bundleId && row.bundleId === row.id;
+
+  /** That proposal as the model made it, from the bundle record; null for older bundles. */
+  const originOf = (row: Row) =>
+    Effect.gen(function* () {
+      const card = row.bundleId ? yield* loadBundle(row.bundleId) : null;
+      const raw = card?.situation?.origin;
+      if (!raw) return null;
+      const parsed = ProposalPayloadSchema.safeParse(raw);
+      return parsed.success && parsed.data.kind === row.kind ? parsed.data : null;
+    });
+
+  /**
+   * Why a "wait resolved" move back out of Blocked should not run now: the
+   * ticket left the status the playbook set (read fresh from Jira). Null to run.
+   */
+  const stillBlocked = (row: Row, payload: ProposalPayload) =>
+    Effect.gen(function* () {
+      if (row.bundleKind !== "wait_resolved" || payload.kind !== "transition_issue") return null;
+      const card = row.bundleId ? yield* loadBundle(row.bundleId) : null;
+      const set = (card?.situation?.facts as { blocked?: { to?: unknown } } | undefined)?.blocked
+        ?.to;
+      if (typeof set !== "string") return null;
+      const now = yield* Effect.either(jira.getIssue(payload.target, { fields: ["status"] }));
+      if (now._tag === "Left") return null;
+      const name = (now.right.fields as { status?: { name?: unknown } }).status?.name;
+      return typeof name === "string" && name.toLowerCase() !== set.toLowerCase()
+        ? `${payload.target} is in ${name} now, not ${set}; left as it is.`
+        : null;
+    });
+
+  /**
+   * After a step of a playbook bundle ran (Phase 26), whether through the card,
+   * Approve all or a Retry: a wait whose ticket the bundle moved to a
+   * Blocked-like status remembers the status it left, so resolving it can move
+   * it back; a resolved wait hands that memory to another wait still open on
+   * the ticket, or wakes the ticket when nothing else holds it.
+   */
+  const afterStep = (step: Row) =>
+    Effect.gen(function* () {
+      const card = step.bundleId ? yield* loadBundle(step.bundleId) : null;
+      const situation = card?.situation;
+      if (!situation) return;
+      const rows = yield* q((d) =>
+        d
+          .select()
+          .from(proposals)
+          .where(eq(proposals.bundleId, step.bundleId ?? ""))
+          .all(),
+      );
+      const executed = (kind: string) =>
+        rows.find((r) => r.kind === kind && r.status === "executed");
+      if (situation.rule === "waiting_on_someone") {
+        if (step.kind !== "link_dependency" && step.kind !== "transition_issue") return;
+        const link = executed("link_dependency");
+        const depId =
+          (link?.result as { dependencyId?: string } | null)?.dependencyId ??
+          waitingFactsOf(situation.facts)?.dependencyId ??
+          null;
+        const undo = undoOf(executed("transition_issue")?.result);
+        if (depId && undo?.kind === "transition_issue") {
+          const dep = yield* q((d) =>
+            d.select().from(dependencies).where(eq(dependencies.id, depId)).get(),
+          );
+          if (dep)
+            yield* q((d) =>
+              d
+                .update(dependencies)
+                .set({
+                  data: {
+                    ...(dep.data ?? {}),
+                    blocked: { issueKey: undo.issueKey, from: undo.fromStatus, to: undo.toStatus },
+                  },
+                })
+                .where(eq(dependencies.id, depId)),
+            );
+        }
+      }
+      if (situation.rule === "wait_resolved") {
+        const resolve = rows.find((r) => r.kind === "update_dependency");
+        const payload = resolve ? effectivePayload(resolve) : null;
+        const depId = payload?.kind === "update_dependency" ? payload.dependencyId : null;
+        if (!depId) return;
+        const dep = yield* q((d) =>
+          d.select().from(dependencies).where(eq(dependencies.id, depId)).get(),
+        );
+        if (!dep) return;
+        const clear = () =>
+          q((d) =>
+            d
+              .update(dependencies)
+              .set({ data: { ...dep.data, blocked: undefined } })
+              .where(eq(dependencies.id, depId)),
+          );
+        // Moved back out of Blocked: nothing left to undo later.
+        if (step.kind === "transition_issue") {
+          if (dep.data?.blocked) yield* clear();
+          return;
+        }
+        if (step.kind !== "update_dependency") return;
+        // Another wait still holds the ticket in Blocked: it takes over the memory.
+        const blocked = dep.data?.blocked;
+        if (blocked) {
+          const other = (yield* q((d) =>
+            d
+              .select()
+              .from(dependencies)
+              .where(
+                and(eq(dependencies.issueKey, dep.issueKey), ne(dependencies.status, "resolved")),
+              )
+              .all(),
+          )).find((w) => w.id !== dep.id);
+          if (other) {
+            yield* q((d) =>
+              d
+                .update(dependencies)
+                .set({ data: { ...(other.data ?? {}), blocked } })
+                .where(eq(dependencies.id, other.id)),
+            );
+            yield* clear();
+          }
+        }
+        yield* wakeAfterWait(dep);
+      }
+    });
+
+  /**
+   * A resolved wait wakes its ticket (Today's woken row, D45) when nothing else
+   * holds it: no other open wait on it, no open blocker, and it is not done.
+   */
+  const wakeAfterWait = (dep: typeof dependencies.$inferSelect) =>
+    Effect.gen(function* () {
+      const others = yield* q((d) =>
+        d
+          .select({ id: dependencies.id })
+          .from(dependencies)
+          .where(and(eq(dependencies.issueKey, dep.issueKey), ne(dependencies.status, "resolved")))
+          .all(),
+      );
+      if (others.length > 0) return;
+      const meta = yield* q((d) =>
+        d.select().from(issueMeta).where(eq(issueMeta.issueKey, dep.issueKey)).get(),
+      );
+      if (meta?.openBlockers?.length) return;
+      const issue = yield* q((d) =>
+        d
+          .select({ category: jiraIssues.statusCategory, raw: jiraIssues.raw })
+          .from(jiraIssues)
+          .where(eq(jiraIssues.key, dep.issueKey))
+          .get(),
+      );
+      if (!issue || issue.category === "done") return;
+      // A Jira blocker still open holds it too (D45): the fresh blocker states first.
+      const fresh = parseBlockers(yield* withDb(getState(SYNC_KEYS.blockers)));
+      const links = parseIssueLinks((issue.raw as { issuelinks?: unknown } | null)?.issuelinks);
+      if (blockInfo(links, fresh).blockedBy.length > 0) return;
+      const owner = dep.ownerPersonId
+        ? (yield* q((d) =>
+            d
+              .select({ name: people.displayName })
+              .from(people)
+              .where(eq(people.id, dep.ownerPersonId ?? ""))
+              .get(),
+          ))?.name
+        : dep.ownerTeamId
+          ? (yield* q((d) =>
+              d
+                .select({ name: teams.name })
+                .from(teams)
+                .where(eq(teams.id, dep.ownerTeamId ?? ""))
+                .get(),
+            ))?.name
+          : null;
+      const at = nowIso();
+      const by = `wait:${owner ?? "They"} delivered ${dep.label}`.slice(0, 300);
+      yield* q((d) =>
+        d
+          .insert(issueMeta)
+          .values({ issueKey: dep.issueKey, unblockedAt: at, unblockedBy: by })
+          .onConflictDoUpdate({
+            target: issueMeta.issueKey,
+            set: { unblockedAt: at, unblockedBy: by, unblockNotifiedAt: null },
+          }),
+      );
+    });
+
+  /** A bundle's card: an outcome card (its own inbox item) or a playbook bundle in a thread. */
+  const loadBundle = (bundleId: string) =>
+    Effect.gen(function* () {
+      const card = yield* q((d) =>
+        d.select().from(inboxItems).where(eq(inboxItems.id, bundleId)).get(),
+      );
+      if (card)
+        return {
+          outcome: true,
+          situation: situationOf(card.triage),
+          inboxItemId: card.id,
+          workItemId: card.workItemId,
+          status: card.status,
+        };
+      const stored = yield* q((d) =>
+        d.select().from(bundles).where(eq(bundles.id, bundleId)).get(),
+      );
+      if (!stored) return null;
+      const thread = yield* q((d) =>
+        d
+          .select({ status: inboxItems.status })
+          .from(inboxItems)
+          .where(eq(inboxItems.id, stored.inboxItemId))
+          .get(),
+      );
+      return {
+        outcome: false,
+        situation: bundleRecordOf(stored.record),
+        inboxItemId: stored.inboxItemId,
+        workItemId: null as string | null,
+        status: thread?.status ?? "triaged",
+      };
     });
 
   const fileBundle = (bundleId: string) =>

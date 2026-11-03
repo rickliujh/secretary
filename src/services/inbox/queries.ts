@@ -1,7 +1,7 @@
 /** Read models for the Inbox page. */
 import { asc, desc, eq, like, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { inboxItems, inboxMessages, intakeItems, people, proposals } from "@/db/schema";
+import { bundles, inboxItems, inboxMessages, intakeItems, people, proposals } from "@/db/schema";
 import { query } from "@/services/db";
 import {
   AssistantContentSchema,
@@ -11,6 +11,7 @@ import {
 import { localRevokeBlock } from "@/services/proposals/revoke";
 import { localRevokeData } from "@/services/proposals/revoke-facts";
 import { type ProposalPayload, parsePayload } from "@/services/proposals/schema";
+import { bundleRecordOf, type SituationRecord } from "@/services/work/schema";
 
 export type InboxListItem = {
   id: string;
@@ -180,11 +181,21 @@ export const inboxDetail = (id: string) =>
         .orderBy(asc(inboxMessages.seq))
         .all(),
     );
+    // The thread's playbook bundles (Phase 26), each shown as one card.
+    const stored = yield* query((d) =>
+      d.select().from(bundles).where(eq(bundles.inboxItemId, id)).all(),
+    );
+    const records: Record<string, SituationRecord> = {};
+    for (const b of stored) {
+      const r = bundleRecordOf(b.record);
+      if (r) records[b.id] = r;
+    }
     return {
       item: { ...item, error: (item.triage as { error?: string } | null)?.error ?? null },
       items,
       proposals: props,
       messages: messages.map(toMessage),
+      bundles: records,
     };
   });
 

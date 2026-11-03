@@ -122,6 +122,7 @@ describe("groupSmallAsks (D44)", () => {
         label: "Finance",
         ownerPersonId: null,
         ownerTeamId: null,
+        mirror: false,
         externalRef: null,
         externalUrl: null,
         expectedAt: null,

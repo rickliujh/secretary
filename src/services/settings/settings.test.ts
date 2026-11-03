@@ -74,6 +74,14 @@ describe("Settings schema", () => {
           commitment_due: true,
           teammate_touched: true,
           wait_unanswered: true,
+          ticket_done: true,
+        },
+        instructions: {
+          mirrorWaits: true,
+          blockedStatus: false,
+          commentWaits: true,
+          linkFoundTickets: true,
+          draftRequests: true,
         },
       },
       network: {

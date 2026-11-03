@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { useLookups } from "@/app/queries";
+import { requestWorkPass } from "@/app/work";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -154,7 +155,13 @@ export function DependencyDialog({
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
         <form
           onSubmit={form.handleSubmit((v) =>
-            save.mutate(v, { onSuccess: () => onOpenChange(false) }),
+            save.mutate(v, {
+              onSuccess: () => {
+                onOpenChange(false);
+                // A new wait gets the "waiting on someone" card from the next pass (Phase 26).
+                if (!dependency) requestWorkPass();
+              },
+            }),
           )}
         >
           <DialogHeader className="mb-4">

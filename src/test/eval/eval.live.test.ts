@@ -17,7 +17,7 @@
  * Jira is a stub over the fixtures, so nothing is written anywhere.
  */
 import { describe, expect, test } from "bun:test";
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Data, Effect, Layer } from "effect";
 import { renderReport } from "@/components/report/render";
 import {
@@ -83,6 +83,7 @@ import {
   stopMessage,
   stopReason,
 } from "./harness";
+import { classifyOwn, isChore } from "./own-proposals";
 import { seedWorkItem } from "./work-seed";
 
 const env = process.env;
@@ -479,20 +480,14 @@ const runCase = (c: EvalCase, label: string) =>
       if (e._tag === "LlmError") providerError = e.kind;
       errors = [`${e._tag}${e._tag === "LlmError" ? ` ${e.kind}` : ""}: ${e.message}`];
     } else {
-      // Scored on what the thread ends with: replaced proposals do not count.
+      // Scored on what the thread ends with: replaced proposals do not count, and
+      // neither do a playbook's chores (Phase 26), which code adds, not the model.
       const id = attempt.right.inboxItemId;
-      const rows = (yield* query((d) =>
-        d
-          .select()
-          .from(proposals)
-          .where(eq(proposals.inboxItemId, id))
-          .orderBy(asc(proposals.seq))
-          .all(),
-      )).filter((x) => x.status !== "superseded");
+      const own = yield* classifyOwn(id);
       const items = yield* query((d) =>
         d.select().from(intakeItems).where(eq(intakeItems.inboxItemId, id)).all(),
       );
-      payloads = rows.map((x) => x.payload as ProposalPayload);
+      payloads = own;
       errors = items.map((i) => i.error).filter((e): e is string => !!e);
     }
     const stats = yield* recordedCalls;
@@ -737,9 +732,10 @@ describe.skipIf(!configured || !!env.SECRETARY_EVAL_CASE)("live chat eval (Phase
         });
         const waiting = yield* ask("What am I waiting on from team Platform?");
         const change = yield* ask("Comment on PAY-4 that we are blocked until finance signs off.");
-        const pending = yield* query((d) =>
+        // The model's proposals only: a playbook's chores are code's (Phase 26).
+        const pending = (yield* query((d) =>
           d.select().from(proposals).where(eq(proposals.status, "pending")).all(),
-        );
+        )).filter((p) => !isChore(p));
         return { waiting, change, pending };
       }),
     );

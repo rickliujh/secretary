@@ -218,6 +218,45 @@ export const RuleNameSchema = z.enum(RULE_NAMES);
 export type { RuleName } from "@/services/settings/schema";
 
 /**
+ * Playbooks that are no consequence rule (FR-19.7, Phase 26): "waiting on
+ * someone" expands a new wait, "wait resolved" a resolved one. They have no
+ * rule switch; the standing instructions shape their steps.
+ */
+export const PLAYBOOK_NAMES = ["waiting_on_someone", "wait_resolved"] as const;
+export type PlaybookName = (typeof PLAYBOOK_NAMES)[number];
+
+/** What made a card or bundle: a consequence rule or a playbook. */
+export const SITUATION_KINDS = [...RULE_NAMES, ...PLAYBOOK_NAMES] as const;
+export const SituationKindSchema = z.enum(SITUATION_KINDS);
+export type SituationKind = (typeof SITUATION_KINDS)[number];
+
+/**
+ * The live search for the owner's ticket (Phase 26, "waiting on someone"):
+ * where it looked, what it found (stored out of scope, D45), and what code
+ * picked by itself (a single clear match) or null.
+ */
+export const FoundSchema = z.object({
+  /** The projects searched; empty when the owner has none, so no search ran. */
+  projects: z.array(z.string()).default([]),
+  /** "Could not search PLAT" when the search failed or timed out; the link step is skipped. */
+  error: z.string().nullable().default(null),
+  results: z
+    .array(
+      z.object({
+        key: z.string(),
+        summary: z.string(),
+        status: z.string().nullable().default(null),
+        url: z.string().nullable().default(null),
+        /** Label stems its summary shares. */
+        score: z.number().int().default(0),
+      }),
+    )
+    .default([]),
+  picked: z.string().nullable().default(null),
+});
+export type Found = z.infer<typeof FoundSchema>;
+
+/**
  * One step of an outcome: a canonical proposal payload (so validation, editing,
  * revoke and the Executor need nothing new), its line on the card, and whether
  * the other steps hang on it (leaving it out drops them; its failure stops them).
@@ -226,8 +265,14 @@ export const StepDraftSchema = z.object({
   payload: ProposalPayloadSchema,
   label: z.string().trim().min(1),
   required: z.boolean().default(false),
+  /**
+   * Runs only when the user picks one of the found tickets (Phase 26: the
+   * `link_issues` to their ticket); left out with no correction otherwise.
+   */
+  choice: z.boolean().default(false),
 });
-export type StepDraft = z.infer<typeof StepDraftSchema>;
+/** A step as rules and playbooks write it: `choice` may be left out (false). */
+export type StepDraft = Omit<z.infer<typeof StepDraftSchema>, "choice"> & { choice?: boolean };
 
 /**
  * What a rule found (D61): `key` is `<rule>:<work_item_id>:<fingerprint>` of
@@ -235,7 +280,7 @@ export type StepDraft = z.infer<typeof StepDraftSchema>;
  * tickets it is about (Today hides their plain rows while the card is open).
  */
 export const SituationSchema = z.object({
-  rule: RuleNameSchema,
+  rule: SituationKindSchema,
   key: z.string().min(1),
   title: z.string().trim().min(1),
   /** The facts in one line. */
@@ -248,13 +293,19 @@ export const SituationSchema = z.object({
   /** The facts the rule used, as it read them. */
   facts: z.record(z.string(), z.unknown()).default({}),
   steps: z.array(StepDraftSchema).default([]),
+  /** A playbook's live search for the owner's ticket (Phase 26). */
+  found: FoundSchema.nullable().default(null),
 });
-export type Situation = z.infer<typeof SituationSchema>;
+/** A situation as rules write it: `found` may be left out (null). */
+export type Situation = Omit<z.infer<typeof SituationSchema>, "found" | "steps"> & {
+  steps: StepDraft[];
+  found?: Found | null;
+};
 
 /** An outcome card's `inbox_items.triage`: the situation without the payloads (they are the proposals). */
 export const SituationRecordSchema = z.object({
   situation: z.object({
-    rule: RuleNameSchema,
+    rule: SituationKindSchema,
     key: z.string(),
     title: z.string(),
     why: z.string(),
@@ -265,16 +316,37 @@ export const SituationRecordSchema = z.object({
     itemName: z.string().default(""),
     /** One per proposal, by its `seq`. */
     steps: z
-      .array(z.object({ seq: z.number().int(), label: z.string(), required: z.boolean() }))
+      .array(
+        z.object({
+          seq: z.number().int(),
+          label: z.string(),
+          required: z.boolean(),
+          choice: z.boolean().default(false),
+        }),
+      )
       .default([]),
+    found: FoundSchema.nullable().default(null),
+    /**
+     * A playbook bundle in a thread (Phase 26): the proposal it expanded, as
+     * the model made it, for classify's corrections and the thread's revisions.
+     */
+    origin: z.unknown().nullable().default(null),
   }),
 });
-export type SituationRecord = z.infer<typeof SituationRecordSchema>["situation"];
+/** `origin` may be left out (null): only a playbook bundle in a thread has one. */
+export type SituationRecord = Omit<z.infer<typeof SituationRecordSchema>["situation"], "origin"> & {
+  origin?: unknown;
+};
 
 /** The situation record of an inbox item's triage, or null when it holds none. */
 export function situationOf(triage: unknown): SituationRecord | null {
   const r = SituationRecordSchema.safeParse(triage);
   return r.success ? r.data.situation : null;
+}
+
+/** A playbook bundle's record as `bundles.record` stores it (Phase 26), or null. */
+export function bundleRecordOf(record: unknown): SituationRecord | null {
+  return situationOf({ situation: record });
 }
 
 export * from "./questions-schema";

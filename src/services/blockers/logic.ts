@@ -248,6 +248,8 @@ const shortDate = (iso: string) =>
 /** Why an issue woke up: "PLAT-812 moved to Done on 2 Oct", or that the link is gone. */
 export function unblockReason(blocker: string | null, blockers: BlockerMap): string {
   if (!blocker) return "Its blockers are done";
+  // A resolved wait woke it (Phase 26): "Sarah delivered the cert".
+  if (blocker.startsWith("wait:")) return blocker.slice(5);
   const s = blockers[blocker];
   if (s?.statusCategory !== "done" || s.gone) return `${blocker} no longer blocks it`;
   return `${blocker} moved to ${s.status}${s.resolvedAt ? ` on ${shortDate(s.resolvedAt)}` : ""}`;

@@ -792,12 +792,109 @@ lookups (Phase 26).
       chase card twice → it stops coming for that item; Settings > Secretary
       switches work.
 
-## Phase 26: Playbooks and standing instructions (FR-19.7)
+## Phase 26: Playbooks and standing instructions (FR-19.7, D61)
 
-"Waiting on someone" first: live lookup of their ticket, comment, link or status,
-mirror by default, follow-up, request draft; Settings > Secretary standing
-instructions; teams and people gain `jiraProjects`. Then wait resolved, chase due,
-ticket done.
+Branch `feat/26-playbooks` from `feat/25-outcomes`. A playbook is a situation
+(Phase 25) whose steps are the complete set of chores a secretary would do, not
+only the stale fact. The first is "waiting on someone": the case that started
+FR-19 (a dependency created from chat looked nothing up, commented nowhere and
+blocked nothing). Standing instructions are switches the playbooks read.
+
+### Tasks
+
+1. **Jira projects for contacts.** `teams` and `people` gain `jira_projects`
+   (json, migration 0019), editable in the contact sheets (a tag input of
+   project keys from the synced projects). Filled by hand or inferred: after a
+   sync, for each synced ticket whose assignee is a known person, that ticket's
+   project joins the person's list, and a team's list is the union of its
+   members' (inferred entries are kept apart from the hand-written ones in the
+   json: `{ key, by: "user" | "sync" }`). Classify's `people` and `teams` blocks
+   do not change.
+2. **Standing instructions** as a `secretary.instructions` settings section
+   (Settings > Secretary, below the rule switches), each a switch with one line:
+   `mirrorWaits` (default on; D18 mirror of every new wait), `blockedStatus`
+   (default off: move my ticket to a Blocked-like status while it waits on
+   someone), `commentWaits` (default on: say on my ticket who I am waiting on and
+   when), `linkFoundTickets` (default on: link their ticket as a blocker when one
+   is found), `draftRequests` (default on: prepare the request message when the
+   ask has not gone out). Leaving the same step out of a playbook card twice
+   (Phase 25's `step_left_out` corrections, same rule and step kind) makes the
+   next card for that playbook show one line above the steps: "You left the
+   comment out twice. Make that the rule?" with Yes (flips the instruction) and
+   No (records a `memories` preference so it is not offered again).
+3. **The "waiting on someone" playbook** in `services/work/playbooks/waiting.ts`:
+   triggered when a `link_dependency` is proposed by classify or the chat
+   (before the card is shown: the playbook replaces the single proposal with a
+   bundle in the same inbox item, `bundle_kind` `waiting_on_someone`), when a
+   wait is created from the dependency dialog, or when the pass sees a new open
+   wait with no bundle. Steps, in order, each one its own proposal in the bundle:
+   - **Find their ticket**: a bounded live `JiraClient.search` (JQL: the owner's
+     `jira_projects`, else their team's, else none; `statusCategory != Done`;
+     text ~ the wait label's words after stop-word removal; `maxResults 10`,
+     ordered by updated). Results are stored as candidates out of scope (D45's
+     rule, `candidate: true`) and shown in the card as a radio list with
+     "None of these". Code picks nothing by itself when more than one scores
+     equally; a single result whose summary shares two or more label stems is
+     pre-selected. Picking one makes the next step a `link_issues` (target blocked
+     by their ticket) and updates the wait's `externalRef` / `externalUrl` to it;
+     "None" keeps a person or team wait. Timeout 8 s; a failed search is shown as
+     "Could not search <projects>" and the step is skipped, not failed.
+   - `link_dependency` (the original, with `expectedAt` from the input and
+     `nextFollowupAt` from `nextFollowupAfter` using the owner's responsiveness
+     profile), mirrored by default when `mirrorWaits`.
+   - `add_comment` on the user's ticket when `commentWaits`: "Waiting on
+     <owner> for <label><, expected <date>><, see <THEIR-KEY>>." through
+     `proposalTextToWiki`.
+   - `transition_issue` to the first status of the ticket's project whose name
+     matches Blocked, On hold or Waiting, when `blockedStatus` is on and the
+     project has one (from `projectStatuses`); skipped silently otherwise.
+   - `draft_message` to the owner (intent request) when `draftRequests` is on and
+     the item has no `draft_sent` or `wait_chased` to that owner and the input
+     was not itself their message (the sender is not the owner).
+   Approval runs through `approveBundle` (Phase 25). The wait proposal is the
+   required step.
+4. **Later playbooks**, same module layout, each a Phase 25 rule whose steps grow:
+   - `wait_resolved` (extends `blocker_closed`, also fired by an `update_dependency`
+     resolve or the owner's message saying it is done): resolve the wait, comment
+     on the ticket, remove the Blocked-like status when the playbook set it (the
+     wait's `data` remembers the status it came from), wake dependent tickets
+     (`unblockedAt`, Today's woken row).
+   - `chase_due` (extends `wait_unanswered`): the chase draft, the follow-up
+     logged when the draft is marked sent (Phase 23's `draft_sent` event), an
+     optional `add_comment` "Still waiting on <owner>" when `commentWaits` is on
+     and the last comment about the wait is older than the chase interval.
+   - `ticket_done` (new rule: the user's primary ticket turned Done by them, or
+     the user says so in chat or a paste): resolve its open waits, comment a
+     closing note when a requester is on record ("Done; <requester> asked for
+     this on <date>"), wake tickets that were blocked by it (`link_issues`
+     inward links), and a `draft_message` to the requester when the ticket is a
+     small ask.
+5. **Chat.** `propose_actions` keeps producing `link_dependency`; the playbook
+   expands it before the card is shown, so "I'm waiting on Sarah for the cert"
+   in chat yields the full card. The chat's answer names the steps it offered.
+6. **Tests.** Unit tests for the JQL builder (projects, stop words, escaping,
+   no projects → no search), candidate scoring and pre-selection, each step's
+   switch, the "make that the rule" offer after two left-outs, the three later
+   playbooks' step sets. Mock-Jira AC: the mock gains a Platform project with
+   PLAT-812 "Renew the payments cert"; "I'm waiting on Sarah for the cert" in
+   chat → one card with the found ticket pre-selected, the wait, the comment,
+   no transition (instruction off), the request draft; Approve → the mock shows
+   the link, the comment and the remote link; turning `blockedStatus` on and
+   repeating on another ticket adds the transition; the owner's "it's done"
+   paste gives a `wait_resolved` card whose approval resolves, comments and
+   un-blocks. Live eval: no new model prompt; the existing classify cases must
+   keep their score.
+7. **Docs.** D61 "Built (Phase 26)" tail; design.md section 4 (`jira_projects`),
+   section 8, 7.3; CHANGELOG.
+
+### Checklist
+
+- [ ] `bun run typecheck`, `bun test`, `bun run lint`, `bun run build` green
+- [ ] Rick: tell the chat you are waiting on a real person for something their
+      team has a ticket for → the card finds it; approve → his ticket has the
+      comment and the blocked-by link, the wait is mirrored, the follow-up date
+      is set, the request draft is on the Drafts page. Leave the comment out
+      twice → the app offers to make that the rule.
 
 ## Phase 27: Suggestions where the user is (FR-19.8)
 

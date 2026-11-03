@@ -9,6 +9,7 @@ import { Data, Effect } from "effect";
 import { z } from "zod";
 import {
   actionsLog,
+  bundles,
   chatConversations,
   communications,
   contextNotes,
@@ -53,6 +54,8 @@ const EXPORTED_TABLES = [
   inboxMessages,
   intakeItems,
   proposals,
+  // Playbook bundles of input threads (Phase 26), after their threads.
+  bundles,
   actionsLog,
   memories,
   chatConversations,

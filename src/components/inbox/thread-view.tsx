@@ -32,9 +32,10 @@ import { hasInput, type MessagePart } from "@/services/intake/thread";
 import { describePayload } from "@/services/proposals/schema";
 import { threadRefs } from "@/services/proposals/thread-refs";
 import { executedRefs, groupSmallAsks } from "@/services/small-asks/bundle";
+import type { SituationRecord } from "@/services/work/schema";
 import { Composer, type ComposerMessage } from "./composer";
 import { PASTED_HIGHLIGHT } from "./message-doc";
-import { OutcomeCard } from "./outcome-card";
+import { BundleCard, OutcomeCard } from "./outcome-card";
 import { ProposalCard } from "./proposal-card";
 import { SmallAskRow } from "./small-ask-row";
 import { useDecisions, useReply } from "./use-inbox";
@@ -235,6 +236,7 @@ function AssistantTurn({
   answeringId,
   created,
   onChoose,
+  bundles,
 }: {
   summary: string | null;
   proposals: ProposalView[];
@@ -243,15 +245,33 @@ function AssistantTurn({
   /** `$new` refs the thread already created, from any turn. */
   created: ReadonlySet<string>;
   onChoose?: (proposalId: string, choice: string) => void;
+  /** The thread's playbook bundles (Phase 26), by bundle id. */
+  bundles: Readonly<Record<string, SituationRecord>>;
 }) {
-  const shown = proposals.filter((p) => p.status !== "superseded");
+  const live = proposals.filter((p) => p.status !== "superseded");
   const replaced = proposals.filter((p) => p.status === "superseded");
+  // A playbook's bundle is one card, ahead of the turn's other cards (Phase 26).
+  const grouped = new Map<string, ProposalView[]>();
+  for (const p of live)
+    if (p.bundleId) grouped.set(p.bundleId, [...(grouped.get(p.bundleId) ?? []), p]);
+  const shown = live.filter((p) => !p.bundleId);
+  const firstSeq = (id: string) => grouped.get(id)?.[0]?.seq ?? 0;
   return (
     <div className="flex max-w-[95%] flex-col gap-2">
       <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
         <Sparkles className="size-3.5 shrink-0" />
-        {summary ?? (shown.length ? "Here is what I propose." : "Nothing to do here.")}
+        {summary ?? (live.length ? "Here is what I propose." : "Nothing to do here.")}
       </p>
+      {[...grouped.keys()]
+        .sort((a, b) => firstSeq(a) - firstSeq(b))
+        .map((id) => (
+          <BundleCard
+            key={id}
+            bundleId={id}
+            situation={bundles[id] ?? null}
+            proposals={grouped.get(id) ?? []}
+          />
+        ))}
       {groupSmallAsks(shown, created).map((entry) => {
         if (entry.type === "track")
           return (
@@ -362,6 +382,7 @@ export function ThreadView({ id }: { id: string }) {
         answeringId={answering?.id ?? null}
         created={created}
         onChoose={reply.isPending ? undefined : choose}
+        bundles={d.bundles}
       />
     );
 
@@ -414,6 +435,7 @@ export function ThreadView({ id }: { id: string }) {
               answeringId={answering?.id ?? null}
               created={created}
               onChoose={reply.isPending ? undefined : choose}
+              bundles={d.bundles}
             />
           )}
           {sending && (

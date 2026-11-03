@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/sheet";
 import { deleteTeam, getTeam } from "@/services/directory/queries";
 import { ContextNotes } from "./context-notes";
+import { JiraProjects } from "./jira-projects";
 import { Section } from "./person-sheet";
 import { TeamDialog } from "./team-dialog";
 import { useDirectoryMutation } from "./use-directory";
@@ -105,6 +106,9 @@ export function TeamSheet({
               {d.team.escalationPath && (
                 <Section title="Escalation path">{d.team.escalationPath}</Section>
               )}
+              <Section title="Jira projects">
+                <JiraProjects subject="team" id={d.team.id} entries={d.team.jiraProjects ?? []} />
+              </Section>
               <Section title={`Members (${d.members.length})`}>
                 {d.members.length === 0 && (
                   <span className="text-muted-foreground">No members yet.</span>

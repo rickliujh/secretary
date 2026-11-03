@@ -83,6 +83,11 @@ export const queryKeys = {
   inboxList: (search: string) => ["inbox", "list", search] as const,
   inboxDetail: (id: string) => ["inbox", "detail", id] as const,
   pendingCount: ["inbox", "pending"] as const,
+  /** "Make that the rule?" on a playbook card (Phase 26); under "inbox" so decisions refresh it. */
+  instructionOffer: (playbook: string, kinds: readonly string[]) =>
+    ["inbox", "instruction-offer", playbook, ...kinds] as const,
+  /** Project keys the app knows, for the contact sheets' Jira projects (Phase 26). */
+  syncedProjects: ["tickets", "synced-projects"] as const,
   dependencies: ["dependencies"] as const,
   dependencyList: (includeResolved: boolean, issueKey?: string) =>
     ["dependencies", "list", includeResolved, issueKey ?? ""] as const,

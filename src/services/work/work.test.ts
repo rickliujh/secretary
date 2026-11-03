@@ -251,7 +251,8 @@ describe("attachment (D61)", () => {
         return { cert, all: yield* events };
       }),
     );
-    const real = r.all.filter((e) => e.kind !== "ticket_viewed");
+    // The new wait's playbook card (Phase 26) is the secretary's, already attached.
+    const real = r.all.filter((e) => e.kind !== "ticket_viewed" && e.kind !== "outcome_offered");
     expect(real.map((e) => [e.workItemId, e.attachedBy, e.applied])).toEqual([
       [r.cert, "code", true],
       [r.cert, "code", true],

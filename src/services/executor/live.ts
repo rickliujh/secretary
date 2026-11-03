@@ -1157,10 +1157,23 @@ const make = Effect.gen(function* () {
           };
           yield* q((d) => d.insert(dependencies).values(row));
           yield* audit(proposalId, "link_dependency", payload.target, row, { id });
+          // The wait mirrored into Jira (D18, Phase 26's `mirrorWaits`): the wait stands
+          // here either way, so a failed remote link is a warning, not a failure.
+          const warning = payload.mirror
+            ? yield* local(mirror(id, true, { proposalId })).pipe(
+                Effect.as(null),
+                Effect.catchAll((e) =>
+                  Effect.succeed(
+                    `The wait is tracked here, but its link on ${payload.target} in Jira was not made: ${e.message}`,
+                  ),
+                ),
+              )
+            : null;
           return {
-            message: `${payload.target} now waits on ${payload.label}`,
+            message: `${payload.target} now waits on ${payload.label}${payload.mirror && !warning ? ", shown in Jira" : ""}`,
             dependencyId: id,
             issueKey: payload.target,
+            ...(warning ? { warning } : {}),
           } satisfies ProposalResult;
         }
         case "link_issues":

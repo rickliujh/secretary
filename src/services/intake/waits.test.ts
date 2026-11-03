@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { dependencies, people } from "@/db/schema";
+import { dependencies, memories, people } from "@/db/schema";
 import type { ItemSnapshot } from "@/prompts/classify";
 import { query } from "@/services/db";
 import { timing } from "@/services/dependencies/logic";
@@ -126,6 +126,12 @@ describe("intake and waits (FR-3 AC)", () => {
         label: "Q3 numbers from finance",
         logged: true,
       },
+      // The wait_resolved playbook (Phase 26): it says so on the ticket.
+      {
+        kind: "add_comment",
+        target: "PAY-2",
+        bodyMd: "No longer waiting on Bob Ray for Q3 numbers from finance: it is done.",
+      },
     ]);
     expect(r.decided).toMatchObject({
       status: "executed",
@@ -197,5 +203,178 @@ describe("intake and waits (FR-3 AC)", () => {
       reason: "Bob Ray is back",
     });
     expect(r.remindMon.map((x) => x.reason)).toEqual(["Bob Ray is back"]);
+  });
+});
+
+describe("a wait's playbook in a thread (Phase 26)", () => {
+  const contract = {
+    kind: "link_dependency",
+    target: "PAY-2",
+    dependencyKind: "person",
+    label: "the signed contract",
+    ownerPersonId: BOB,
+    ...e,
+  };
+  const answer = (expectedAt: string | null) => ({
+    summary: "Waiting on Bob for the signed contract",
+    question: null,
+    confidence: 0.9,
+    proposals: [{ ...contract, expectedAt }],
+  });
+
+  test("a reply revises the wait only; the playbook expands it again", async () => {
+    const { layer, models } = layerWith([answer(null), answer("2026-09-30")]);
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* seedBob;
+          const intake = yield* Intake;
+          const t = yield* intake.triage({
+            text: "I'm waiting on Bob for the signed contract for PAY-2",
+            source: "typed",
+            senderPersonId: null,
+            today: TODAY,
+          });
+          const first = (yield* readThread(t.inboxItemId)).props;
+          yield* intake.reply({
+            inboxItemId: t.inboxItemId,
+            instruction: "He said by 30 September",
+            today: TODAY,
+          });
+          return { first, after: (yield* readThread(t.inboxItemId)).props };
+        }),
+        layer,
+      ),
+    );
+    expect(r.first.map((p) => p.kind)).toEqual(["link_dependency", "add_comment", "draft_message"]);
+    // The model is shown the wait it proposed, not the chores code added.
+    const revision = promptOf(models.calls, 1);
+    expect(revision).toContain("the signed contract");
+    expect(revision).not.toContain("Waiting on Bob Ray for");
+    expect(r.after.filter((p) => p.status === "superseded").map((p) => p.kind)).toEqual([
+      "link_dependency",
+      "add_comment",
+      "draft_message",
+    ]);
+    const live = r.after.filter((p) => p.status === "pending");
+    expect(live.map((p) => p.kind)).toEqual(["link_dependency", "add_comment", "draft_message"]);
+    expect(live[0]?.id).toBe(live[0]?.bundleId ?? "");
+    expect(live[1]?.payload).toMatchObject({
+      bodyMd: "Waiting on Bob Ray for the signed contract, expected 30 Sept.",
+    });
+  });
+});
+
+describe("a bundled wait still teaches classify (Phase 26, D46)", () => {
+  const contract = {
+    kind: "link_dependency",
+    target: "PAY-2",
+    dependencyKind: "person",
+    label: "the signed contract",
+    ownerPersonId: BOB,
+    expectedAt: null,
+    ...e,
+  };
+  const answer = (proposals: Record<string, unknown>[]) => ({
+    summary: "Waiting on Bob for the signed contract",
+    question: null,
+    confidence: 0.9,
+    proposals,
+  });
+  const triage = Effect.gen(function* () {
+    yield* seedBob;
+    const t = yield* (yield* Intake).triage({
+      text: "I'm waiting on Bob for the signed contract for PAY-2",
+      source: "typed",
+      senderPersonId: null,
+      today: TODAY,
+    });
+    return { t, props: (yield* readThread(t.inboxItemId)).props };
+  });
+  const examples = query((d) =>
+    d.select().from(memories).where(eq(memories.kind, "example")).all(),
+  );
+
+  test("rejecting the wait rejects its card: one classify correction, as the model made it", async () => {
+    const { layer } = layerWith([answer([contract])]);
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const { t, props } = yield* triage;
+          const origin = props.find((p) => p.id === p.bundleId);
+          yield* (yield* Proposals).reject(origin?.id ?? "");
+          return {
+            props: (yield* readThread(t.inboxItemId)).props,
+            examples: yield* examples,
+            item: (yield* readThread(t.inboxItemId)).item,
+          };
+        }),
+        layer,
+      ),
+    );
+    expect(r.props.map((p) => [p.kind, p.status])).toEqual([
+      ["link_dependency", "rejected"],
+      ["add_comment", "rejected"],
+      ["draft_message", "rejected"],
+    ]);
+    expect(r.examples).toHaveLength(1);
+    expect(r.examples[0]).toMatchObject({
+      subjectType: "proposal_kind",
+      subjectId: "link_dependency",
+      exampleAfter: null,
+    });
+    // As the model made it: no follow-up date or mirror the playbook set.
+    expect(r.examples[0]?.exampleBefore).toMatchObject({ nextFollowupAt: null, mirror: false });
+    expect(r.item?.status).toBe("filed");
+  });
+
+  test("approving an edited wait records the edit against the wait as the model made it", async () => {
+    const { layer } = layerWith([answer([contract])]);
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const { props } = yield* triage;
+          const origin = props.find((p) => p.id === p.bundleId);
+          const edited = { ...(origin?.payload as object), label: "the countersigned contract" };
+          yield* (yield* Proposals).approve(origin?.id ?? "", edited as never);
+          return yield* examples;
+        }),
+        layer,
+      ),
+    );
+    expect(r).toHaveLength(1);
+    expect(r[0]?.exampleBefore).toMatchObject({
+      label: "the signed contract",
+      nextFollowupAt: null,
+      mirror: false,
+    });
+    expect(r[0]?.exampleAfter).toMatchObject({
+      label: "the countersigned contract",
+      nextFollowupAt: null,
+      mirror: false,
+    });
+  });
+
+  test("a comment the user dropped in a revision is not put back by the playbook", async () => {
+    const comment = { kind: "add_comment", target: "PAY-2", body: "Waiting on Bob.", ...e };
+    const { layer } = layerWith([answer([contract, comment]), answer([contract])]);
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const { t, props } = yield* triage;
+          yield* (yield* Intake).reply({
+            inboxItemId: t.inboxItemId,
+            instruction: "just track it, no comment",
+            today: TODAY,
+          });
+          return { first: props, after: (yield* readThread(t.inboxItemId)).props };
+        }),
+        layer,
+      ),
+    );
+    // The model's own comment stands in for the playbook's in the first turn.
+    expect(r.first.map((p) => p.kind)).toEqual(["link_dependency", "draft_message", "add_comment"]);
+    const live = r.after.filter((p) => p.status === "pending");
+    expect(live.map((p) => p.kind)).toEqual(["link_dependency", "draft_message"]);
   });
 });
