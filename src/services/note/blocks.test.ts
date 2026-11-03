@@ -68,6 +68,36 @@ describe("splitBlocks (D65)", () => {
     ]);
   });
 
+  test("each block knows its lines, after frontmatter and around blank lines (D67)", () => {
+    expect(blocks.map((b) => [b.fromLine, b.toLine])).toEqual([
+      [5, 6],
+      [8, 8],
+      [9, 10],
+      [11, 11],
+      [12, 12],
+      [14, 18],
+      [21, 21],
+      [23, 23],
+      [25, 26],
+    ]);
+    const lines = NOTE.split("\n");
+    for (const b of blocks)
+      expect(
+        lines
+          .slice(b.fromLine, b.toLine + 1)
+          .join("\n")
+          .trim(),
+      ).toBe(b.text);
+  });
+
+  test("line ranges count blank lines, CRLF and an empty first line", () => {
+    const b = splitBlocks("\r\n\r\nfirst\r\nstill first\r\n\r\n\r\n- item\r\n\r\n  ");
+    expect(b.map((x) => [x.text, x.fromLine, x.toLine])).toEqual([
+      ["first\nstill first", 2, 3],
+      ["- item", 6, 6],
+    ]);
+  });
+
   test("checkboxes: state and the unticked twin's hash", () => {
     const [, open, done] = blocks;
     expect(open?.checked).toBe(false);
