@@ -38,6 +38,7 @@ import { JiraClient } from "@/services/jira";
 import { parseIssueLinks } from "@/services/jira/schemas";
 import { LlmLive } from "@/services/llm/live";
 import { makeScriptedModels, type Scripted } from "@/services/llm/test";
+import { dailyNoteTestLayer } from "@/services/note/test";
 import { Proposals } from "@/services/proposals";
 import { ProposalsLive } from "@/services/proposals/live";
 import { RetrievalLive } from "@/services/retrieval/live";
@@ -146,7 +147,7 @@ function setup(script?: Script) {
   const layer = Layer.provideMerge(
     ChatLive,
     Layer.provideMerge(
-      Layer.merge(IntakeLive, ProposalsLive),
+      Layer.provideMerge(dailyNoteTestLayer(), Layer.merge(IntakeLive, ProposalsLive)),
       Layer.provideMerge(
         Layer.mergeAll(
           RetrievalLive,

@@ -7,6 +7,8 @@ import { IntakeLive } from "@/services/intake/live";
 import { LearningLive } from "@/services/learning/live";
 import { LlmLive } from "@/services/llm/live";
 import { makeScriptedModels, type Scripted } from "@/services/llm/test";
+import { DailyNoteLive } from "@/services/note/live";
+import { makeNoteFileTest } from "@/services/note/test";
 import { PlanningLive } from "@/services/planning/live";
 import { ReportsLive } from "@/services/report/live";
 import { RetrievalLive } from "@/services/retrieval/live";
@@ -21,7 +23,13 @@ import type { StubRoute } from "./stub-fetch";
 export function intakeTestLayer(
   scripts: Record<string, Scripted[]>,
   extraRoutes: StubRoute[] = [],
-  opts: { vaults?: MemoryVaults; dataSources?: DataSource[]; settings?: Partial<AppSettings> } = {},
+  opts: {
+    vaults?: MemoryVaults;
+    dataSources?: DataSource[];
+    settings?: Partial<AppSettings>;
+    /** The vaults' daily note files (D65), by vault name; null: not written yet. */
+    noteFiles?: Record<string, string | null>;
+  } = {},
 ) {
   const jira = syncedJiraLayer(extraRoutes, {
     ...opts.settings,
@@ -34,6 +42,7 @@ export function intakeTestLayer(
     },
   });
   const models = makeScriptedModels(scripts);
+  const noteFile = makeNoteFileTest(opts.noteFiles);
   const llm = Layer.provideMerge(
     Layer.merge(LlmLive, ConfluenceClientLive),
     Layer.merge(jira.layer, models.layer),
@@ -41,7 +50,7 @@ export function intakeTestLayer(
   const layer = Layer.provideMerge(
     Layer.mergeAll(CommsLive, LearningLive, ChatLive, PlanningLive, ReportsLive),
     Layer.provideMerge(
-      IntakeLive,
+      Layer.provideMerge(DailyNoteLive.pipe(Layer.provide(noteFile.layer)), IntakeLive),
       Layer.provideMerge(
         Layer.merge(
           RetrievalLive,
@@ -51,7 +60,7 @@ export function intakeTestLayer(
       ),
     ),
   );
-  return { layer, models, seen: jira.seen };
+  return { layer, models, seen: jira.seen, noteFile };
 }
 
 export const out = (value: unknown) => ({ text: JSON.stringify(value) });
