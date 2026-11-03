@@ -13,6 +13,8 @@ export class SecretaryTransport implements ChatTransport<UIMessage> {
     private readonly tier: () => Tier | undefined,
     /** A tool recorded work events: the app schedules a work pass (D61). */
     private readonly onWorkChanged: () => void = () => undefined,
+    /** A tool wrote an Inbox item (the end-of-day page, D63): the Inbox reads it again. */
+    private readonly onInboxChanged: () => void = () => undefined,
   ) {}
 
   sendMessages({
@@ -24,7 +26,13 @@ export class SecretaryTransport implements ChatTransport<UIMessage> {
   }): Promise<ReadableStream<UIMessageChunk>> {
     return run(
       Effect.flatMap(Chat, (c) =>
-        c.stream({ messages, tier: this.tier(), abortSignal, onWorkChanged: this.onWorkChanged }),
+        c.stream({
+          messages,
+          tier: this.tier(),
+          abortSignal,
+          onWorkChanged: this.onWorkChanged,
+          onInboxChanged: this.onInboxChanged,
+        }),
       ),
       abortSignal,
     );

@@ -8,9 +8,14 @@
  * doubts. The answer arrives through `Intake.reply` and reaches the item; an
  * unanswered question expires after seven days with its event attached as
  * `unsure`, listed on the timeline and never read into the state.
+ *
+ * What the ration leaves unasked is kept for the day (`sync_state`
+ * `work.unasked`), so the end-of-day pass can release up to five of them in
+ * the same order (D63); a released question does not count against the ration.
  */
 import { and, eq, gte, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
+import { z } from "zod";
 import {
   inboxItems,
   inboxMessages,
@@ -19,8 +24,11 @@ import {
   workItemIssues,
   workItems,
 } from "@/db/schema";
+import { localDate } from "@/lib/dates";
 import { newId, nowIso } from "@/lib/ids";
+import { readJson } from "@/lib/json";
 import { query } from "@/services/db";
+import { getState, SYNC_KEYS, setState } from "@/services/sync/state";
 import type { AttachAsk } from "./attach";
 import { appendEvents } from "./events";
 import type { DoubtOfItems } from "./queries";
@@ -33,6 +41,15 @@ import {
   type WorkQuestion,
   WorkQuestionSchema,
 } from "./schema";
+
+/**
+ * One writer at a time for the work threads, the ration's leftovers and the
+ * end-of-day page (D63): the work pass's `askQuestions` and `runDayEnd` hold
+ * it, so two runs never make two threads for one item, rewrite
+ * `work.unasked` over each other or release a question twice. Not
+ * re-entrant: code inside either calls the unlocked parts.
+ */
+export const questionLock = Effect.unsafeMakeSemaphore(1);
 
 /** Days a question waits for an answer. */
 export const QUESTION_DAYS = 7;
@@ -130,7 +147,14 @@ export const postMessage = (inboxItemId: string, summary: string) =>
 /** Posts one question in a thread: an assistant turn holding the pending question. */
 export const postQuestion = (
   inboxItemId: string,
-  q: { question: string; choices: string[]; work: WorkQuestion; intro?: string },
+  q: {
+    question: string;
+    choices: string[];
+    work: WorkQuestion;
+    intro?: string;
+    /** Released by the end-of-day pass on this local day (D63): outside the ration. */
+    releasedOn?: string;
+  },
 ) =>
   Effect.gen(function* () {
     const now = nowIso();
@@ -155,6 +179,7 @@ export const postQuestion = (
           question: q.question,
           choices: q.choices,
           work: q.work,
+          ...(q.releasedOn ? { releasedOn: q.releasedOn } : {}),
         },
         status: "pending",
         createdAt: now,
@@ -172,7 +197,8 @@ export const postQuestion = (
 
 /**
  * Work questions asked in work threads since `since` (the ration counts these).
- * A question in a thread the user parked does not count (D62).
+ * A question in a thread the user parked does not count (D62), nor one the
+ * end-of-day pass released (D63).
  */
 const askedSince = (since: string) =>
   Effect.map(
@@ -188,6 +214,7 @@ const askedSince = (since: string) =>
             ne(inboxItems.status, "parked"),
             gte(proposals.createdAt, since),
             sql`json_extract(${proposals.payload}, '$.work.type') IS NOT NULL`,
+            sql`json_extract(${proposals.payload}, '$.releasedOn') IS NULL`,
           ),
         )
         .get(),
@@ -253,37 +280,52 @@ const meaningAsked = (since: string) =>
       }),
   );
 
-type Ask =
+/** A question that shares the day's ration; `rank` orders them (the most consequential first). */
+export type Ask =
   | { type: "attach"; ask: AttachAsk; rank: number }
   | { type: "meaning"; ask: MeaningAsk; rank: number }
   | { type: "group"; ask: DoubtOfItems; rank: number };
 
-/**
- * Asks what the pass could not settle. Questions about an Inbox message go in
- * its thread at once; the rest share the day's ration, most consequential first.
- */
-export const askQuestions = (opts: {
-  attach: readonly AttachAsk[];
-  meaning: readonly MeaningAsk[];
-  doubts: readonly DoubtOfItems[];
-  perDay: number;
-  /** Start of the user's day, ISO: the ration counts from here. */
-  dayStart: string;
-}) =>
+/** The item whose work thread a rationed question goes in. */
+const targetOf = (r: Ask) => (r.type === "meaning" ? r.ask.itemId : (r.ask.itemIds[0] ?? ""));
+
+/** One key per question, so the day's unasked list holds each once. */
+export const askKey = (r: Ask) =>
+  r.type === "attach"
+    ? `attach:${r.ask.eventId}`
+    : r.type === "meaning"
+      ? `meaning:${r.ask.itemId}:${normalise(r.ask.question)}`
+      : doubtKey(r.ask);
+
+/** Items among `ids` whose work thread the user parked (D62). */
+const parkedItems = (ids: readonly string[]) =>
+  Effect.map(
+    ids.length
+      ? query((d) =>
+          d
+            .select({ item: inboxItems.workItemId })
+            .from(inboxItems)
+            .where(
+              and(
+                inArray(inboxItems.workItemId, [...ids]),
+                ne(inboxItems.source, "secretary"),
+                eq(inboxItems.status, "parked"),
+              ),
+            )
+            .all(),
+        )
+      : Effect.succeed([] as { item: string | null }[]),
+    (rows) => new Set(rows.map((r) => r.item ?? "")),
+  );
+
+/** Posting over the items the questions name: their names and tickets read once. */
+const asker = (ids: readonly string[]) =>
   Effect.gen(function* () {
-    const ids = [
-      ...new Set([
-        ...opts.attach.flatMap((a) => a.itemIds),
-        ...opts.meaning.map((m) => m.itemId),
-        ...opts.doubts.flatMap((d) => d.itemIds),
-      ]),
-    ];
     const items = yield* itemsById(ids);
     const keys = yield* keysByItem(ids);
     const nameOf = (id: string) => items.get(id)?.name ?? "Work item";
-    const asked: string[] = [];
 
-    const askAttach = (a: AttachAsk, inboxItemId: string) =>
+    const askAttach = (a: AttachAsk, inboxItemId: string, releasedOn?: string) =>
       Effect.gen(function* () {
         const choices = [
           ...a.itemIds.map((id) => choiceLabel(nameOf(id), keys.get(id) ?? [])),
@@ -294,6 +336,7 @@ export const askQuestions = (opts: {
           choices,
           work: { type: "attach", eventId: a.eventId, itemIds: a.itemIds },
           intro: "I am not sure which work item this belongs to",
+          releasedOn,
         });
         const row = yield* query((d) =>
           d
@@ -308,8 +351,71 @@ export const askQuestions = (opts: {
             .set({ data: { ...eventData(row?.data), question: id, candidates: a.itemIds } })
             .where(eq(workEvents.id, a.eventId)),
         );
-        asked.push(id);
+        return id;
       });
+
+    /** A rationed question, in its item's work thread. */
+    const post = (r: Ask, releasedOn?: string) =>
+      Effect.gen(function* () {
+        if (r.type === "attach") {
+          const first = r.ask.itemIds[0] ?? "";
+          return yield* askAttach(r.ask, yield* workThread(first, nameOf(first)), releasedOn);
+        }
+        if (r.type === "meaning")
+          return yield* postQuestion(yield* workThread(r.ask.itemId, nameOf(r.ask.itemId)), {
+            question: r.ask.question,
+            choices: r.ask.choices,
+            work: { type: "meaning", itemId: r.ask.itemId },
+            intro: `A question about "${nameOf(r.ask.itemId)}"`,
+            releasedOn,
+          });
+        const [a, b] = r.ask.itemIds;
+        return yield* postQuestion(yield* workThread(a, nameOf(a)), {
+          question: `Are "${choiceLabel(nameOf(a), keys.get(a) ?? [])}" and "${choiceLabel(nameOf(b), keys.get(b) ?? [])}" one piece of work?${
+            r.ask.reason === "cap"
+              ? " Together they would be a large item, so I kept them apart."
+              : " Their tickets are linked."
+          }`,
+          choices: [ONE_PIECE, KEEP_APART],
+          work: { type: "group", key: doubtKey(r.ask), itemIds: [a, b] },
+          intro: "Two work items may be one",
+          releasedOn,
+        });
+      });
+    return { askAttach, post, nameOf };
+  });
+
+/**
+ * Asks what the pass could not settle. Questions about an Inbox message go in
+ * its thread at once; the rest share the day's ration, most consequential first.
+ * What the ration leaves is kept for the day, for the end-of-day pass (D63).
+ */
+export const askQuestions = (opts: {
+  attach: readonly AttachAsk[];
+  meaning: readonly MeaningAsk[];
+  doubts: readonly DoubtOfItems[];
+  perDay: number;
+  /** Start of the user's day, ISO: the ration counts from here. */
+  dayStart: string;
+}) => questionLock.withPermits(1)(askUnlocked(opts));
+
+const askUnlocked = (opts: {
+  attach: readonly AttachAsk[];
+  meaning: readonly MeaningAsk[];
+  doubts: readonly DoubtOfItems[];
+  perDay: number;
+  dayStart: string;
+}) =>
+  Effect.gen(function* () {
+    const ids = [
+      ...new Set([
+        ...opts.attach.flatMap((a) => a.itemIds),
+        ...opts.meaning.map((m) => m.itemId),
+        ...opts.doubts.flatMap((d) => d.itemIds),
+      ]),
+    ];
+    const { askAttach, post } = yield* asker(ids);
+    const asked: string[] = [];
 
     // In the thread the user is in: free, and asked at once.
     const rationed: Ask[] = [];
@@ -323,7 +429,7 @@ export const askQuestions = (opts: {
             .get(),
         );
         if (thread) {
-          yield* askAttach(a, thread.id);
+          asked.push(yield* askAttach(a, thread.id));
           continue;
         }
       }
@@ -345,56 +451,174 @@ export const askQuestions = (opts: {
 
     // A work thread the user parked takes no new rationed question until it is
     // back (D62): its questions do not count, so they would not be rationed.
-    const parked = new Set(
-      ids.length
-        ? (yield* query((d) =>
-            d
-              .select({ item: inboxItems.workItemId })
-              .from(inboxItems)
-              .where(
-                and(
-                  inArray(inboxItems.workItemId, ids),
-                  ne(inboxItems.source, "secretary"),
-                  eq(inboxItems.status, "parked"),
-                ),
-              )
-              .all(),
-          )).map((r) => r.item)
-        : [],
-    );
-    const target = (r: Ask) => (r.type === "meaning" ? r.ask.itemId : (r.ask.itemIds[0] ?? ""));
+    const parked = yield* parkedItems(ids);
+    const posted: string[] = [];
+    const unasked: Ask[] = [];
     let left = Math.max(0, opts.perDay - (yield* askedSince(opts.dayStart)));
     for (const r of rationed.sort((a, b) => a.rank - b.rank)) {
-      if (left <= 0) break;
-      if (parked.has(target(r))) continue;
-      left--;
-      if (r.type === "attach") {
-        const first = r.ask.itemIds[0] ?? "";
-        yield* askAttach(r.ask, yield* workThread(first, nameOf(first)));
-      } else if (r.type === "meaning") {
-        const id = yield* postQuestion(yield* workThread(r.ask.itemId, nameOf(r.ask.itemId)), {
-          question: r.ask.question,
-          choices: r.ask.choices,
-          work: { type: "meaning", itemId: r.ask.itemId },
-          intro: `A question about "${nameOf(r.ask.itemId)}"`,
-        });
-        asked.push(id);
-      } else {
-        const [a, b] = r.ask.itemIds;
-        const id = yield* postQuestion(yield* workThread(a, nameOf(a)), {
-          question: `Are "${choiceLabel(nameOf(a), keys.get(a) ?? [])}" and "${choiceLabel(nameOf(b), keys.get(b) ?? [])}" one piece of work?${
-            r.ask.reason === "cap"
-              ? " Together they would be a large item, so I kept them apart."
-              : " Their tickets are linked."
-          }`,
-          choices: [ONE_PIECE, KEEP_APART],
-          work: { type: "group", key: doubtKey(r.ask), itemIds: [a, b] },
-          intro: "Two work items may be one",
-        });
-        asked.push(id);
+      // Kept for the end of day, which releases it if the thread is back by then.
+      if (parked.has(targetOf(r)) || left <= 0) {
+        unasked.push(r);
+        continue;
       }
+      left--;
+      asked.push(yield* post(r));
+      posted.push(askKey(r));
     }
+    yield* keepUnasked(localDate(new Date(opts.dayStart)), unasked, posted);
     return asked;
+  });
+
+// ---------------------------------------------------------------------------
+// What the ration left unasked (D63)
+// ---------------------------------------------------------------------------
+
+const StoredAskSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("attach"),
+    rank: z.number(),
+    ask: z.object({
+      eventId: z.string(),
+      itemIds: z.array(z.string()).min(1),
+      inboxItemId: z.string().nullable().default(null),
+      datesNamed: z.boolean().default(false),
+      summary: z.string(),
+      // The event's words stay in the event; the question shows only its summary.
+      text: z.string().default(""),
+    }),
+  }),
+  z.object({
+    type: z.literal("meaning"),
+    rank: z.number(),
+    ask: z.object({
+      itemId: z.string(),
+      question: z.string(),
+      choices: z.array(z.string()).default([]),
+    }),
+  }),
+  z.object({
+    type: z.literal("group"),
+    rank: z.number(),
+    ask: z.object({
+      reason: z.enum(["cap", "items"]),
+      itemIds: z.tuple([z.string(), z.string()]),
+    }),
+  }),
+]);
+
+/** `sync_state` `work.unasked`: the day's questions over the ration, in the order found. */
+const UnaskedSchema = z.object({
+  day: z.string(),
+  asks: z.array(StoredAskSchema).default([]),
+});
+
+const stored = (r: Ask): Ask => (r.type === "attach" ? { ...r, ask: { ...r.ask, text: "" } } : r);
+
+/** The day's unasked questions; another day's list is empty. */
+export const unaskedOf = (today: string) =>
+  Effect.map(getState(SYNC_KEYS.unasked), (raw) => {
+    const v = readJson(raw, UnaskedSchema, { day: today, asks: [] });
+    return v.day === today ? (v.asks as Ask[]) : [];
+  });
+
+/** Most questions kept for the day; the oldest go first. */
+export const UNASKED_LIMIT = 50;
+
+const saveUnasked = (today: string, asks: readonly Ask[]) =>
+  setState(
+    SYNC_KEYS.unasked,
+    JSON.stringify({ day: today, asks: asks.slice(-UNASKED_LIMIT).map(stored) }),
+  );
+
+/**
+ * Keeps what the ration left today: the earlier list without what was just
+ * asked, with this pass's leftovers in place of the same questions. Attach and
+ * grouping questions come back every pass while they stand; a meaning
+ * question is found once, so it is kept here until the day ends.
+ */
+const keepUnasked = (today: string, unasked: readonly Ask[], asked: readonly string[]) =>
+  Effect.gen(function* () {
+    const before = yield* unaskedOf(today);
+    if (before.length === 0 && unasked.length === 0) return;
+    const gone = new Set([...asked, ...unasked.map(askKey)]);
+    yield* saveUnasked(today, [...before.filter((r) => !gone.has(askKey(r))), ...unasked]);
+  });
+
+/** Whether a question kept for later still needs asking. */
+/**
+ * Whether a work question still has something to settle: its event is still
+ * unattached (attach), its items are still active. A released question whose
+ * answer no longer matters is withdrawn on the next end-of-day run (D63).
+ */
+export const questionStands = (q: WorkQuestion) =>
+  Effect.gen(function* () {
+    const ids = q.type === "meaning" ? [q.itemId] : q.itemIds;
+    const items = yield* itemsById(ids);
+    const active = (id: string) => items.get(id)?.status === "active";
+    if (q.type === "attach") {
+      const e = yield* query((d) =>
+        d.select().from(workEvents).where(eq(workEvents.id, q.eventId)).get(),
+      );
+      return !!e && e.attachedBy === null && ids.some(active);
+    }
+    return ids.every(active);
+  });
+
+const askOf = (r: Ask): WorkQuestion =>
+  r.type === "attach"
+    ? { type: "attach", eventId: r.ask.eventId, itemIds: r.ask.itemIds }
+    : r.type === "meaning"
+      ? { type: "meaning", itemId: r.ask.itemId }
+      : { type: "group", key: doubtKey(r.ask), itemIds: r.ask.itemIds };
+
+const stillOpen = (r: Ask, today: string) =>
+  Effect.gen(function* () {
+    if (!(yield* questionStands(askOf(r)))) return false;
+    if (r.type === "attach") {
+      // A question about it is out already.
+      const e = yield* query((d) =>
+        d.select().from(workEvents).where(eq(workEvents.id, r.ask.eventId)).get(),
+      );
+      return !eventData(e?.data).question;
+    }
+    if (r.type === "group") return !(yield* askedKeys).has(doubtKey(r.ask));
+    const since = new Date(
+      Date.parse(`${today}T00:00:00`) - QUESTION_DAYS * 86_400_000,
+    ).toISOString();
+    const recent = (yield* meaningAsked(since)).filter((x) => x.itemId === r.ask.itemId);
+    return !recent.some((x) => x.pending || sameQuestion(x.question, r.ask.question));
+  });
+
+/**
+ * The end-of-day pass's release (D63): up to `limit` of the day's questions
+ * the ration left unasked, most consequential first, posted in their items'
+ * work threads as the pass would have, marked `releasedOn` so the ration does
+ * not count them. A question whose thread the user parked stays for later;
+ * one that no longer stands is dropped. Returns the posted proposal ids.
+ * The caller holds `questionLock` (`runDayEnd` does).
+ */
+export const releaseUnasked = (opts: { today: string; limit: number }) =>
+  Effect.gen(function* () {
+    const all = yield* unaskedOf(opts.today);
+    if (all.length === 0 || opts.limit <= 0) return [] as string[];
+    const order = [...all].sort((a, b) => a.rank - b.rank);
+    const ids = [
+      ...new Set(order.flatMap((r) => (r.type === "meaning" ? [r.ask.itemId] : r.ask.itemIds))),
+    ];
+    const parked = yield* parkedItems(ids);
+    const { post } = yield* asker(ids);
+    const released: string[] = [];
+    const keep: Ask[] = [];
+    for (const r of order) {
+      if (released.length >= opts.limit || parked.has(targetOf(r))) {
+        keep.push(r);
+        continue;
+      }
+      if (!(yield* stillOpen(r, opts.today))) continue;
+      released.push(yield* post(r, opts.today));
+    }
+    yield* saveUnasked(opts.today, keep);
+    return released;
   });
 
 // ---------------------------------------------------------------------------
@@ -513,7 +737,12 @@ export type WorkAnswer = { message: string; reask: boolean };
  */
 export const answerWorkQuestion = (row: typeof proposals.$inferSelect, answer: string) =>
   Effect.gen(function* () {
-    const payload = row.payload as { question?: string; choices?: string[]; work?: unknown };
+    const payload = row.payload as {
+      question?: string;
+      choices?: string[];
+      work?: unknown;
+      releasedOn?: string;
+    };
     const q = WorkQuestionSchema.parse(payload.work);
     const choices = payload.choices ?? [];
     const again = (message: string) =>
@@ -524,6 +753,8 @@ export const answerWorkQuestion = (row: typeof proposals.$inferSelect, answer: s
             choices,
             work: q,
             intro: message,
+            // A released question asked again stays outside the ration (D63).
+            releasedOn: payload.releasedOn,
           });
         return { message, reask: true } satisfies WorkAnswer;
       });
@@ -596,3 +827,34 @@ export const answerWorkQuestion = (row: typeof proposals.$inferSelect, answer: s
     ]);
     return { message: "Thanks, noted.", reask: false } satisfies WorkAnswer;
   });
+
+/** One key per work question, the same for a question and its re-ask. */
+export const workQuestionKey = (q: WorkQuestion) =>
+  q.type === "attach" ? `attach:${q.eventId}` : q.type === "group" ? q.key : `meaning:${q.itemId}`;
+
+/**
+ * Work questions the end-of-day pass released on `today` (D63), any status,
+ * a re-ask counted with its question: five a day at most.
+ */
+export const releasedOn = (today: string) =>
+  Effect.map(
+    query((d) =>
+      d
+        .select({ thread: proposals.inboxItemId, payload: proposals.payload })
+        .from(proposals)
+        .where(
+          and(
+            eq(proposals.kind, "needs_clarification"),
+            sql`json_extract(${proposals.payload}, '$.releasedOn') = ${today}`,
+          ),
+        )
+        .all(),
+    ),
+    (rows) =>
+      new Set(
+        rows.flatMap((r) => {
+          const q = WorkQuestionSchema.safeParse((r.payload as { work?: unknown }).work);
+          return q.success ? [`${r.thread}|${workQuestionKey(q.data)}`] : [];
+        }),
+      ).size,
+  );

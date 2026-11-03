@@ -70,3 +70,81 @@ export class PassScheduler {
     this.again = false;
   }
 }
+
+/** Minutes after midnight of a local "HH:MM" time; null when it is no time. */
+export function minutesOf(at: string): number | null {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(at);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+/** The local day of a moment, as YYYY-MM-DD. */
+const dayOf = (ms: number) => new Date(ms).toLocaleDateString("en-CA");
+
+/** The moment of `at` on the local day of `ms`. */
+const atOn = (ms: number, minutes: number) => {
+  const d = new Date(ms);
+  return new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
+    Math.floor(minutes / 60),
+    minutes % 60,
+  ).getTime();
+};
+
+/**
+ * The end-of-day pass at a set time (D63): while the app is open, once per
+ * local day, when the clock passes `at`. It checks every `tickMs` (30 s) and
+ * fires only when the time fell between two checks, so an app opened after
+ * the time does not run it late; the user can still ask from Today or the
+ * chat. A run that fails is not retried that day.
+ */
+export class DailyTrigger {
+  private timer: unknown = null;
+  private lastCheck = 0;
+  private firedOn: string | null = null;
+  private minutes: number | null = null;
+
+  constructor(
+    private readonly run: () => Promise<unknown>,
+    private readonly opts: { tickMs?: number; timers?: Timers } = {},
+  ) {}
+
+  private get timers() {
+    return this.opts.timers ?? realTimers;
+  }
+
+  /** Starts (or moves) the trigger to `at`, counting from now. */
+  start(at: string) {
+    this.stop();
+    this.minutes = minutesOf(at);
+    if (this.minutes === null) return;
+    this.lastCheck = this.timers.now();
+    this.schedule();
+  }
+
+  stop() {
+    if (this.timer !== null) this.timers.clear(this.timer);
+    this.timer = null;
+  }
+
+  private schedule() {
+    this.timer = this.timers.set(() => this.tick(), this.opts.tickMs ?? 30_000);
+  }
+
+  private tick() {
+    this.timer = null;
+    const now = this.timers.now();
+    const minutes = this.minutes;
+    if (minutes !== null) {
+      const due = atOn(now, minutes);
+      const today = dayOf(now);
+      if (this.lastCheck < due && due <= now && this.firedOn !== today) {
+        this.firedOn = today;
+        void this.run().catch(() => undefined);
+      }
+    }
+    this.lastCheck = now;
+    this.schedule();
+  }
+}

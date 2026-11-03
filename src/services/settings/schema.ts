@@ -215,6 +215,11 @@ export const InstructionsSchema = z.object({
 });
 export type Instructions = z.infer<typeof InstructionsSchema>;
 
+/** When the end-of-day pass runs once its switch is on (D63). */
+export const DEFAULT_DAY_END_AT = "17:30";
+/** A local time of day, HH:MM on a 24-hour clock. */
+export const DAY_END_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 /** Settings > Secretary beyond the work model: the rules' switches and the standing instructions. */
 export const SecretarySettingsSchema = z.object({
   rules: z
@@ -235,6 +240,17 @@ export const SecretarySettingsSchema = z.object({
   suggestions: z.boolean().default(true),
   /** While an item is current, Inbox threads about other work offer Park (D62). */
   parkInput: z.boolean().default(true),
+  /**
+   * The end-of-day pass at a set time (D63, Phase 28): off by default. While
+   * on, it runs once a day at `at` (local HH:MM) if the app is open then; the
+   * Today button and the chat's "wrap up my day" run it at any time.
+   */
+  dayEnd: z
+    .object({
+      enabled: z.boolean().default(false),
+      at: z.string().regex(DAY_END_TIME, "A time such as 17:30").default(DEFAULT_DAY_END_AT),
+    })
+    .prefault({}),
 });
 export type SecretarySettings = z.infer<typeof SecretarySettingsSchema>;
 

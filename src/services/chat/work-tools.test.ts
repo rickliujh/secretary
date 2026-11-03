@@ -1,8 +1,8 @@
 /**
  * The chat reads the work model (Phase 24, FR-19.5, D61 Reads): work_items
  * (list, one item, what changed), note_work (a local write that asks when it
- * cannot tell the item, and requests a work pass), and my_focus naming the
- * item the user is on. Over the cert item the eval seeds.
+ * cannot tell the item, and requests a work pass), my_focus naming the
+ * item the user is on, and day_end (Phase 28) writing the end-of-day page. Over the cert item the eval seeds.
  */
 import { describe, expect, test } from "bun:test";
 import type { UIMessage, UIMessageChunk } from "ai";
@@ -38,6 +38,7 @@ async function turn(
 ) {
   const { layer, models } = intakeTestLayer({ "std-m": steps });
   let passes = 0;
+  let inboxes = 0;
   const r = await Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
@@ -51,6 +52,9 @@ async function turn(
           messages: ask(question),
           onWorkChanged: () => {
             passes++;
+          },
+          onInboxChanged: () => {
+            inboxes++;
           },
         });
         const chunks = yield* Effect.promise(() => drainStream(stream));
@@ -72,7 +76,7 @@ async function turn(
       layer,
     ),
   );
-  return { ...r, passes, models, out: outputs(r.chunks) };
+  return { ...r, passes, inboxes, models, out: outputs(r.chunks) };
 }
 
 const call = (name: string, input: Record<string, unknown>): Scripted => ({
@@ -223,5 +227,33 @@ describe("my_focus", () => {
         currentStep: "Waiting on Platform (PLAT-812) to issue the new cert; Sarah is getting it",
       },
     });
+  });
+});
+
+describe("day_end (D63)", () => {
+  test('"wrap up my day" writes the page in the Inbox, in code, and points there', async () => {
+    const r = await turn(
+      [call("day_end", {}), { text: "Your day is wrapped up." }],
+      "wrap up my day",
+    );
+    const out = r.out[0] as {
+      threadId: string;
+      replaced: boolean;
+      counts: Record<string, number>;
+      page: string;
+      questions: unknown[];
+      note: string;
+    };
+    expect(out.threadId).toBeString();
+    expect(out.replaced).toBe(false);
+    // Dana was promised an ETA on 25 Sep: overdue, so it is listed for tomorrow.
+    expect(out.counts.promises).toBe(1);
+    expect(out.page).toContain("To Dana Reyes: an ETA for the cert renewal, due overdue since");
+    expect(out.page).not.toContain("\\");
+    expect(out.questions).toEqual([]);
+    expect(out.note).toContain("in the Inbox");
+    expect(r.inboxes).toBe(1);
+    expect(r.passes).toBe(0);
+    expect(promptOf(r.models.calls, 0)).toContain("call day_end");
   });
 });

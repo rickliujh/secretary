@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { describeError } from "@/app/errors";
 import { QuickThread } from "@/components/inbox/quick-thread";
 import { BriefButton } from "@/components/today/brief";
+import { DayEndButton } from "@/components/today/day-end";
 import { SprintWork, TheirMove, YourMove } from "@/components/today/lists";
 import { PlanCard } from "@/components/today/plan-card";
 import { SweepButton } from "@/components/today/sweep";
@@ -36,6 +37,7 @@ function TodayPage() {
             </p>
             <div className="ml-auto flex items-center gap-2">
               <SweepButton today={t} />
+              <DayEndButton />
               <BriefButton brief={data.brief} fresh={data.briefFresh} />
             </div>
           </>

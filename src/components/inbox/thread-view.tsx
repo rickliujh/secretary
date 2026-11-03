@@ -34,6 +34,7 @@ import { threadRefs } from "@/services/proposals/thread-refs";
 import { executedRefs, groupSmallAsks } from "@/services/small-asks/bundle";
 import type { SituationRecord } from "@/services/work/schema";
 import { Composer, type ComposerMessage } from "./composer";
+import { DayEndView } from "./day-end-view";
 import { PASTED_HIGHLIGHT } from "./message-doc";
 import { BundleCard, OutcomeCard } from "./outcome-card";
 import { ThreadPark } from "./park";
@@ -324,6 +325,8 @@ export function ThreadView({ id }: { id: string }) {
   const d = detail.data;
   if (detail.isPending) return <Loader2 className="m-6 animate-spin text-muted-foreground" />;
   if (!d) return <p className="p-6 text-sm text-muted-foreground">This thread no longer exists.</p>;
+  // The day's end-of-day page (D63): the page, its questions and Done.
+  if (d.dayEnd) return <DayEndView detail={d} />;
   // An outcome card is no conversation: its steps, one Approve (Phase 25).
   if (d.item.source === "secretary") return <OutcomeCard detail={d} />;
 

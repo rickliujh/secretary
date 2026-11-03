@@ -276,6 +276,11 @@ export const NeedsClarification = z.object({
   choices: z.array(z.string().trim().min(1)).default([]),
   /** Set on a work model question (D61): its answer goes to the work model, not to classify. */
   work: WorkQuestionSchema.optional(),
+  /**
+   * The local day the end-of-day pass released this work question (D63): the
+   * day's ration had left it unasked, so it does not count against the ration.
+   */
+  releasedOn: z.string().optional(),
 });
 
 export const ProposalPayloadSchema = z.discriminatedUnion("kind", [

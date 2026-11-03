@@ -85,6 +85,7 @@ describe("Settings schema", () => {
         },
         suggestions: true,
         parkInput: true,
+        dayEnd: { enabled: false, at: "17:30" },
       },
       network: {
         proxyMode: "system",

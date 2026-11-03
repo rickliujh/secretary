@@ -35,6 +35,11 @@ export const SYNC_KEYS = {
    * the consequence rules saw, so a move is seen once.
    */
   outcomes: "work.outcomes",
+  /**
+   * JSON UnaskedQuestions (D63): the work questions the day's ration left
+   * unasked, which the end-of-day pass may release.
+   */
+  unasked: "work.unasked",
   /** JSON CleanupResult of the last storage cleanup (D34). */
   lastCleanup: "app.lastCleanup",
 } as const;
