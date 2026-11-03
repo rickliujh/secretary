@@ -57,6 +57,14 @@ export type ReplyInput = {
   answers?: string | null;
   /** Source of the pasted text; defaults to the thread's. */
   source?: Source;
+  /**
+   * The message is new input to the thread, as a first message is (D66): its
+   * typed parts are input, not an instruction, so a block of the daily note
+   * joins its thread as new items. Needs `parts`; without it a reply is as before.
+   */
+  asInput?: boolean;
+  /** With `asInput` from the daily note: the day of the note the block is from (D66). */
+  noteDate?: string;
   today?: string;
   onProgress?: (message: string) => void;
 };

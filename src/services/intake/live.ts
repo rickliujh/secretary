@@ -260,7 +260,9 @@ const make = Effect.gen(function* () {
       const instructions = userMessages.flatMap((m, i) => {
         const c = UserContentSchema.safeParse(m.content);
         if (!c.success) return [];
-        return splitMessage(c.data.parts, i === 0, c.data.inline).instruction ?? [];
+        return (
+          splitMessage(c.data.parts, i === 0 || !!c.data.asInput, c.data.inline).instruction ?? []
+        );
       });
       // Typed input written in the message box may hold «...» values (D56); older
       // typed input's own « and » are plain quotes, so they never read as one.
@@ -496,6 +498,7 @@ const make = Effect.gen(function* () {
           ownKeys: own.issueKeys.filter((k) => !deleted.has(k)),
           ownInput: job.ownInput,
           inboxItemId,
+          createdKeys: ctx.thread.createdKeys,
         })),
         ownInput: job.ownInput,
         ...(threadCreates.length ? { threadCreates } : {}),
@@ -952,12 +955,17 @@ const make = Effect.gen(function* () {
       const thread = yield* loadThread(inboxItemId);
       const message = thread.messages.find((m) => m.id === messageId);
       const content = UserContentSchema.parse(message?.content ?? { parts: [] });
-      const { input, instruction } = splitMessage(content.parts, false, content.inline);
+      const asInput = !!content.asInput;
+      const { input, instruction } = splitMessage(content.parts, asInput, content.inline);
       if (input) {
         // New input joins the thread as new items, instructed by this message only.
-        // Pasted text is never the user's own words, whatever source it was given.
+        // Pasted text is never the user's own words, whatever source it was given;
+        // a message that is input as a whole (a note block, D66) kept its source
+        // when it was stored, and is the user's words when it quotes no one.
         const named = content.source ?? thread.item.source;
-        const source = ownWordsSource(named) ? "other" : named;
+        const source = asInput ? named : ownWordsSource(named) ? "other" : named;
+        const ownInput =
+          asInput && ownWordsSource(named) && !hasInput(content.parts, !!content.inline);
         const cleaned = cleanInput(input) || input.trim();
         const quotes = yield* segment(cleaned, source, progress);
         const start = Math.max(-1, ...thread.current.keys()) + 1;
@@ -967,7 +975,7 @@ const make = Effect.gen(function* () {
           instructions: instruction ? [instruction] : [],
           revising: [],
           source,
-          ownInput: false,
+          ownInput,
         }));
         const results = yield* classifyAll(
           inboxItemId,
@@ -1056,7 +1064,9 @@ const make = Effect.gen(function* () {
   const reply = (input: ReplyInput) =>
     Effect.gen(function* () {
       const parts = input.parts ? mergeParts(input.parts) : null;
-      const split = parts ? splitMessage(parts, false, true) : null;
+      // New input as a whole (D66): typed parts are input, as in a first message.
+      const asInput = !!input.asInput && !!parts;
+      const split = parts ? splitMessage(parts, asInput, true) : null;
       const text = split ? split.input : (input.text?.trim() ?? "");
       const instruction = split ? split.instruction : input.instruction?.trim() || null;
       if (!text && !instruction)
@@ -1078,7 +1088,20 @@ const make = Effect.gen(function* () {
       // Pasted text is never "typed": only the user's own words state points without
       // a cue (D55 answers), so a paste that would be "typed" is "other".
       const named = input.source ?? (thread.item.source as Source);
-      const replySource: Source = text && ownWordsSource(named) ? "other" : named;
+      // As input, a note block stays "note" (its ">" quote is its pasted input),
+      // as in `triage`; typed words alone are "typed", a paste is never "typed".
+      const typedOnly = !!parts && !hasInput(parts, true);
+      const replySource: Source = asInput
+        ? named === "note"
+          ? "note"
+          : typedOnly
+            ? "typed"
+            : named === "typed"
+              ? "other"
+              : named
+        : text && ownWordsSource(named)
+          ? "other"
+          : named;
       const now = nowIso();
       const messageId = newId();
       yield* q((d) =>
@@ -1092,6 +1115,10 @@ const make = Effect.gen(function* () {
             ...(parts ? { inline: true } : {}),
             source: replySource,
             answers: input.answers ?? null,
+            ...(asInput ? { asInput: true } : {}),
+            ...(asInput && replySource === "note" && input.noteDate
+              ? { noteDate: input.noteDate }
+              : {}),
           },
           createdAt: now,
         }),

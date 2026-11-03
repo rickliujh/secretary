@@ -33,6 +33,8 @@ export type EvalExpectation = {
   anyOf?: Expected[][];
   /** None of these kinds may be proposed. */
   forbiddenKinds?: ProposalKind[];
+  /** None of these may be proposed, matched as `required` is ("no create_issue that is an Epic"). */
+  forbidden?: Expected[];
 };
 
 /** The issue a payload acts on, or its main subject, for matching. */
@@ -64,7 +66,13 @@ function payloadTarget(p: ProposalPayload): string | undefined {
   }
 }
 
-export type CaseScore = { pass: boolean; missing: Expected[]; forbidden: ProposalKind[] };
+export type CaseScore = {
+  pass: boolean;
+  missing: Expected[];
+  forbidden: ProposalKind[];
+  /** The `forbidden` expectations something proposed matched. */
+  unwanted: Expected[];
+};
 
 export function scoreCase(
   expected: EvalExpectation,
@@ -86,7 +94,13 @@ export function scoreCase(
   const forbidden = [
     ...new Set(actual.map((a) => a.kind).filter((k) => expected.forbiddenKinds?.includes(k))),
   ];
-  return { pass: missing.length === 0 && forbidden.length === 0, missing, forbidden };
+  const unwanted = (expected.forbidden ?? []).filter(found);
+  return {
+    pass: missing.length === 0 && forbidden.length === 0 && unwanted.length === 0,
+    missing,
+    forbidden,
+    unwanted,
+  };
 }
 
 /** Kind:target signature of a set of proposals, ignoring questions and order. */

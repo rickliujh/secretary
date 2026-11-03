@@ -27,6 +27,8 @@ export type SnapshotRequest = {
   ownInput?: boolean;
   /** The Inbox thread the item is in; its own messages stay out of the work block's events. */
   inboxItemId?: string;
+  /** Tickets the thread created that still exist, for the duplicate check (D66). */
+  createdKeys?: readonly string[];
 };
 
 export interface RetrievalShape {

@@ -112,6 +112,7 @@ function UserBubble({
   inline = false,
   source,
   answer,
+  noteDate = null,
   pending = false,
 }: {
   parts: readonly MessagePart[];
@@ -119,6 +120,8 @@ function UserBubble({
   inline?: boolean;
   source: string | null;
   answer?: boolean;
+  /** A later block of the daily note that continued the thread (D66): its day. */
+  noteDate?: string | null;
   pending?: boolean;
 }) {
   return (
@@ -129,6 +132,9 @@ function UserBubble({
       )}
     >
       {answer && <span className="text-xs text-muted-foreground">Answer</span>}
+      {noteDate && (
+        <span className="text-xs text-muted-foreground">from the note, {shortDate(noteDate)}</span>
+      )}
       {inline && <InlineText parts={parts} source={source} />}
       {!inline &&
         parts.map((p, i) =>
@@ -378,6 +384,8 @@ export function ThreadView({ id }: { id: string }) {
         inline={m.inline}
         source={m.source}
         answer={!!m.answers}
+        // The first message's day is in the header; a later note block says its own.
+        noteDate={m.id !== firstUser?.id ? m.noteDate : null}
       />
     ) : (
       <AssistantTurn

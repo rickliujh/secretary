@@ -86,8 +86,10 @@ export type ReadResult = {
   skipped?: "disabled";
   /** New Inbox threads. */
   cards: number;
-  /** Threads revised because their block changed before a decision. */
+  /** Threads revised because their block changed (D66: decided or not). */
   revised: number;
+  /** Blocks that continued an earlier note thread as a new message there (D66). */
+  continued: number;
   /** Ticked boxes that proposed closing their ticket. */
   closed: number;
   /** Work items a block was noted on, by name. */

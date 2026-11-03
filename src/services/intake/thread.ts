@@ -39,6 +39,11 @@ export const UserContentSchema = z.object({
   author: z.enum(["chat"]).optional(),
   /** The daily note's day, when the message is a block of it (D65). */
   noteDate: z.string().optional(),
+  /**
+   * A later message that is new input, as a first message is (D66): its typed
+   * text is input, not an instruction. Set on a note block that continues a thread.
+   */
+  asInput: z.boolean().optional(),
 });
 export type UserContent = z.infer<typeof UserContentSchema>;
 

@@ -25,7 +25,7 @@ import {
   TEAM_REF_RE,
   WAIT_ACTIONS,
 } from "@/services/proposals/schema";
-import type { Reason } from "@/services/retrieval/ranking";
+import { type Reason, summaryOverlap } from "@/services/retrieval/ranking";
 import { sameWaitSubject } from "@/services/retrieval/waits";
 import { isSubtaskType, stripProvenance, withProvenance } from "@/services/small-asks/home";
 import type { PromptSprint } from "@/services/sprints/calendar";
@@ -52,13 +52,16 @@ import {
 import { renderWorkBlock, type WorkItemSnapshot } from "./work-block";
 
 /**
- * Recorded with each classified item. 16 adds the ticket shape rules (one
+ * Recorded with each classified item. 17 tells the model which tickets it made
+ * (the `created` candidate reason), makes "do not create what a candidate
+ * already covers" a general rule, and sends back a create that nearly repeats
+ * a candidate's summary (D66); 16 adds the ticket shape rules (one
  * ticket per piece of work, what a description holds; D64); 15 the work block
  * (FR-19.5, D61); 14 new contacts and teams (FR-18, D60); 13 pastes inside
  * instructions as «...» (D56); 11 is the revoke thread context (FR-14.6) and
  * 12 story points (D55).
  */
-export const CLASSIFY_PROMPT_VERSION = 16;
+export const CLASSIFY_PROMPT_VERSION = 17;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 /** Placeholders for contacts and teams created in the same answer (prompt version 14, D60). */
 /** How many new contacts, and teams, one answer may create. */
@@ -100,6 +103,16 @@ const offersDirectory = (s: ItemSnapshot) => s.promptVersion >= 14;
 const hasWork = (s: ItemSnapshot) => s.promptVersion >= 15 && !!s.work?.length;
 /** The ticket shape rules (D64): one ticket per piece of work, what a description holds. */
 const shapesTickets = (s: ItemSnapshot) => s.promptVersion >= 16;
+/**
+ * What the model made (D66): the `created` reason explained, the general rule
+ * against creating what a candidate covers, and the duplicate-summary check.
+ */
+const knowsCreated = (s: ItemSnapshot) => s.promptVersion >= 17;
+
+/** A create this alike to a candidate's summary repeats it (D66). */
+export const DUPLICATE_SUMMARY = 0.75;
+/** The same for a ticket this thread created: a repeat is likelier there. */
+export const DUPLICATE_SUMMARY_HERE = 0.5;
 
 export type CandidateIssue = {
   key: string;
@@ -325,6 +338,12 @@ export type ItemSnapshot = {
    * does not offer; validation rejects text that names them (prompt version 11).
    */
   revokedClosed?: string[];
+  /**
+   * Tickets this item's thread created that still exist (prompt version 17,
+   * D66): a create repeating one of their summaries is caught at a lower
+   * overlap. Never shown to the model.
+   */
+  createdKeys?: string[];
 };
 
 const enumOf = (values: readonly string[]) => z.enum(values as [string, ...string[]]);
@@ -1290,6 +1309,37 @@ export const deletedTicketError = (at: string, field: string, key: string) =>
   `${at}: ${field} ${key} was deleted when the user revoked it, so it no longer exists. Do not target, comment on or link to it.`;
 
 /**
+ * The open candidate in the create's project whose summary this create nearly
+ * repeats (D66): overlap at `DUPLICATE_SUMMARY`, or `DUPLICATE_SUMMARY_HERE`
+ * for a ticket this thread created, except a sibling (under the same epic or
+ * parent as the create), whose steps share words by nature. Summaries whose
+ * words with digits differ never match. Work filed under the candidate (its
+ * epic or parent) is not a repeat of it.
+ */
+function duplicateCandidate(
+  p: ItemOutput["proposals"][number],
+  s: ItemSnapshot,
+  small: boolean,
+): CandidateIssue | null {
+  const summary = str(p.summary);
+  if (!summary) return null;
+  const project = small ? smallAskPlacement(p, s).projectKey : str(p.projectKey);
+  const here = new Set(s.createdKeys ?? []);
+  let best: { c: CandidateIssue; score: number } | null = null;
+  for (const c of s.candidates) {
+    if (c.statusCategory === "done" || c.projectKey !== project) continue;
+    if (c.key === p.epic || c.key === p.parent) continue;
+    const score = summaryOverlap(summary, c.summary);
+    const sibling =
+      (!!c.epicKey && c.epicKey === str(p.epic)) ||
+      (!!c.parentKey && c.parentKey === str(p.parent));
+    const threshold = here.has(c.key) && !sibling ? DUPLICATE_SUMMARY_HERE : DUPLICATE_SUMMARY;
+    if (score >= threshold && (!best || score > best.score)) best = { c, score };
+  }
+  return best?.c ?? null;
+}
+
+/**
  * Business-rule checks the schema cannot express (design.md 7.0 rule 4).
  * Returns error strings for the repair prompt; empty means valid.
  */
@@ -1384,6 +1434,13 @@ export function validateItemOutput(out: ItemOutput, s: ItemSnapshot): string[] {
       if (subtask && !p.parent) errors.push(`${at}: a Sub-task needs a parent.`);
       if (!subtask && p.parent)
         errors.push(`${at}: only a Sub-task has a parent; use epic for epics.`);
+    }
+    if (p.kind === "create_issue" && knowsCreated(s)) {
+      const same = duplicateCandidate(p, s, small);
+      if (same)
+        errors.push(
+          `${str(p.ref) ?? at}: ${same.key} already exists with nearly the same summary («${same.summary.replace(/[«»]/g, `"`)}»). Do not create it again: act on ${same.key}, create the work under it, or leave it out.`,
+        );
     }
     if (p.kind === "create_issue") {
       if (typeof p.epic === "string" && !isEpic(p.epic))
@@ -1727,7 +1784,11 @@ ${
 }${
   s.smallAsks
     ? `- A small ask is a small task for the user that arrives beside planned work: a reply they owe, something to send, a question to answer, something to chase or check, a document to update. When the input holds one that no candidate issue covers, propose create_issue with smallAsk yes. Write the summary as the action ("Send Dana the Q3 numbers"), set dueDate when a deadline is given, pick issueType from the small-asks home's types (leave it empty for the default), and set epic only when a candidate epic clearly fits. Do not choose its project, assignee or labels; code sets them and records who asked.
-- When a small ask belongs to an existing candidate story or task, make it a Sub-task of that issue (issueType Sub-task, parent that issue, smallAsk yes). When a candidate issue already covers the ask, act on that issue instead of creating one.
+- When a small ask belongs to an existing candidate story or task, make it a Sub-task of that issue (issueType Sub-task, parent that issue, smallAsk yes).${
+        knowsCreated(s)
+          ? ""
+          : " When a candidate issue already covers the ask, act on that issue instead of creating one."
+      }
 - Planned work (a feature, a bug, a project task, an epic) is not a small ask: create_issue with smallAsk no, choosing projectKey and issueType yourself.
 - When the input says the small ask waits on someone or something, add a link_dependency whose target is the new issue's ref.${
         s.blockLinkType
@@ -1753,6 +1814,11 @@ ${
 }${
   shapesTickets(s)
     ? `- When the input asks for new tickets, each distinct piece of work it names is its own ticket, never a line in another ticket's description. An epic and the work under it are separate tickets: "create an epic for X, the first step is Y" is one create_issue for the epic and one for Y (a Story or Task from the project's issue types) whose epic field is the new epic's ref. A description says what the ticket is about, for the people who read it in Jira; it never repeats the user's instructions to you.
+`
+    : ""
+}${
+  knowsCreated(s)
+    ? `- When a candidate issue already covers work the input asks to create, do not create it again: act on that issue (a comment, an update, a Story or Task under it when it is an Epic) or propose nothing for it. An input that repeats the request a created ticket came from is not a request to do it again.
 `
     : ""
 }- Use update_person or update_team only for durable facts (role, responsibilities, how they like to communicate).
@@ -1876,7 +1942,11 @@ ${
   }
   if (hasWork(s)) blocks.push(renderWorkBlock(s.work ?? []));
   blocks.push(
-    `## Candidate issues (the only existing issues you may reference)\n${
+    `## Candidate issues (the only existing issues you may reference)${
+      knowsCreated(s) && s.candidates.some((c) => c.reasons.includes("created"))
+        ? "\ncreated: made on your approval in the last two weeks"
+        : ""
+    }\n${
       s.candidates
         .map(
           (c) =>

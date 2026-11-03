@@ -48,6 +48,16 @@ import { pickWaits } from "./waits";
 
 const FTS_LIMIT = 15;
 const RECENT_LIMIT = 5;
+/** Tickets made by approved creates offered as `created` (D66): at most this many... */
+const CREATED_LIMIT = 5;
+/** ...of this many days before the item's day. */
+const CREATED_DAYS = 14;
+
+/** Local midnight of a YYYY-MM-DD date, `days` earlier (negative: later), as an ISO timestamp. */
+const localMidnight = (date: string, days: number) => {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y ?? 1970, (m ?? 1) - 1, (d ?? 1) - days).toISOString();
+};
 const PEOPLE_ALL_THRESHOLD = 30;
 const NOTE_EXCERPT = 600;
 
@@ -121,6 +131,44 @@ const make = Effect.gen(function* () {
               .all(),
           )).map((r) => r.key)
         : [];
+      // Tickets the user's approved creates made in the two weeks up to the
+      // item's day, in any thread, newest first (D66): the model is told what it
+      // already made. A revision keeps its day, so it does not see later creates.
+      const day = req.askedOn ?? req.today;
+      const decided = sql`coalesce(${proposals.decidedAt}, ${proposals.createdAt})`;
+      const createdRows = yield* q((d) =>
+        d
+          .select({ result: proposals.result })
+          .from(proposals)
+          .where(
+            and(
+              eq(proposals.kind, "create_issue"),
+              eq(proposals.status, "executed"),
+              sql`${decided} >= ${localMidnight(day, CREATED_DAYS)}`,
+              sql`${decided} < ${localMidnight(day, -1)}`,
+            ),
+          )
+          .orderBy(desc(decided))
+          .all(),
+      );
+      const createdKeys = [
+        ...new Set(
+          createdRows
+            .map((r) => (r.result as { issueKey?: string } | null)?.issueKey)
+            .filter((k): k is string => !!k),
+        ),
+      ];
+      const live = createdKeys.length
+        ? new Set(
+            (yield* q((d) =>
+              d
+                .select({ key: jiraIssues.key })
+                .from(jiraIssues)
+                .where(and(inArray(jiraIssues.key, createdKeys), eq(jiraIssues.stale, false)))
+                .all(),
+            )).map((r) => r.key),
+          )
+        : new Set<string>();
       const tracked = (yield* q((d) =>
         d
           .select({ key: jiraIssues.key })
@@ -192,9 +240,12 @@ const make = Effect.gen(function* () {
       const otherWork = [...new Set(reachedWork.flatMap((w) => w.keys.map((k) => k.key)))].filter(
         (k) => !pinned.has(k),
       );
+      // Deleted and revoke-closed ones fall out below, as from every other source.
+      const created = createdKeys.filter((k) => live.has(k)).slice(0, CREATED_LIMIT);
       const sources: [Reason, string[], boolean?][] = [
         ["mentioned", mentioned],
         ["work", pinnedWork, true],
+        ["created", created],
         ["search", searched],
         ["work", otherWork],
         ["sender", senderIssues],
@@ -657,6 +708,7 @@ const make = Effect.gen(function* () {
           parseLinkTypes(yield* withDb(getState(SYNC_KEYS.linkTypes))).blocks?.name ?? null,
         ...(reached.size ? { deleted: [...reached].sort() } : {}),
         ...(reachedClosed.size ? { revokedClosed: [...reachedClosed].sort() } : {}),
+        ...(req.createdKeys?.length ? { createdKeys: [...req.createdKeys] } : {}),
       } satisfies ItemSnapshot;
     });
 
