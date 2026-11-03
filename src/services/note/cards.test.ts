@@ -1,6 +1,6 @@
 /**
  * Cards on the note's blocks (FR-20.7, D67) on the database: the page's
- * queries, the strip's badge, and Ask on a block. Real DailyNote, Intake and
+ * queries, the mark's state, and Ask on a block. Real DailyNote, Intake and
  * Llm over the fixtures; the models are scripted.
  */
 import { describe, expect, test } from "bun:test";
@@ -16,7 +16,15 @@ import { syncOnce } from "@/test/seed";
 import { query } from "../db";
 import { DailyNote, type DailyNoteShape } from ".";
 import { hashText, normaliseBlock, splitBlocks } from "./blocks";
-import { blocksOf, cardCount, stripBadge, type ThreadSummary, threadSummaries } from "./cards";
+import {
+  blocksOf,
+  cardCount,
+  markLabel,
+  markState,
+  type ThreadSummary,
+  threadMark,
+  threadSummaries,
+} from "./cards";
 import { dayBefore, recordBlock, saveBody } from "./queries";
 
 const home = {
@@ -98,18 +106,82 @@ const summary = (over: Partial<ThreadSummary> = {}): ThreadSummary => ({
   ...over,
 });
 
-describe("the strip's badge (D67)", () => {
-  test("what waits first, else how the thread ended", () => {
-    expect(stripBadge(summary({ waiting: 1 }))).toBe("1 card waiting");
-    expect(stripBadge(summary({ waiting: 2 }))).toBe("2 cards waiting");
-    expect(stripBadge(summary({ questions: 1 }))).toBe("1 question");
-    expect(stripBadge(summary({ waiting: 2, questions: 3 }))).toBe("2 cards waiting, 3 questions");
-    expect(stripBadge(summary({ approved: 2, waiting: 1 }))).toBe("1 card waiting");
-    expect(stripBadge(summary({ approved: 2 }))).toBe("approved");
-    expect(stripBadge(summary({ status: "dismissed", waiting: 1 }))).toBe("dismissed");
-    expect(stripBadge(summary())).toBe("nothing left");
-    expect(stripBadge(summary({ error: "Provider down" }))).toBe("did not go through");
-    expect(stripBadge(summary({ approved: 1, failed: 1 }))).toBe("1 failed");
+/** The mark's words for a thread's summary. */
+const badge = (t: ThreadSummary) => markLabel(threadMark(t));
+
+describe("the mark's state (D67)", () => {
+  test("a thread: what waits first, else how it ended", () => {
+    expect(threadMark(summary({ waiting: 2, questions: 1 }))).toEqual({
+      kind: "waiting",
+      count: 2,
+      questions: 1,
+    });
+    expect(badge(summary({ waiting: 1 }))).toBe("1 card waiting");
+    expect(badge(summary({ waiting: 2 }))).toBe("2 cards waiting");
+    expect(threadMark(summary({ questions: 1 }))).toEqual({ kind: "question", count: 1 });
+    expect(badge(summary({ questions: 1 }))).toBe("1 question");
+    expect(badge(summary({ waiting: 2, questions: 3 }))).toBe("2 cards waiting, 3 questions");
+    expect(badge(summary({ approved: 2, waiting: 1 }))).toBe("1 card waiting");
+    expect(threadMark(summary({ approved: 2 }))).toEqual({ kind: "done", ended: "approved" });
+    expect(badge(summary({ status: "dismissed", waiting: 1 }))).toBe("dismissed");
+    expect(badge(summary())).toBe("nothing left");
+    expect(threadMark(summary({ error: "Provider down" }))).toEqual({
+      kind: "failed",
+      turn: true,
+      count: 0,
+    });
+    expect(badge(summary({ error: "Provider down" }))).toBe("did not go through");
+    expect(badge(summary({ approved: 1, failed: 1 }))).toBe("1 failed");
+    // A reply that did not go through shows over approved and waiting cards.
+    expect(badge(summary({ error: "Timed out", approved: 1, waiting: 2 }))).toBe(
+      "did not go through",
+    );
+  });
+
+  const block = (over: Partial<Parameters<typeof markState>[0]> = {}) =>
+    markState({
+      status: "skipped",
+      changed: false,
+      private: false,
+      threadId: null,
+      thread: undefined,
+      reads: true,
+      ...over,
+    });
+
+  test("a block: every state D67 lists", () => {
+    expect(block({ status: "acted", threadId: "t", thread: summary({ waiting: 1 }) }).kind).toBe(
+      "waiting",
+    );
+    expect(block({ status: "acted", threadId: "t", thread: summary({ questions: 1 }) }).kind).toBe(
+      "question",
+    );
+    expect(block({ status: "revised", threadId: "t", thread: summary({ approved: 1 }) }).kind).toBe(
+      "done",
+    );
+    expect(block({ status: "acted", threadId: "t", thread: summary({ error: "x" }) }).kind).toBe(
+      "failed",
+    );
+    expect(block({ status: "acted", threadId: "t" }).kind).toBe("loading");
+    expect(block({ status: "context" }).kind).toBe("noted");
+    expect(block({ status: "skipped" }).kind).toBe("alone");
+    expect(block({ status: "unread" }).kind).toBe("unread");
+    expect(block({ status: "unread", reads: false }).kind).toBe("not_read");
+    // Changed since it was read: not read yet, whatever the thread holds.
+    expect(
+      block({ status: "acted", changed: true, threadId: "t", thread: summary({ waiting: 1 }) })
+        .kind,
+    ).toBe("unread");
+    expect(block({ status: "private" }).kind).toBe("private");
+    expect(block({ status: "skipped", private: true }).kind).toBe("private");
+    expect(block({ status: "unread", private: true }).kind).toBe("private");
+  });
+
+  test("the mark's words for the states without a thread", () => {
+    expect(markLabel({ kind: "noted" })).toBe("noted on a work item");
+    expect(markLabel({ kind: "unread" })).toBe("not read yet");
+    expect(markLabel({ kind: "alone" })).toBe("nothing to do");
+    expect(markLabel({ kind: "private" })).toBe("private, never sent");
   });
 });
 
@@ -135,7 +207,7 @@ describe("the page's queries (D67)", () => {
           const rows = yield* blocksOf(today);
           const thread = rows.find((b) => b.status === "acted")?.inboxItemId ?? "";
           const before = yield* threadSummaries([thread, thread]);
-          // Approved and executed: the strip says approved and lists the ticket.
+          // Approved and executed: the mark says approved and lists the ticket.
           yield* query((d) =>
             d
               .update(proposals)
@@ -157,9 +229,9 @@ describe("the page's queries (D67)", () => {
     ]);
     expect(r.before).toHaveLength(1);
     expect(r.before[0]).toMatchObject({ waiting: 1, questions: 0, approved: 0, created: [] });
-    expect(stripBadge(r.before[0] as ThreadSummary)).toBe("1 card waiting");
+    expect(badge(r.before[0] as ThreadSummary)).toBe("1 card waiting");
     expect(r.after[0]).toMatchObject({ waiting: 0, approved: 1, created: ["OPS-77"] });
-    expect(stripBadge(r.after[0] as ThreadSummary)).toBe("approved");
+    expect(badge(r.after[0] as ThreadSummary)).toBe("approved");
     expect(r.none).toEqual([]);
   });
 });
