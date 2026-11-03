@@ -1,10 +1,16 @@
 /**
  * Eval cases for `note_triage` (Phase 29, D65): readings of a daily note, each
  * one call over its blocks with the work items code would list. Each block
- * names the kind it should get (and, for context, the item); a reading passes
- * when every block does.
+ * names the kind it should get (and, for context, the item; for act, the
+ * earlier note thread it continues, D66); a reading passes when every block
+ * does.
  */
-import type { NoteKind, NoteTriageInput, NoteTriageOutput } from "@/prompts/note-triage";
+import type {
+  NoteKind,
+  NoteTriageInput,
+  NoteTriageOutput,
+  NoteTriageThread,
+} from "@/prompts/note-triage";
 import { noteDecisions } from "@/prompts/note-triage";
 
 export type NoteEvalBlock = {
@@ -13,12 +19,16 @@ export type NoteEvalBlock = {
   expect: NoteKind;
   /** For context: the item id it belongs to. */
   item?: string;
+  /** For act: the listed thread it continues (D66); absent: a new one. */
+  thread?: string;
 };
 
 export type NoteEvalCase = {
   name: string;
   blocks: NoteEvalBlock[];
   items: NoteTriageInput["items"];
+  /** Earlier note threads code would list (D66); absent: none. */
+  threads?: NoteTriageThread[];
 };
 
 const TODAY = "2026-11-02";
@@ -43,6 +53,20 @@ const ONCALL = {
   tickets: ["OPS-7"],
   now: null,
   current: false,
+};
+
+/** The note's earlier conversations of the thread case (D66). */
+const CERT_THREAD: NoteTriageThread = {
+  id: "t-cert",
+  date: "2026-10-30",
+  summary: "Sarah expects the new payment gateway cert from Platform on Friday",
+  tickets: ["PAY-12"],
+};
+const QODER_THREAD: NoteTriageThread = {
+  id: "t-qoder",
+  date: "2026-10-28",
+  summary: "Create an epic for the Qoder migration of the merchant SDK",
+  tickets: ["PAY-40"],
 };
 
 export const NOTE_EVAL_CASES: NoteEvalCase[] = [
@@ -102,11 +126,35 @@ export const NOTE_EVAL_CASES: NoteEvalCase[] = [
       },
     ],
   },
+  {
+    // A line about an earlier conversation's topic continues it; new work starts
+    // a new one; a progress remark stays context (D66).
+    name: "threads: one block continues the cert thread",
+    items: [LEDGER, ONCALL],
+    threads: [CERT_THREAD, QODER_THREAD],
+    blocks: [
+      {
+        text: "Sarah says the gateway cert slips again, Platform now promises next Tuesday",
+        expect: "act",
+        thread: "t-cert",
+      },
+      {
+        text: "- [ ] ask Dana to book the room for the Q4 planning offsite",
+        expect: "act",
+      },
+      {
+        text: "ledger export: staging run finished, every credit note matches",
+        expect: "context",
+        item: "w-ledger",
+      },
+    ],
+  },
 ];
 
 export const noteEvalInput = (c: NoteEvalCase): NoteTriageInput => ({
   blocks: c.blocks.map((b) => ({ text: b.text, section: b.section ?? null, date: TODAY })),
   items: c.items,
+  ...(c.threads ? { threads: c.threads } : {}),
   today: TODAY,
 });
 
@@ -121,6 +169,8 @@ export function scoreNoteCase(c: NoteEvalCase, out: NoteTriageOutput | null): st
     if (d.kind !== b.expect) return [`${label}: ${d.kind}, expected ${b.expect}`];
     if (d.kind === "context" && d.itemId !== b.item)
       return [`${label}: on ${d.itemId}, expected ${b.item}`];
+    if (d.kind === "act" && d.threadId !== (b.thread ?? null))
+      return [`${label}: thread ${d.threadId ?? "none"}, expected ${b.thread ?? "none"}`];
     return [];
   });
 }

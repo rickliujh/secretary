@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { memories, proposals } from "@/db/schema";
+import { inboxItems, intakeItems, memories, proposals } from "@/db/schema";
 import { query } from "@/services/db";
 import { promptOf, readThread, TODAY } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { Intake } from ".";
+import { noteParts } from "./thread";
 
 const e = { rationale: "because", evidence: "blocked on INC0012345", confidence: 0.9 };
 const transition = { kind: "transition_issue", target: "PAY-2", toStatus: "To Do", ...e };
@@ -695,5 +696,135 @@ describe("inline messages and the user's own words (D55 with D56)", () => {
       ["typed", true],
       ["other", false],
     ]);
+  });
+});
+
+describe("a note block as new input in its thread (asInput, D66)", () => {
+  test("typed words are input, the thread's decisions and creates are known, a dismissed thread returns", async () => {
+    const epic = {
+      kind: "create_issue",
+      ref: "$new:1",
+      projectKey: "PAY",
+      issueType: "Epic",
+      summary: "Qoder migration",
+      description: null,
+      parent: null,
+      epic: null,
+      priority: null,
+      assignee: null,
+      dueDate: null,
+      ...e,
+    };
+    const story = {
+      ...epic,
+      issueType: "Story",
+      summary: "Audit the SDK for Qoder",
+      epic: "PAY-1",
+    };
+    const { layer, models } = intakeTestLayer({
+      "std-m": [out(answer([epic], "Qoder migration epic")), out(answer([story], "SDK audit"))],
+    });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const intake = yield* Intake;
+          const first = yield* intake.triage({
+            source: "note",
+            parts: noteParts("Create an epic for the Qoder migration"),
+            senderPersonId: null,
+            noteDate: "2026-09-23",
+            today: TODAY,
+          });
+          const id = first.inboxItemId;
+          // Approved and made (as PAY-1 in the cache), then the thread was dismissed.
+          yield* query((d) =>
+            d
+              .update(proposals)
+              .set({
+                status: "executed",
+                decidedAt: "2026-09-23T10:00:00.000Z",
+                result: { issueKey: "PAY-1" },
+              })
+              .where(eq(proposals.inboxItemId, id)),
+          );
+          yield* query((d) =>
+            d.update(inboxItems).set({ status: "dismissed" }).where(eq(inboxItems.id, id)),
+          );
+          const res = yield* intake.reply({
+            inboxItemId: id,
+            asInput: true,
+            parts: noteParts("Qoder: the first step is an audit of the SDK"),
+            noteDate: "2026-09-24",
+            today: TODAY,
+          });
+          const items = yield* query((d) =>
+            d.select().from(intakeItems).where(eq(intakeItems.inboxItemId, id)).all(),
+          );
+          return { res, thread: yield* readThread(id), items };
+        }),
+        layer,
+      ),
+    );
+    expect(r.res).toMatchObject({ items: 1, proposals: 1 });
+    const message = r.thread.messages.filter((m) => m.role === "user")[1];
+    expect(message?.content).toEqual({
+      parts: [{ type: "typed", text: "Qoder: the first step is an audit of the SDK" }],
+      inline: true,
+      source: "note",
+      answers: null,
+      asInput: true,
+      noteDate: "2026-09-24",
+    });
+    // Back in the Inbox with the new card; the decided create stays as it was.
+    expect(r.thread.item?.status).toBe("triaged");
+    expect(r.thread.props.map((p) => [p.kind, p.status])).toEqual([
+      ["create_issue", "executed"],
+      ["create_issue", "pending"],
+    ]);
+    // A new item of the thread, the user's own words, instructed by nothing.
+    const second = r.items.find((i) => i.idx === 1);
+    expect(second?.quote).toBe("Qoder: the first step is an audit of the SDK");
+    expect(second?.snapshot).toMatchObject({
+      source: "note",
+      ownInput: true,
+      createdKeys: ["PAY-1"],
+    });
+    const p = promptOf(models.calls, 1);
+    expect(p).not.toContain("Instructions from the user in this conversation");
+    expect(p).toContain("## Earlier in this conversation (context only)");
+    expect(p).toContain("Create an epic for the Qoder migration");
+    expect(p).toContain("## Already decided in this conversation");
+    expect(p).toContain("- PAY-1 [Epic");
+    expect(p).toContain("created: made on your approval in the last two weeks");
+  });
+
+  test("without asInput a typed reply is still an instruction", async () => {
+    const { layer, models } = intakeTestLayer({
+      "std-m": [out(answer([transition])), out(answer([transition]))],
+    });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const intake = yield* Intake;
+          const first = yield* intake.triage({
+            text,
+            source: "teams",
+            senderPersonId: null,
+            today: TODAY,
+          });
+          yield* intake.reply({
+            inboxItemId: first.inboxItemId,
+            parts: [{ type: "typed", text: "make it Blocked instead" }],
+            today: TODAY,
+          });
+          return yield* readThread(first.inboxItemId);
+        }),
+        layer,
+      ),
+    );
+    expect(r.messages[2]?.content).not.toHaveProperty("asInput");
+    expect(promptOf(models.calls, 1)).toContain("1. make it Blocked instead");
   });
 });

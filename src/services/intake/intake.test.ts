@@ -250,12 +250,23 @@ describe("Intake.triage", () => {
           confidence: 0.9,
           proposals: [create("PAY", "Backfill August refund totals", "PAY-1")],
         }),
+        // OPS-7 "Open firewall to ledger" is open: the same summary is sent back (D66)...
         out({
           summary: "New firewall task",
           question: null,
           confidence: 0.9,
           proposals: [
             create("OPS", "Open ledger firewall port", null),
+            { kind: "add_comment", target: "$new:1", body: "Tom will pick this up.", ...e },
+          ],
+        }),
+        // ...and the repair names the work apart from it.
+        out({
+          summary: "New firewall task",
+          question: null,
+          confidence: 0.9,
+          proposals: [
+            create("OPS", "Ask Tom to schedule the ledger port change", null),
             { kind: "add_comment", target: "$new:1", body: "Tom will pick this up.", ...e },
           ],
         }),
@@ -276,7 +287,10 @@ describe("Intake.triage", () => {
         layer,
       ),
     );
-    expect(models.calls.map((c) => c.model)).toEqual(["fast-m", "std-m", "std-m"]);
+    expect(models.calls.map((c) => c.model)).toEqual(["fast-m", "std-m", "std-m", "std-m"]);
+    expect(promptOf(models.calls, 3)).toContain(
+      "OPS-7 already exists with nearly the same summary («Open firewall to ledger»)",
+    );
     expect(r.res.items).toBe(2);
     expect(r.props.map((p) => p.payload)).toMatchObject([
       { kind: "create_issue", ref: "$new:1", projectKey: "PAY", epic: "PAY-1" },

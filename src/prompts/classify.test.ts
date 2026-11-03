@@ -10,6 +10,7 @@ import {
   type DecidedProposal,
   fromPayload,
   type ItemOutput,
+  type ItemSnapshot,
   mapItemOutput,
   validateItemOutput,
 } from "./classify";
@@ -830,5 +831,196 @@ describe("ticket shape rules (prompt version 16, D64)", () => {
     const json = JSON.stringify(z.toJSONSchema(buildItemSchema(old)));
     expect(json).toContain('"description":"Markdown. Used by create_issue."');
     expect(json).not.toContain(DESCRIPTION_RULE);
+  });
+});
+
+describe("what the model made (prompt version 17, D66)", () => {
+  const GENERAL_RULE =
+    "When a candidate issue already covers work the input asks to create, do not create it again: act on that issue (a comment, an update, a Story or Task under it when it is an Epic) or propose nothing for it. An input that repeats the request a created ticket came from is not a request to do it again.";
+  const SMALL_ASK_SENTENCE =
+    "When a candidate issue already covers the ask, act on that issue instead of creating one.";
+  const HEADER = "created: made on your approval in the last two weeks";
+  const home = {
+    projectKey: "OPS",
+    label: "small-ask",
+    joinSprint: true,
+    issueTypes: ["Task"],
+    defaultType: "Task",
+  };
+  const epic = {
+    key: "PAY-40",
+    summary: "Migrate the merchant SDK to Qoder",
+    issueType: "Epic",
+    status: "To Do",
+    statusCategory: "new",
+    projectKey: "PAY",
+    epicKey: null,
+    parentKey: null,
+    assignee: "rliu",
+    updated: "2026-09-23T09:00:00.000Z",
+    reasons: ["created" as const],
+  };
+  const made: ItemSnapshot = {
+    ...snapshot,
+    smallAsks: home,
+    candidates: [...snapshot.candidates, epic],
+  };
+  const create = (fields: Record<string, unknown>) => ({
+    kind: "create_issue",
+    ref: "$new:1",
+    projectKey: "PAY",
+    issueType: "Epic",
+    summary: "Migrate the merchant SDK to Qoder",
+    description: null,
+    parent: null,
+    epic: null,
+    priority: null,
+    assignee: null,
+    dueDate: null,
+    smallAsk: "no",
+    ...base,
+    ...fields,
+  });
+  const check = (s: ItemSnapshot, fields: Record<string, unknown>) =>
+    validateItemOutput(
+      { summary: "s", question: null, confidence: 0.9, proposals: [create(fields)] } as ItemOutput,
+      s,
+    ).join("\n");
+  const duplicate = (key: string) => `${key} already exists with nearly the same summary`;
+
+  test("the general rule stands next to the shape rule; the small-ask rule loses the sentence", () => {
+    const { system, prompt } = buildClassifyPrompt(made);
+    expect(system).toContain(GENERAL_RULE);
+    expect(system).not.toContain(SMALL_ASK_SENTENCE);
+    // Right after the D64 shape rule.
+    const shapeEnd = "it never repeats the user's instructions to you.\n- ";
+    expect(system).toContain(`${shapeEnd}${GENERAL_RULE}`);
+    expect(prompt).toContain(
+      `## Candidate issues (the only existing issues you may reference)\n${HEADER}\n`,
+    );
+    expect(prompt).toContain(
+      "- PAY-40 [Epic, To Do, assignee rliu] Migrate the merchant SDK to Qoder (created)",
+    );
+    // No created candidate, no header line.
+    expect(buildClassifyPrompt({ ...made, candidates: snapshot.candidates }).prompt).not.toContain(
+      HEADER,
+    );
+  });
+
+  test("version 16 snapshots render as they ran", () => {
+    const old = { ...made, promptVersion: 16 };
+    const { system, prompt } = buildClassifyPrompt(old);
+    expect(system).not.toContain(GENERAL_RULE);
+    expect(system).toContain(
+      `make it a Sub-task of that issue (issueType Sub-task, parent that issue, smallAsk yes). ${SMALL_ASK_SENTENCE}\n`,
+    );
+    expect(prompt).not.toContain(HEADER);
+    expect(check(old, {})).toBe("");
+  });
+
+  test("a create nearly repeating an open candidate's summary in its project is repaired", () => {
+    expect(check(made, { summary: "Migrate merchant SDK to Qoder" })).toBe(
+      "$new:1: PAY-40 already exists with nearly the same summary («Migrate the merchant SDK to Qoder»). Do not create it again: act on PAY-40, create the work under it, or leave it out.",
+    );
+    // {migrate, merchant, sdk} of {migrate, merchant, sdk, qoder}: 0.75 is the line.
+    expect(check(made, { summary: "Migrate the merchant SDK" })).toContain(duplicate("PAY-40"));
+    // {qoder, merchant} of five words: 0.4, under it for a ticket another thread made.
+    expect(check(made, { summary: "Qoder merchant onboarding" })).not.toContain(
+      duplicate("PAY-40"),
+    );
+  });
+
+  test("a ticket this thread created is caught from 0.5", () => {
+    const here = { ...made, createdKeys: ["PAY-40"] };
+    // {merchant, sdk, qoder} of five words: 0.6.
+    expect(check(made, { summary: "Merchant SDK Qoder docs" })).not.toContain(duplicate("PAY-40"));
+    expect(check(here, { summary: "Merchant SDK Qoder docs" })).toContain(duplicate("PAY-40"));
+    expect(check(here, { summary: "Qoder pricing review" })).not.toContain(duplicate("PAY-40"));
+  });
+
+  test("not across projects, not for done tickets, not for work filed under the ticket", () => {
+    expect(check(made, { projectKey: "OPS", issueType: "Task" })).not.toContain(
+      duplicate("PAY-40"),
+    );
+    const done = {
+      ...made,
+      candidates: made.candidates.map((c) =>
+        c.key === "PAY-40" ? { ...c, status: "Done", statusCategory: "done" } : c,
+      ),
+    };
+    expect(check(done, {})).toBe("");
+    expect(check(made, { issueType: "Story", epic: "PAY-40" })).toBe("");
+  });
+
+  test("a small ask is checked in the project code puts it in", () => {
+    expect(
+      check(made, {
+        smallAsk: "yes",
+        projectKey: "PAY",
+        issueType: "",
+        summary: "Open the firewall to the ledger",
+      }),
+    ).toContain(duplicate("OPS-7"));
+  });
+});
+
+describe("the duplicate check's edges (prompt version 17, D66 review)", () => {
+  const ticket = (key: string, summary: string, epicKey: string | null = null) => ({
+    key,
+    summary,
+    issueType: "Story",
+    status: "To Do",
+    statusCategory: "new",
+    projectKey: "PAY",
+    epicKey,
+    parentKey: null,
+    assignee: null,
+    updated: "2026-09-23T09:00:00.000Z",
+    reasons: ["created" as const],
+  });
+  const create = (fields: Record<string, unknown>) => ({
+    kind: "create_issue",
+    ref: "$new:1",
+    projectKey: "PAY",
+    issueType: "Story",
+    description: null,
+    parent: null,
+    epic: null,
+    priority: null,
+    assignee: null,
+    dueDate: null,
+    ...base,
+    ...fields,
+  });
+  const check = (s: ItemSnapshot, fields: Record<string, unknown>) =>
+    validateItemOutput(
+      { summary: "s", question: null, confidence: 0.9, proposals: [create(fields)] } as ItemOutput,
+      s,
+    ).join("\n");
+
+  test("a summary that differs in a number is a new ticket (Q3 is not Q4)", () => {
+    const s = {
+      ...snapshot,
+      candidates: [...snapshot.candidates, ticket("PAY-41", "Send Dana the Q3 numbers")],
+      createdKeys: ["PAY-41"],
+    };
+    expect(check(s, { summary: "Send Dana the Q4 numbers" })).not.toContain("already exists");
+    expect(check(s, { summary: "Send Dana the Q3 numbers" })).toContain(
+      "PAY-41 already exists with nearly the same summary",
+    );
+  });
+
+  test("a sibling under the same epic is held to 0.75, not 0.5", () => {
+    const s = {
+      ...snapshot,
+      candidates: [...snapshot.candidates, ticket("PAY-41", "Payment webhook retries", "PAY-1")],
+      createdKeys: ["PAY-41"],
+    };
+    // {payment, webhook} of four words: 0.5.
+    expect(check(s, { summary: "Payment webhook logging", epic: "PAY-1" })).toBe("");
+    // Not under the same epic: this thread's ticket is caught from 0.5.
+    expect(check(s, { summary: "Payment webhook logging" })).toContain(
+      "PAY-41 already exists with nearly the same summary",
+    );
   });
 });

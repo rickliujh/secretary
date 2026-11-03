@@ -15,6 +15,13 @@
  * - With the vault connected, a line added on the file side appears on the
  *   page, a line typed on the page appears in the file, and edits on both
  *   sides since the last sync are both kept.
+ *
+ * FR-20.6 acceptance (Phase 30, D66): a block that made an Epic and a Story,
+ * both approved, gives nothing at a second read; editing it gives new cards in
+ * the same thread, whose classify call lists the Epic as a candidate and the
+ * decisions as already decided; a create repeating the Epic is sent back; a
+ * block naming the Story's key, and one the triage assigns to the thread, are
+ * new messages there; a to-do copied into the next day's note gives no card.
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
@@ -26,7 +33,7 @@ import { query } from "@/services/db";
 import { ExecutorLive } from "@/services/executor/live";
 import { IntakeLive } from "@/services/intake/live";
 import { LlmLive } from "@/services/llm/live";
-import { makeScriptedModels } from "@/services/llm/test";
+import { makeScriptedModels, type Scripted } from "@/services/llm/test";
 import { Proposals } from "@/services/proposals";
 import { ProposalsLive } from "@/services/proposals/live";
 import { RetrievalLive } from "@/services/retrieval/live";
@@ -40,6 +47,8 @@ import { jiraSettings, jiraTestLayer } from "@/test/layers";
 import { createHandler, generate } from "../../../scripts/mock-jira";
 import { DailyNote } from ".";
 import { DailyNoteLive } from "./live";
+import { saveBody } from "./queries";
+import { readNote } from "./read";
 import { makeNoteFileTest } from "./test";
 
 const servers: { stop: (force?: boolean) => void }[] = [];
@@ -86,7 +95,8 @@ const smallAsk = (summary: string) => ({
     },
   ],
 });
-const triage = (kind: string) => out({ blocks: [{ index: "1", kind, item: "(none)" }] });
+const triage = (kind: string) =>
+  out({ blocks: [{ index: "1", kind, item: "(none)", thread: "(none)" }] });
 
 const VAULT = {
   id: "v1",
@@ -96,7 +106,17 @@ const VAULT = {
   enabled: true,
 };
 
-function setup() {
+/** The Phase 29 acceptance's scripted answers. */
+const phase29 = (): Record<string, Scripted[]> => ({
+  "fast-m": [triage("act"), triage("skip"), triage("act")],
+  "std-m": [
+    out(sarahClassified),
+    out(smallAsk("Send Dana the Q3 numbers")),
+    out(smallAsk("Send Dana the Q3 and Q4 numbers")),
+  ],
+});
+
+function setup(scripts: Record<string, Scripted[]> = phase29()) {
   const issues = generate(40);
   const pay = issues.get("PAY-12");
   const me = [...issues.values()].find((i) => i.assignee?.name === "me")?.assignee;
@@ -129,14 +149,7 @@ function setup() {
     },
     secretary: { ...s.secretary, dailyNote: { ...s.secretary.dailyNote, vaultSourceId: "v1" } },
   });
-  const models = makeScriptedModels({
-    "fast-m": [triage("act"), triage("skip"), triage("act")],
-    "std-m": [
-      out(sarahClassified),
-      out(smallAsk("Send Dana the Q3 numbers")),
-      out(smallAsk("Send Dana the Q3 and Q4 numbers")),
-    ],
-  });
+  const models = makeScriptedModels(scripts);
   const file = makeNoteFileTest({ Work: null });
   const llm = Layer.provideMerge(
     LlmLive,
@@ -333,5 +346,187 @@ describe("the daily note against the mock Jira (FR-20 AC, Phase 29)", () => {
       "transition_issue",
     ]);
     expect([...issues.values()].find((i) => i.key === r.key)?.status).toBe("Done");
+  });
+});
+
+/**
+ * FR-20.6 acceptance (Phase 30, D66): the note as one conversation per topic.
+ * Keys and thread ids are made while the test runs, so the scripted answers
+ * that name them read them when the model is called.
+ */
+describe("one conversation per topic against the mock Jira (FR-20.6 AC, Phase 30)", () => {
+  const made = { epic: "", story: "", qoder: "" };
+  /** A scripted answer built when the model is called. */
+  const later = (value: () => unknown) => ({
+    get text() {
+      return JSON.stringify(value());
+    },
+  });
+  const e = { rationale: "From the note", evidence: "Qoder", confidence: 0.9 };
+  const create = (fields: Record<string, unknown>) => ({
+    kind: "create_issue",
+    ref: "$new:1",
+    projectKey: "PAY",
+    issueType: "Story",
+    description: "",
+    parent: "",
+    epic: "",
+    priority: "",
+    assignee: "",
+    dueDate: "",
+    smallAsk: "no",
+    ...e,
+    ...fields,
+  });
+  const answer = (summary: string, proposals: unknown[]) => ({
+    summary,
+    question: null,
+    confidence: 0.9,
+    proposals,
+  });
+  const comment = (body: string) =>
+    later(() => answer(body, [{ kind: "add_comment", target: made.story, body, ...e }]));
+  const QODER =
+    "Create an epic for the Qoder migration of the merchant SDK; first step is the SDK audit";
+  const EPIC = "Qoder migration of the merchant SDK";
+
+  test("decided cards are not made again; edits, named keys and the triage's choice continue the thread", async () => {
+    const { layer, models } = setup({
+      "fast-m": [
+        triage("act"),
+        triage("act"),
+        // The block naming the Story's key: act, and code picks the thread.
+        triage("act"),
+        later(() => ({
+          blocks: [{ index: "1", kind: "act", item: "(none)", thread: made.qoder }],
+        })),
+      ],
+      "std-m": [
+        out(smallAsk("Send Dana the Q3 numbers")),
+        out(
+          answer("Qoder migration epic and the SDK audit", [
+            create({ issueType: "Epic", summary: EPIC }),
+            create({ ref: "$new:2", summary: "Audit the merchant SDK", epic: "$new:1" }),
+          ]),
+        ),
+        // The edit: first the epic again (sent back), then only the new step.
+        later(() => answer("Qoder docs", [create({ issueType: "Epic", summary: EPIC })])),
+        later(() =>
+          answer("Qoder docs", [create({ summary: "Write the Qoder SDK docs", epic: made.epic })]),
+        ),
+        comment("The SDK audit has started; Ana pairs on it."),
+        comment("The SDK docs wait until the audit is done."),
+      ],
+    });
+    const fastCalls = () => models.calls.filter((c) => c.model === "fast-m").length;
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const note = yield* DailyNote;
+          const proposalsSvc = yield* Proposals;
+          const pendingOf = (id: string) =>
+            Effect.map(readThread(id), (t) =>
+              t.props.filter((p) => p.status === "pending").map((p) => p.id),
+            );
+
+          // Two days ago: the to-do, one small ask card.
+          const earlier = new Date(Date.now() - 2 * 86_400_000);
+          yield* saveBody(localDate(earlier), "- [ ] send Dana the Q3 numbers\n");
+          yield* readNote("button", { now: earlier });
+
+          // Today: the to-do copied over, and the Qoder epic with its first step.
+          let body = `- [ ] send Dana the Q3 numbers\n\n${QODER}\n`;
+          yield* note.save(TODAY, body);
+          const first = yield* note.read("button");
+          const qoder = (yield* noteThreads).find((t) => t.rawText.includes("Qoder"));
+          made.qoder = qoder?.id ?? "";
+          const created = yield* pendingOf(made.qoder);
+          for (const id of created) yield* proposalsSvc.approve(id);
+          const rows = yield* query((d) =>
+            d.select().from(proposals).where(eq(proposals.inboxItemId, made.qoder)).all(),
+          );
+          const keyOf = (type: string) =>
+            (
+              rows.find((p) => (p.payload as { issueType?: string }).issueType === type)
+                ?.result as { issueKey?: string } | null
+            )?.issueKey ?? "";
+          made.epic = keyOf("Epic");
+          made.story = keyOf("Story");
+
+          // The unchanged note again: nothing.
+          const unchanged = yield* note.read("pass");
+          const callsUnchanged = models.calls.length;
+
+          // The block edited after both were approved: new cards in the same thread.
+          body = `- [ ] send Dana the Q3 numbers\n\n${QODER}, then the SDK docs\n`;
+          yield* note.save(TODAY, body);
+          const edited = yield* note.read("typing");
+
+          // A new block naming the Story's key continues the thread.
+          body += `\n${made.story} audit started, Ana pairs with me\n`;
+          yield* note.save(TODAY, body);
+          const named = yield* note.read("typing");
+
+          // A block the triage assigns to the thread: a new message there.
+          body += "\nAna says the merchant SDK docs can wait until after the audit\n";
+          yield* note.save(TODAY, body);
+          const picked = yield* note.read("typing");
+
+          return {
+            first,
+            unchanged,
+            callsUnchanged,
+            edited,
+            named,
+            picked,
+            threads: yield* noteThreads,
+            thread: yield* readThread(made.qoder),
+          };
+        }),
+        layer,
+      ),
+    );
+
+    // The copied to-do made no second card; the Qoder block made one thread.
+    expect(r.first).toMatchObject({ cards: 1, continued: 0 });
+    expect(r.threads).toHaveLength(2);
+    expect(made.epic).toMatch(/^PAY-\d+$/);
+    expect(made.story).toMatch(/^PAY-\d+$/);
+
+    // A second read of the unchanged note: nothing, and no model call.
+    expect(r.unchanged).toMatchObject({ cards: 0, revised: 0, continued: 0, called: false });
+    expect(r.callsUnchanged).toBe(4);
+
+    // The edit revised the thread; its classify call knew the epic and the decisions.
+    expect(r.edited).toMatchObject({ revised: 1, cards: 0 });
+    const std = models.calls.filter((c) => c.model === "std-m");
+    const revise = JSON.stringify(std[2]?.prompt);
+    expect(revise).toContain(`- ${made.epic} [Epic`);
+    expect(revise).toContain("created: made on your approval in the last two weeks");
+    expect(revise).toContain("## Already decided in this conversation");
+    expect(revise).toContain(`Create Epic in PAY`);
+    // The repeated epic was sent back for repair.
+    expect(JSON.stringify(std[3]?.prompt)).toContain(
+      `${made.epic} already exists with nearly the same summary`,
+    );
+
+    // The named key and the triage's choice continued the same thread.
+    expect(r.named).toMatchObject({ continued: 1, cards: 0, called: true });
+    expect(r.picked).toMatchObject({ continued: 1, cards: 0, called: true });
+    expect(fastCalls()).toBe(4);
+    expect(r.threads).toHaveLength(2);
+    const users = r.thread.messages.filter((m) => m.role === "user");
+    expect(users).toHaveLength(4);
+    expect(users[2]?.content).toMatchObject({ asInput: true, source: "note", noteDate: TODAY });
+    expect(users[3]?.content).toMatchObject({ asInput: true, source: "note", noteDate: TODAY });
+    expect(r.thread.props.filter((p) => p.status === "pending").map((p) => p.kind)).toEqual([
+      "create_issue",
+      "add_comment",
+      "add_comment",
+    ]);
+    expect(
+      r.thread.props.filter((p) => p.kind === "create_issue" && p.status === "pending")[0]?.payload,
+    ).toMatchObject({ issueType: "Story", epic: made.epic });
   });
 });

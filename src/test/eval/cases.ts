@@ -45,6 +45,12 @@ export type EvalCase = {
   contacts?: Record<string, { displayName: string; team?: "Payments" | "Platform" | "Network" }>;
   /** A work item that exists only while this case runs (D61 Reads, prompt version 15). */
   workItem?: EvalWorkItem;
+  /**
+   * A ticket the user's approval made two days before, in another thread (D66):
+   * cached as the sync would hold it, with the executed create that made it, so
+   * retrieval offers it as `created`.
+   */
+  created?: EvalCreated;
   expect: EvalExpectation;
   single: boolean;
 };
@@ -70,6 +76,15 @@ export type EvalWorkItem = {
   nextExpected?: { what: string; on: string | null };
   commitments?: { what: string; to: string; dueOn: string | null }[];
   wait?: { issueKey: string; label: string; owner: string; expectedAt?: string };
+};
+
+/** A ticket an earlier thread created on the user's approval (D66). */
+export type EvalCreated = {
+  key: string;
+  summary: string;
+  issueType: string;
+  /** The words the earlier thread was started with. */
+  request: string;
 };
 
 /** The cert renewal of the work model's plan (D61): PAY-12 waits on PLAT-812 and on Sarah. */
@@ -109,8 +124,11 @@ const CERT_CONTACTS: EvalCase["contacts"] = {
   dana: { displayName: "Dana Reyes", team: "Payments" },
 };
 
-/** Tickets a case's work item adds to the cache, so its expectations may name them. */
-export const workItemKeys = (c: EvalCase) => c.workItem?.issues.map((i) => i.key) ?? [];
+/** Tickets a case's work item, or its created ticket, adds to the cache, so its expectations may name them. */
+export const workItemKeys = (c: EvalCase) => [
+  ...(c.workItem?.issues.map((i) => i.key) ?? []),
+  ...(c.created ? [c.created.key] : []),
+];
 
 /**
  * An expected target that is a seeded contact (`contact:ana`), whose id is made
@@ -221,6 +239,26 @@ export const EVAL_CASES: EvalCase[] = [
         ],
       ],
       forbiddenKinds: ["add_comment", "needs_clarification"],
+    },
+    single: true,
+  },
+  {
+    // The epic exists: the user approved it two days ago in another thread. The
+    // input repeats that request and adds a step: the step goes under the epic,
+    // and no second epic is made (prompt version 17, D66).
+    name: "an epic the note already made is not created again",
+    source: "typed",
+    text: "We need to migrate the merchant SDK to Qoder, create an epic for that. The second step is to update the SDK docs for the Qoder endpoints.",
+    created: {
+      key: "PAY-40",
+      summary: "Migrate the merchant SDK to Qoder",
+      issueType: "Epic",
+      request: "We need to migrate the merchant SDK to Qoder, create an epic for that.",
+    },
+    expect: {
+      required: [{ kind: "create_issue", target: "PAY-40" }],
+      forbidden: [{ kind: "create_issue", fields: { issueType: "Epic" } }],
+      forbiddenKinds: ["needs_clarification"],
     },
     single: true,
   },

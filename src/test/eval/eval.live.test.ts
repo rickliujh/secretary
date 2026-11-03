@@ -85,7 +85,7 @@ import {
   stopReason,
 } from "./harness";
 import { classifyOwn, isChore } from "./own-proposals";
-import { seedWorkItem } from "./work-seed";
+import { seedCreated, seedWorkItem } from "./work-seed";
 
 const env = process.env;
 const configured = !!(
@@ -439,6 +439,7 @@ const runCase = (c: EvalCase, label: string) =>
         ...(p.team ? { teamId: teamIds[p.team] } : {}),
       });
     if (c.workItem) yield* seedWorkItem(c.workItem, extra);
+    if (c.created) yield* seedCreated(c.created);
     // A provider error (timeout, rate limit) fails this case; the run decides whether to go on.
     const intake = yield* Intake;
     const attempt = yield* Effect.either(
@@ -563,7 +564,7 @@ const report = (label: string, results: Outcome[]) => {
       for (const e of errors) console.log(`      error: ${e.replace(/\n/g, " | ")}`);
     }
     console.log(
-      `${pass ? "PASS" : "FAIL"}  ${seconds(ms).padStart(6)}  ${describeStats(stats)}  ${c.name}: ${signature(payloads) || "(nothing)"}${s.missing.length ? `  missing ${s.missing.map((m) => `${m.kind}:${m.target ?? "*"}`).join(", ")}` : ""}${s.forbidden.length ? `  forbidden ${s.forbidden.join(", ")}` : ""}`,
+      `${pass ? "PASS" : "FAIL"}  ${seconds(ms).padStart(6)}  ${describeStats(stats)}  ${c.name}: ${signature(payloads) || "(nothing)"}${s.missing.length ? `  missing ${s.missing.map((m) => `${m.kind}:${m.target ?? "*"}`).join(", ")}` : ""}${s.forbidden.length ? `  forbidden ${s.forbidden.join(", ")}` : ""}${s.unwanted.length ? `  unwanted ${s.unwanted.map((m) => `${m.kind}${m.fields ? JSON.stringify(m.fields) : ""}`).join(", ")}` : ""}`,
     );
   }
   return results.filter((r) => r.pass).length / results.length;
