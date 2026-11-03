@@ -34,14 +34,14 @@ import { describePayload } from "@/services/proposals/schema";
 import { threadRefs } from "@/services/proposals/thread-refs";
 import { executedRefs, groupSmallAsks } from "@/services/small-asks/bundle";
 import type { SituationRecord } from "@/services/work/schema";
-import { Composer, type ComposerMessage } from "./composer";
+import { Composer } from "./composer";
 import { DayEndView } from "./day-end-view";
 import { PASTED_HIGHLIGHT } from "./message-doc";
 import { BundleCard, OutcomeCard } from "./outcome-card";
 import { ThreadPark } from "./park";
 import { ProposalCard } from "./proposal-card";
 import { SmallAskRow } from "./small-ask-row";
-import { useDecisions, useReply } from "./use-inbox";
+import { useDecisions, useThreadReply } from "./use-inbox";
 
 function PastedText({ text, source }: { text: string; source: string | null }) {
   const [open, setOpen] = useState(false);
@@ -327,8 +327,8 @@ export function ThreadView({ id }: { id: string }) {
   const lookups = useLookups();
   const { approveAll, dismiss, retriage } = useDecisions();
   // Approve all waits for a save in this thread (the sprint switch, a row field) to land (D57).
-  const reply = useReply();
-  const [skipAnswer, setSkipAnswer] = useState<string | null>(null);
+  // The newest open question is what a reply answers, unless the user opts out.
+  const { reply, answering, skip, send, choose } = useThreadReply(id, detail.data?.proposals);
   const d = detail.data;
   if (detail.isPending) return <Loader2 className="m-6 animate-spin text-muted-foreground" />;
   if (!d) return <p className="p-6 text-sm text-muted-foreground">This thread no longer exists.</p>;
@@ -343,11 +343,6 @@ export function ThreadView({ id }: { id: string }) {
   const byMessage = new Map<string | null, ProposalView[]>();
   for (const p of d.proposals)
     byMessage.set(p.messageId, [...(byMessage.get(p.messageId) ?? []), p]);
-  // The newest open question is what a reply answers, unless the user opts out.
-  const openQuestion = d.proposals
-    .filter((p) => p.kind === "needs_clarification" && p.status === "pending")
-    .at(-1);
-  const answering = openQuestion && openQuestion.id !== skipAnswer ? openQuestion : null;
   const created = executedRefs(d.proposals);
   // The thread's new contacts and teams, for names and selects before they exist (D60).
   const threadLookups = { ...lookups, refs: threadRefs(d.proposals) };
@@ -357,23 +352,6 @@ export function ThreadView({ id }: { id: string }) {
   const noteDate = firstUser?.role === "user" ? firstUser.noteDate : null;
   const unanswered = !reply.isPending && last?.role === "user" && d.item.error;
 
-  const send = (m: ComposerMessage) => {
-    const withInput = hasInput(m.parts, true);
-    reply.mutate({
-      inboxItemId: id,
-      parts: m.parts,
-      source: withInput ? m.source : undefined,
-      // Only a typed reply answers; pasted input starts new items instead.
-      answers: answering && !withInput ? answering.id : null,
-    });
-  };
-  // A one-click answer: the choice, typed, as the reply to that question (D61).
-  const choose = (proposalId: string, choice: string) =>
-    reply.mutate({
-      inboxItemId: id,
-      parts: [{ type: "typed", text: choice }],
-      answers: proposalId,
-    });
   const sending = reply.isPending ? reply.variables : null;
 
   const turn = (m: ThreadMessage) =>
@@ -405,7 +383,7 @@ export function ThreadView({ id }: { id: string }) {
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           {noteDate ? (
-            // A block of the daily note (D65): back to its line, conversation open (D67).
+            // A block of the daily note (D65): back to its line, its card pinned (D67).
             <Badge variant="outline" asChild>
               <Link
                 to="/note"
@@ -536,7 +514,7 @@ export function ThreadView({ id }: { id: string }) {
                   variant="ghost"
                   className="size-5"
                   aria-label="Do not treat my next message as the answer"
-                  onClick={() => setSkipAnswer(answering.id)}
+                  onClick={() => skip(answering.id)}
                 >
                   <X />
                 </Button>

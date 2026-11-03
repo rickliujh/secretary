@@ -5,24 +5,37 @@
  * closed or continued as you type (`editor-setup.ts`). A value that arrives
  * from outside (a sync, the chat's append) is applied as one change over the
  * common prefix and suffix, outside the undo history, so the cursor and the
- * scroll stay. Line wrapping, monospace, the app's light or dark theme (next-themes),
- * read-only for earlier days. Marks and strips come from `cards-extension`.
+ * scroll stay. Line wrapping, proportional type (monospace inside fenced code
+ * only, headings a little larger), the app's light or dark theme
+ * (next-themes), read-only for earlier days. The marks and the hover come
+ * from `cards-extension`; `overlay` (the card and its anchor) is placed in the
+ * editor's box, where the anchor's coordinates are measured.
  */
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
+import { EditorState, type Range } from "@codemirror/state";
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  type ViewUpdate,
+} from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import CodeMirror, { type BasicSetupOptions } from "@uiw/react-codemirror";
 import { useTheme } from "next-themes";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { NoteCardsData } from "./block-marks";
-import { noteCards, type SlotStore, setNoteCards } from "./cards-extension";
+import type { NoteCardStore } from "./card-store";
+import { noteCards, setNoteCards } from "./cards-extension";
 import { externalChange, noteTyping } from "./editor-setup";
 
 const highlight = HighlightStyle.define([
-  { tag: tags.heading, fontWeight: "600" },
+  { tag: tags.heading1, fontWeight: "600", fontSize: "1.25em" },
+  { tag: tags.heading2, fontWeight: "600", fontSize: "1.15em" },
+  { tag: tags.heading3, fontWeight: "600", fontSize: "1.07em" },
+  { tag: [tags.heading4, tags.heading5, tags.heading6], fontWeight: "600" },
   { tag: tags.strong, fontWeight: "600" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
@@ -33,6 +46,43 @@ const highlight = HighlightStyle.define([
   },
 ]);
 
+const fenceLine = Decoration.line({ class: "cm-note-fence" });
+
+/** The lines of fenced code blocks, for monospace there only. */
+function fenceLines(view: EditorView): DecorationSet {
+  const out: Range<Decoration>[] = [];
+  const doc = view.state.doc;
+  for (const { from, to } of view.visibleRanges)
+    syntaxTree(view.state).iterate({
+      from,
+      to,
+      enter(node) {
+        if (node.name !== "FencedCode") return;
+        const last = doc.lineAt(node.to).number;
+        for (let n = doc.lineAt(node.from).number; n <= last; n++)
+          out.push(fenceLine.range(doc.line(n).from));
+        return false;
+      },
+    });
+  return Decoration.set(out, true);
+}
+
+const fences = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = fenceLines(view);
+    }
+    update(u: ViewUpdate) {
+      if (u.docChanged || u.viewportChanged || syntaxTree(u.state) !== syntaxTree(u.startState))
+        this.decorations = fenceLines(u.view);
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
+
+const MONO = "var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace)";
+
 /** The app's colours through its CSS variables; `dark` sets CodeMirror's own defaults. */
 const themeFor = (dark: boolean) =>
   EditorView.theme(
@@ -40,13 +90,21 @@ const themeFor = (dark: boolean) =>
       "&": {
         color: "var(--foreground)",
         backgroundColor: "transparent",
-        fontSize: "inherit",
+        fontSize: "15px",
+        // The marks' colours, as the mockup has them: blue, amber, red, green, purple.
+        "--note-mark-waiting": dark ? "#60a5fa" : "#2563eb",
+        "--note-mark-question": dark ? "#f59e0b" : "#d97706",
+        "--note-mark-failed": dark ? "#f87171" : "#dc2626",
+        "--note-mark-done": dark ? "#4ade80" : "#16a34a",
+        "--note-mark-noted": dark ? "#a78bfa" : "#7c3aed",
       },
       "&.cm-focused": { outline: "none" },
-      ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.5" },
+      ".cm-scroller": { fontFamily: "var(--font-sans)", lineHeight: "1.6" },
       // As tall as the textarea was, and all of it clickable.
       ".cm-content": { padding: "8px 0", minHeight: "50vh", caretColor: "var(--foreground)" },
-      ".cm-line": { padding: "0 10px 0 4px" },
+      ".cm-line": { padding: "0 10px 0 4px", borderRadius: "4px" },
+      ".cm-note-fence": { fontFamily: MONO, fontSize: "13.5px" },
+      ".cm-note-lit": { backgroundColor: "color-mix(in oklch, var(--muted) 70%, transparent)" },
       ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--foreground)" },
       "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection":
         { backgroundColor: "color-mix(in oklch, var(--primary) 22%, transparent)" },
@@ -56,10 +114,46 @@ const themeFor = (dark: boolean) =>
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "center",
-        padding: "0 2px 0 6px",
+        padding: "0 2px 0 8px",
       },
-      ".cm-note-mark": { display: "inline-flex", width: "16px", minHeight: "1.5em" },
-      ".cm-note-strip": { padding: "0 10px 0 4px", overflow: "hidden" },
+      // The mark: small, in the margin, quiet until its line is hovered (D67).
+      ".cm-note-mark": {
+        position: "relative",
+        display: "inline-grid",
+        placeItems: "center",
+        width: "15px",
+        height: "15px",
+        // Centred on the 15 px / 1.6 line; em here would be the mark's own 10 px.
+        marginTop: "calc((15px * 1.6 - 15px) / 2)",
+        padding: "0",
+        border: "none",
+        borderRadius: "50%",
+        background: "transparent",
+        color: "var(--muted-foreground)",
+        fontFamily: "var(--font-sans)",
+        fontSize: "10px",
+        fontWeight: "700",
+        lineHeight: "1",
+        cursor: "pointer",
+        outline: "none",
+      },
+      "button.cm-note-mark:focus-visible": { boxShadow: "0 0 0 2px var(--ring)" },
+      ".cm-note-mark-waiting": { backgroundColor: "var(--note-mark-waiting)", color: "#fff" },
+      ".cm-note-mark-question": { backgroundColor: "var(--note-mark-question)", color: "#fff" },
+      ".cm-note-mark-failed": { backgroundColor: "var(--note-mark-failed)", color: "#fff" },
+      ".cm-note-mark-done": { color: "var(--note-mark-done)" },
+      ".cm-note-mark-noted": { color: "var(--note-mark-noted)" },
+      ".cm-note-mark-unread": {
+        border: "1.5px solid var(--muted-foreground)",
+        width: "11px",
+        height: "11px",
+        marginTop: "calc((15px * 1.6 - 11px) / 2)",
+        animation: "cm-note-pulse 1.6s ease-in-out infinite",
+      },
+      "@keyframes cm-note-pulse": { "50%": { opacity: "0.35" } },
+      ".cm-note-mark-ghost, .cm-note-mark-private": { opacity: "0" },
+      ".cm-note-mark-ghost.cm-note-mark-lit, .cm-note-mark-private.cm-note-mark-lit, .cm-note-mark-ghost:focus-visible, .cm-note-mark-private:focus-visible":
+        { opacity: "0.7" },
       ".cm-panels": { backgroundColor: "var(--popover)", color: "var(--popover-foreground)" },
     },
     { dark },
@@ -95,7 +189,8 @@ export function NoteEditor({
   placeholder,
   label,
   cards,
-  slots,
+  store,
+  overlay,
   className,
 }: {
   value: string;
@@ -105,8 +200,10 @@ export function NoteEditor({
   /** The editor's accessible name. */
   label: string;
   cards: NoteCardsData;
-  /** Where the marks' and strips' DOM nodes are registered for the page. */
-  slots: SlotStore;
+  /** The hover cards' store: the block under the pointer, the open card, its anchor. */
+  store: NoteCardStore;
+  /** Placed in the editor's box: the card and its anchor. */
+  overlay?: ReactNode;
   className?: string;
 }) {
   const { resolvedTheme } = useTheme();
@@ -124,10 +221,11 @@ export function NoteEditor({
       EditorView.lineWrapping,
       EditorView.contentAttributes.of({ "aria-label": label }),
       markdown({ base: markdownLanguage, addKeymap: false }),
+      fences,
       noteTyping,
-      noteCards(slots),
+      noteCards(store),
     ],
-    [label, slots],
+    [label, store],
   );
 
   useEffect(() => {
@@ -143,7 +241,7 @@ export function NoteEditor({
   return (
     <div
       className={cn(
-        "rounded-lg border border-input font-mono text-base transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 md:text-sm dark:bg-input/30",
+        "relative rounded-lg border border-input transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30",
         className,
       )}
     >
@@ -158,6 +256,7 @@ export function NoteEditor({
         theme={resolvedTheme === "dark" ? darkTheme : lightTheme}
         extensions={extensions}
       />
+      {overlay}
     </div>
   );
 }

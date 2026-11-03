@@ -14,9 +14,9 @@ import type { ProposalView } from "@/services/inbox/queries";
 import { compactLine, isCompact } from "@/services/proposals/compact";
 import {
   NEW_REF_RE,
-  PROPOSAL_LABELS,
   type ProposalPayload,
   pointsLabel,
+  proposalLabel,
   withoutCodeFields,
 } from "@/services/proposals/schema";
 import { directoryName } from "@/services/proposals/thread-refs";
@@ -359,8 +359,6 @@ export function ProposalCard({
   const drafts = useDraftPanel();
   const draftId = result?.communicationId;
   const pending = proposal.status === "pending";
-  // Approve waits for a save of this proposal (the sprint switch, a row field) to land (D57).
-  const pendingEdit = usePendingEdit(proposal.id);
   const busy = approve.isPending || reject.isPending;
   // The sprint switch alone is code's field, not an edit of the proposal (D57).
   const edited =
@@ -473,7 +471,7 @@ export function ProposalCard({
       <article
         // biome-ignore lint/a11y/noNoninteractiveTabindex: the row takes the card's a/r shortcuts when focused (NFR-6).
         tabIndex={0}
-        aria-label={`${PROPOSAL_LABELS[proposal.payload.kind]} proposal, ${proposal.status}`}
+        aria-label={`${proposalLabel(payload)} proposal, ${proposal.status}`}
         className={cn(
           "flex flex-col gap-1 rounded-lg border px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
           !pending && proposal.status !== "failed" && "opacity-75",
@@ -485,7 +483,7 @@ export function ProposalCard({
         }}
       >
         <div className="flex items-center gap-2">
-          <Badge variant="secondary">{PROPOSAL_LABELS[proposal.payload.kind]}</Badge>
+          <Badge variant="secondary">{proposalLabel(payload)}</Badge>
           <span className="min-w-0 flex-1 truncate text-sm" title={line ?? undefined}>
             {line}
           </span>
@@ -511,7 +509,7 @@ export function ProposalCard({
     <article
       // biome-ignore lint/a11y/noNoninteractiveTabindex: the card takes a/e/r shortcuts when focused (NFR-6).
       tabIndex={0}
-      aria-label={`${PROPOSAL_LABELS[proposal.payload.kind]} proposal, ${proposal.status}`}
+      aria-label={`${proposalLabel(payload)} proposal, ${proposal.status}`}
       className={cn(
         "flex flex-col gap-2 rounded-lg border p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring",
         !pending && proposal.status !== "failed" && "opacity-75",
@@ -524,7 +522,7 @@ export function ProposalCard({
       }}
     >
       <header className="flex items-center gap-2">
-        <Badge variant="secondary">{PROPOSAL_LABELS[proposal.payload.kind]}</Badge>
+        <Badge variant="secondary">{proposalLabel(payload)}</Badge>
         <Badge
           variant="secondary"
           className={cn("border-transparent", STATUS_TONE[proposal.status])}
@@ -574,43 +572,87 @@ export function ProposalCard({
           )}
         </footer>
       )}
-      <ProposalEditDialog
-        payload={payload}
+      <ProposalEditor
+        proposal={proposal}
         lookups={lookups}
-        sprint={
-          payload.kind === "create_issue" && pending ? (
-            <SprintSwitch proposal={proposal} layout="dialog" />
-          ) : undefined
-        }
         open={editing}
         onOpenChange={setEditing}
         busy={busy}
-        {...(inBundle ? { submitLabel: "Save changes" } : {})}
-        onApprove={(changed) => {
-          // A step of an outcome card keeps the edit; the card's Approve runs it.
-          if (inBundle) {
-            saveEdit.mutate({
-              id: proposal.id,
-              edited: changed,
-              inboxItemId: proposal.inboxItemId,
-            });
-            return;
-          }
-          // The dialog's form does not hold the sprint switch; carry its current value.
-          const current = pendingEdit ?? payload;
-          approve.mutate({
-            id: proposal.id,
-            edited:
-              changed.kind === "create_issue" && current.kind === "create_issue"
-                ? {
-                    ...changed,
-                    joinSprint: current.joinSprint,
-                    joinSprintChosen: current.joinSprintChosen,
-                  }
-                : changed,
-          });
-        }}
+        inBundle={inBundle}
+        approve={approve}
+        saveEdit={saveEdit}
       />
     </article>
+  );
+}
+
+type Decisions = ReturnType<typeof useDecisions>;
+
+/**
+ * Edit on a proposal (FR-7.2): the edit dialog, with a create's sprint switch;
+ * submitting approves with the changes, or, for a step of an outcome card,
+ * saves them on the step. The Inbox's cards and the note's cards (D67) share it.
+ */
+export function ProposalEditor({
+  proposal,
+  lookups,
+  open,
+  onOpenChange,
+  busy,
+  inBundle = false,
+  approve,
+  saveEdit,
+}: {
+  proposal: ProposalView;
+  lookups: Lookups;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  busy: boolean;
+  inBundle?: boolean;
+  /** The caller's decision mutations, so its buttons show their progress. */
+  approve: Decisions["approve"];
+  saveEdit: Decisions["saveEdit"];
+}) {
+  const payload = proposal.editedPayload ?? proposal.payload;
+  const pending = proposal.status === "pending";
+  const pendingEdit = usePendingEdit(proposal.id);
+  return (
+    <ProposalEditDialog
+      payload={payload}
+      lookups={lookups}
+      sprint={
+        payload.kind === "create_issue" && pending ? (
+          <SprintSwitch proposal={proposal} layout="dialog" />
+        ) : undefined
+      }
+      open={open}
+      onOpenChange={onOpenChange}
+      busy={busy}
+      {...(inBundle ? { submitLabel: "Save changes" } : {})}
+      onApprove={(changed) => {
+        // A step of an outcome card keeps the edit; the card's Approve runs it.
+        if (inBundle) {
+          saveEdit.mutate({
+            id: proposal.id,
+            edited: changed,
+            inboxItemId: proposal.inboxItemId,
+          });
+          return;
+        }
+        // The dialog's form does not hold the sprint switch; carry its current value.
+        const current = pendingEdit ?? payload;
+        approve.mutate({
+          id: proposal.id,
+          edited:
+            changed.kind === "create_issue" && current.kind === "create_issue"
+              ? {
+                  ...changed,
+                  joinSprint: current.joinSprint,
+                  joinSprintChosen: current.joinSprintChosen,
+                }
+              : changed,
+        });
+      }}
+    />
   );
 }

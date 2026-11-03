@@ -24,9 +24,9 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
-  PROPOSAL_LABELS,
   type ProposalPayload,
   ProposalPayloadSchema,
+  proposalLabel,
 } from "@/services/proposals/schema";
 import {
   FIELD_SPECS,
@@ -95,7 +95,7 @@ export function ProposalEditDialog({
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
         <form onSubmit={submit}>
           <DialogHeader className="mb-4">
-            <DialogTitle>Edit: {PROPOSAL_LABELS[payload.kind]}</DialogTitle>
+            <DialogTitle>Edit: {proposalLabel(payload)}</DialogTitle>
             <DialogDescription>
               Your changes are saved as a correction so similar input goes better next time.
             </DialogDescription>

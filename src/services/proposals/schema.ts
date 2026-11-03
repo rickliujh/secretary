@@ -325,6 +325,16 @@ export const PROPOSAL_LABELS: Record<ProposalKind, string> = {
 };
 
 /**
+ * A proposal's label from its payload: a create names its issue type ("Create
+ * Epic", "Create Story"); every other kind, and a create without a type, is
+ * `PROPOSAL_LABELS`. Callers with only a kind use `PROPOSAL_LABELS`.
+ */
+export function proposalLabel(p: ProposalPayload): string {
+  if (p.kind === "create_issue" && p.issueType.trim()) return `Create ${p.issueType.trim()}`;
+  return PROPOSAL_LABELS[p.kind];
+}
+
+/**
  * A stored payload with the defaults of fields added since it was stored, so
  * proposals made before a schema change still load, edit and execute. A value
  * that no longer parses is returned as it is; approving it fails validation.

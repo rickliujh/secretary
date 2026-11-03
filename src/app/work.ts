@@ -27,7 +27,7 @@ const scheduler = new PassScheduler(async () => {
       if (r.created || r.attached || r.calls || r.asked || r.offered || r.returned) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
         void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
-        // The note's strips say what its threads hold (D67).
+        // The note's marks and cards say what its threads hold (D67).
         void queryClient.invalidateQueries({ queryKey: queryKeys.note });
       }
     } catch (e) {

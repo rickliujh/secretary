@@ -1,16 +1,16 @@
 /**
- * The note editor's marks and strips (FR-20.7, D67) as a CodeMirror
- * extension: a gutter with one marker on the first line of each block (an
- * invisible one on blocks not read yet, for Ask) and a one-line block widget
- * under each block with a conversation or a work item note. The page's data
- * arrives by an effect into a state field (it survives a reconfigure of the
- * editor), and the decorations are worked out from the editor's own text at
- * every change, so they never point past it. Blocks are followed through
- * edits by their mapped ranges (`block-marks.ts`), so a block being edited
- * keeps its marker and strip. Markers and widgets make empty DOM nodes,
- * keyed by block only, and register them in a `SlotStore`; the page renders
- * the app's components into them with portals and reads each block's state
- * from the store. Mod-. opens the menu of the block at the cursor.
+ * The note editor's marks and hover (FR-20.7, D67) as a CodeMirror
+ * extension: a gutter with one small mark on the first line of each block, a
+ * faint background on the lines of the hovered block and of the block whose
+ * card is open, and a view plugin that reports the block under the pointer
+ * and the card's anchor (the block's first line, relative to the editor) to
+ * the page's `NoteCardStore`. The page's data arrives by an effect into a
+ * state field (it survives a reconfigure of the editor), and everything is
+ * worked out from the editor's own text at every change, so it never points
+ * past it. Blocks are followed through edits by their mapped ranges
+ * (`block-marks.ts`), so a block being edited keeps its mark, and a pinned
+ * card follows its block when lines above change. Clicking a mark pins its
+ * card; Mod-. pins the card of the block at the cursor.
  */
 import {
   type EditorState,
@@ -19,6 +19,7 @@ import {
   RangeSet,
   StateEffect,
   StateField,
+  Transaction,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -28,98 +29,91 @@ import {
   gutter,
   keymap,
   ViewPlugin,
-  WidgetType,
+  type ViewUpdate,
 } from "@codemirror/view";
+import { type MarkState, markLabel } from "@/services/note/cards";
 import {
   type BlockMark,
+  blockAtLine,
   blockMarks,
   type Carry,
   emptyCards,
   type NoteCardsData,
+  sameMark,
 } from "./block-marks";
+import type { Anchor, NoteCardStore } from "./card-store";
 
-export type Slot = {
-  /** Unique per node, for React's keys. */
-  id: number;
-  kind: "mark" | "strip";
-  /** The block's key: its state is `marks.get(key)`. */
-  key: string;
-  el: HTMLElement;
+/** The room the card needs right of the text: its width, its gap (16) and the collision padding (12). */
+export const CARD_ROOM = 360 + 16 + 12;
+
+const svg = (body: string, fill = "none") =>
+  `<svg viewBox="0 0 16 16" width="12" height="12" fill="${fill}" stroke="currentColor" aria-hidden="true">${body}</svg>`;
+const ICONS = {
+  check: svg(`<path d="M3 8.5l3 3 7-7" stroke-width="2.2"/>`),
+  note: svg(
+    `<path d="M3 2h8l2 2v10H3z" fill="currentColor" opacity=".25" stroke="none"/><path d="M5 7h6M5 10h6" stroke-width="1.5"/>`,
+  ),
+  lock: svg(
+    `<rect x="3" y="7" width="10" height="7" rx="1.5" stroke-width="1.6"/><path d="M5 7V5a3 3 0 016 0v2" stroke-width="1.6"/>`,
+  ),
 };
 
-export type SlotSnapshot = {
-  slots: readonly Slot[];
-  /** Each block's mark, by key, as of the editor's last update. */
-  marks: ReadonlyMap<string, BlockMark>;
-};
-
-/** The DOM nodes the editor made for marks and strips, and the blocks' state, for the page. */
-export class SlotStore {
-  private slots = new Map<HTMLElement, Slot>();
-  private marks: ReadonlyMap<string, BlockMark> = new Map();
-  private snapshot: SlotSnapshot = { slots: [], marks: this.marks };
-  private listeners = new Set<() => void>();
-  private openers = new Set<(key: string) => void>();
-  private queued = false;
-  private next = 0;
-  /** Set by the editor: puts the focus back in the text. */
-  focusEditor: () => void = () => undefined;
-
-  add(slot: Omit<Slot, "id">) {
-    this.slots.set(slot.el, { ...slot, id: this.next++ });
-    this.changed();
-  }
-  remove(el: HTMLElement) {
-    if (this.slots.delete(el)) this.changed();
-  }
-  setMarks(marks: ReadonlyMap<string, BlockMark>) {
-    this.marks = marks;
-    this.changed();
-  }
-  /** Asks the page to open a block's menu (the Mod-. command). */
-  open(key: string) {
-    for (const f of this.openers) f(key);
-  }
-  onOpen = (f: (key: string) => void) => {
-    this.openers.add(f);
-    return () => void this.openers.delete(f);
-  };
-  subscribe = (f: () => void) => {
-    this.listeners.add(f);
-    return () => void this.listeners.delete(f);
-  };
-  getSnapshot = () => this.snapshot;
-  /** Batched: the editor may make many nodes in one update, inside React's commit. */
-  private changed() {
-    if (this.queued) return;
-    this.queued = true;
-    queueMicrotask(() => {
-      this.queued = false;
-      this.snapshot = { slots: [...this.slots.values()], marks: this.marks };
-      for (const f of this.listeners) f();
-    });
+/** The mark's face: its look (a CSS class), its text or icon. */
+export function markFace(state: MarkState): { look: string; text: string; icon: string | null } {
+  switch (state.kind) {
+    case "waiting":
+      return { look: "waiting", text: state.count > 9 ? "9+" : String(state.count), icon: null };
+    case "question":
+      return { look: "question", text: "?", icon: null };
+    case "failed":
+      return { look: "failed", text: "!", icon: null };
+    case "done":
+      return { look: "done", text: "", icon: ICONS.check };
+    case "noted":
+      return { look: "noted", text: "", icon: ICONS.note };
+    case "private":
+      return { look: "private", text: "", icon: ICONS.lock };
+    case "unread":
+      return { look: "unread", text: "", icon: null };
+    case "not_read":
+    case "alone":
+    case "loading":
+      return { look: "ghost", text: "·", icon: null };
   }
 }
 
-/** The marker's node depends on the block only; its look is the page's (React) content. */
 class MarkMarker extends GutterMarker {
   constructor(
     readonly key: string,
-    readonly store: SlotStore,
+    readonly state: MarkState,
+    /** Its block is hovered or its card is open: a quiet mark shows. */
+    readonly lit: boolean,
+    readonly store: NoteCardStore,
   ) {
     super();
   }
   override eq(other: GutterMarker) {
-    return other instanceof MarkMarker && other.key === this.key;
+    return (
+      other instanceof MarkMarker &&
+      other.key === this.key &&
+      other.lit === this.lit &&
+      markLabel(other.state) === markLabel(this.state)
+    );
   }
   override toDOM() {
-    const el = document.createElement("span");
-    el.className = "cm-note-mark";
-    this.store.add({ kind: "mark", key: this.key, el });
+    const face = markFace(this.state);
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = `cm-note-mark cm-note-mark-${face.look}${this.lit ? " cm-note-mark-lit" : ""}`;
+    const label = markLabel(this.state);
+    el.setAttribute("aria-label", `This line: ${label}. Show its card`);
+    el.title = label;
+    if (face.icon) el.innerHTML = face.icon;
+    else el.textContent = face.text;
+    // The text keeps the focus and the selection; the click pins the card.
+    el.addEventListener("mousedown", (e) => e.preventDefault());
+    el.addEventListener("click", () => this.store.togglePin(this.key));
     return el;
-  }
-  override destroy(dom: Node) {
-    this.store.remove(dom as HTMLElement);
   }
 }
 
@@ -132,103 +126,92 @@ class SpacerMarker extends GutterMarker {
   }
 }
 
-/** One line high: the editor knows its height before the page fills it. */
-export const STRIP_HEIGHT = 28;
-
-class StripWidget extends WidgetType {
-  constructor(
-    readonly key: string,
-    readonly store: SlotStore,
-  ) {
-    super();
-  }
-  override eq(other: WidgetType) {
-    return other instanceof StripWidget && other.key === this.key;
-  }
-  override get estimatedHeight() {
-    return STRIP_HEIGHT;
-  }
-  override toDOM() {
-    const el = document.createElement("div");
-    el.className = "cm-note-strip";
-    el.style.height = `${STRIP_HEIGHT}px`;
-    this.store.add({ kind: "strip", key: this.key, el });
-    return el;
-  }
-  override destroy(dom: HTMLElement) {
-    this.store.remove(dom);
-  }
-}
-
 /** Sets what the page knows of the day's blocks. */
 export const setNoteCards = StateEffect.define<NoteCardsData>();
+/** Sets the lit blocks: the hovered one and the one whose card is open. */
+export const setLit = StateEffect.define<readonly string[]>();
 
 export type CardsState = {
   data: NoteCardsData;
   marks: readonly BlockMark[];
   carries: readonly Carry[];
+  lit: readonly string[];
   decos: DecorationSet;
   markers: RangeSet<GutterMarker>;
 };
+
+const litLine = Decoration.line({ class: "cm-note-lit" });
+
+function paint(
+  state: EditorState,
+  marks: readonly BlockMark[],
+  lit: readonly string[],
+  store: NoteCardStore,
+) {
+  const doc = state.doc;
+  const lineAt = (n: number) => doc.line(Math.min(n + 1, doc.lines));
+  const markers = RangeSet.of<GutterMarker>(
+    marks.map((m) =>
+      new MarkMarker(m.key, m.state, lit.includes(m.key), store).range(lineAt(m.line).from),
+    ),
+    true,
+  );
+  const lines = marks
+    .filter((m) => lit.includes(m.key))
+    .flatMap((m) => {
+      const out = [];
+      for (let n = m.line; n <= m.toLine && n < doc.lines; n++)
+        out.push(litLine.range(lineAt(n).from));
+      return out;
+    });
+  return { markers, decos: Decoration.set(lines, true) };
+}
 
 function build(
   state: EditorState,
   data: NoteCardsData,
   carries: readonly Carry[],
-  store: SlotStore,
+  lit: readonly string[],
+  store: NoteCardStore,
 ): CardsState {
-  const doc = state.doc;
-  const out = blockMarks(doc.toString(), data, carries);
-  const lineAt = (n: number) => doc.line(Math.min(n + 1, doc.lines));
-  const markers = RangeSet.of<GutterMarker>(
-    out.marks.map((m) => new MarkMarker(m.key, store).range(lineAt(m.line).from)),
-    true,
-  );
-  const decos = Decoration.set(
-    out.marks
-      .filter((m) => m.strip)
-      .map((m) =>
-        Decoration.widget({ widget: new StripWidget(m.key, store), block: true, side: 1 }).range(
-          lineAt(m.toLine).to,
-        ),
-      ),
-    true,
-  );
-  return { data, marks: out.marks, carries: out.carries, decos, markers };
-}
-
-/**
- * The published mark when nothing the page shows changed (its lines may have
- * moved), so the page's memoised menus and strips skip a keystroke elsewhere.
- */
-function sameMark(before: BlockMark | undefined, now: BlockMark): BlockMark {
-  if (!before) return now;
-  const same =
-    before.hash === now.hash &&
-    before.row === now.row &&
-    before.status === now.status &&
-    before.changed === now.changed &&
-    before.private === now.private &&
-    before.thread === now.thread &&
-    before.waits === now.waits &&
-    before.strip === now.strip;
-  return same ? before : now;
+  const out = blockMarks(state.doc.toString(), data, carries);
+  return {
+    data,
+    marks: out.marks,
+    carries: out.carries,
+    lit,
+    ...paint(state, out.marks, lit, store),
+  };
 }
 
 /** The block whose lines hold the cursor. */
 export function markAtCursor(state: EditorState, marks: readonly BlockMark[]) {
-  const line = state.doc.lineAt(state.selection.main.head).number - 1;
-  return marks.find((m) => m.line <= line && line <= m.toLine) ?? null;
+  return blockAtLine(marks, state.doc.lineAt(state.selection.main.head).number - 1);
 }
 
-/** The state field alone (tests): what `noteCards` adds with its gutter and plugins. */
-export function noteCardsField(store: SlotStore) {
+/** The block under a point of the screen; null outside the note's lines. */
+export function markAtY(view: EditorView, marks: readonly BlockMark[], clientY: number) {
+  const y = clientY - view.documentTop;
+  if (y < 0 || y > view.contentHeight) return null;
+  const line = view.state.doc.lineAt(view.lineBlockAtHeight(y).from).number - 1;
+  return blockAtLine(marks, line);
+}
+
+/** The state field alone (tests): what `noteCards` adds with its gutter and plugin. */
+export function noteCardsField(store: NoteCardStore) {
   return StateField.define<CardsState>({
-    create: (state) => build(state, emptyCards, [], store),
+    create: (state) => build(state, emptyCards, [], [], store),
     update(value, tr) {
       let data = value.data;
-      for (const e of tr.effects) if (e.is(setNoteCards)) data = e.value;
-      if (data === value.data && !tr.docChanged) return value;
+      let lit = value.lit;
+      for (const e of tr.effects) {
+        if (e.is(setNoteCards)) data = e.value;
+        if (e.is(setLit)) lit = e.value;
+      }
+      if (data === value.data && !tr.docChanged) {
+        if (lit === value.lit) return value;
+        return { ...value, lit, ...paint(tr.state, value.marks, lit, store) };
+      }
       // Each block's range follows the change: an edited block is still itself.
       const carries = tr.docChanged
         ? value.carries.map((c) => ({
@@ -237,36 +220,108 @@ export function noteCardsField(store: SlotStore) {
             to: tr.changes.mapPos(c.to, 1),
           }))
         : value.carries;
-      return build(tr.state, data, carries, store);
+      return build(tr.state, data, carries, lit, store);
     },
     provide: (f) => EditorView.decorations.from(f, (v) => v.decos),
   });
 }
 
+/** Typed, pasted or deleted by the user (not a sync, not the chat's append). */
+const byUser = (u: ViewUpdate) =>
+  u.docChanged && u.transactions.some((tr) => tr.annotation(Transaction.userEvent) !== undefined);
+
 /** The extension, for one editor and its store. */
-export function noteCards(store: SlotStore): Extension {
+export function noteCards(store: NoteCardStore): Extension {
   const field = noteCardsField(store);
-  const publish = ViewPlugin.define((view) => {
-    const show = () => {
-      // CodeMirror hides its gutters from assistive tech; this one holds the menus.
-      view.dom.querySelector(".cm-gutters")?.removeAttribute("aria-hidden");
-    };
-    store.focusEditor = () => view.focus();
+  const hover = ViewPlugin.define((view) => {
+    let destroyed = false;
     let published = new Map<string, BlockMark>();
-    const publishMarks = (marks: readonly BlockMark[]) => {
-      published = new Map(marks.map((m) => [m.key, sameMark(published.get(m.key), m)]));
+    const marks = () => view.state.field(field).marks;
+    const publish = () => {
+      published = new Map(marks().map((m) => [m.key, sameMark(published.get(m.key), m)]));
       store.setMarks(published);
     };
-    publishMarks(view.state.field(field).marks);
+    // CodeMirror hides its gutters from assistive tech; this one holds the marks' buttons.
+    const show = () => view.dom.querySelector(".cm-gutters")?.removeAttribute("aria-hidden");
+
+    /** Where the open card's block is, for its anchor. */
+    const measure = () => {
+      const key = store.shown;
+      if (!key) return store.setAnchor(null);
+      view.requestMeasure<Anchor | null>({
+        key: measure,
+        read(v) {
+          const m = v.state.field(field).marks.find((x) => x.key === key);
+          if (!m) return null;
+          const doc = v.state.doc;
+          const first = doc.line(Math.min(m.line + 1, doc.lines));
+          const last = doc.line(Math.min(m.toLine + 1, doc.lines));
+          const top = v.lineBlockAt(first.from).top;
+          const bottom = v.lineBlockAt(last.to).bottom;
+          const box = v.dom.getBoundingClientRect();
+          const text = v.contentDOM.getBoundingClientRect();
+          return {
+            key,
+            top: v.documentTop - box.top + top,
+            left: text.left - box.left,
+            width: text.width,
+            height: bottom - top,
+            side: window.innerWidth - text.right >= CARD_ROOM ? "right" : "bottom",
+          };
+        },
+        write: (a) => store.setAnchor(a),
+      });
+    };
+
+    const onMove = (e: MouseEvent) =>
+      store.pointerAt(markAtY(view, marks(), e.clientY)?.key ?? null);
+    const onLeave = () => store.pointerAt(null);
+    view.dom.addEventListener("mousemove", onMove);
+    view.dom.addEventListener("mouseleave", onLeave);
+    window.addEventListener("resize", measure);
+
+    store.onLit = (keys) =>
+      // The store may change inside an editor update (typing closes a card): dispatch after it.
+      queueMicrotask(() => {
+        if (!destroyed) view.dispatch({ effects: setLit.of(keys) });
+      });
+    store.focusEditor = () => view.focus();
+    // Store callbacks may run inside an editor update (a mark first published there):
+    // never dispatch from them directly.
+    store.reveal = (key) =>
+      queueMicrotask(() => {
+        if (destroyed) return;
+        const m = marks().find((x) => x.key === key);
+        if (!m) return;
+        const pos = view.state.doc.line(Math.min(m.line + 1, view.state.doc.lines)).from;
+        view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+      });
+    publish();
     show();
     return {
       update(u) {
         const now = u.state.field(field);
-        if (now !== u.startState.field(field)) publishMarks(now.marks);
+        if (now.marks !== u.startState.field(field).marks) publish();
+        if (byUser(u)) store.typed();
         show();
+        if (
+          u.docChanged ||
+          u.geometryChanged ||
+          u.transactions.some((tr) => tr.effects.some((e) => e.is(setLit) || e.is(setNoteCards)))
+        )
+          measure();
       },
       destroy() {
+        destroyed = true;
+        view.dom.removeEventListener("mousemove", onMove);
+        view.dom.removeEventListener("mouseleave", onLeave);
+        window.removeEventListener("resize", measure);
+        store.onLit = () => undefined;
         store.focusEditor = () => undefined;
+        store.reveal = () => undefined;
+        // The card belongs to this editor (this day): it goes with it.
+        store.pointerAt(null);
+        store.unpin();
       },
     };
   });
@@ -277,7 +332,7 @@ export function noteCards(store: SlotStore): Extension {
       markers: (view) => view.state.field(field).markers,
       initialSpacer: () => new SpacerMarker(),
     }),
-    publish,
+    hover,
     Prec.high(
       keymap.of([
         {
@@ -285,7 +340,7 @@ export function noteCards(store: SlotStore): Extension {
           run: (view) => {
             const m = markAtCursor(view.state, view.state.field(field).marks);
             if (!m) return false;
-            store.open(m.key);
+            store.pinFromKeyboard(m.key);
             return true;
           },
         },

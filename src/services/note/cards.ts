@@ -1,8 +1,8 @@
 /**
  * What the Note page shows on the note's blocks (FR-20.7, D67): the day's
  * block rows (hash, status, thread, work item) and, for the threads among
- * them, a summary for the strip under the block. Plain queries: no model
- * call, nothing sent anywhere.
+ * them, a summary for the block's mark and card; the mark's state. Plain
+ * queries and logic: no model call, nothing sent anywhere.
  */
 import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
@@ -20,7 +20,7 @@ export type BlockCard = {
   workItemName: string | null;
 };
 
-/** What the strip under a block says of its thread. */
+/** What a block's mark and card say of its thread. */
 export type ThreadSummary = {
   id: string;
   status: (typeof inboxItems.$inferSelect)["status"];
@@ -107,22 +107,90 @@ export const cardCount = (rows: readonly { bundleId: string | null }[]) => {
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /**
- * The strip's badge (D67): what waits in the thread, else how it ended:
- * "2 cards waiting", "1 question", "approved", "dismissed" or "nothing left";
- * a turn that did not go through and a failed execution say so.
+ * The mark's state (D67): what the margin shows on a block's first line and
+ * what its card holds.
  */
-export function stripBadge(t: ThreadSummary): string {
-  if (t.status === "dismissed") return "dismissed";
-  const waits: string[] = [];
-  if (t.waiting) waits.push(`${count(t.waiting, "card")} waiting`);
-  if (t.questions) waits.push(count(t.questions, "question"));
-  if (waits.length) return waits.join(", ");
-  if (t.error && !t.approved && !t.failed) return "did not go through";
-  if (t.failed) return `${t.failed} failed`;
-  if (t.approved) return "approved";
-  return "nothing left";
+export type MarkState =
+  /** Cards wait in its thread (the count); questions may wait too. */
+  | { kind: "waiting"; count: number; questions: number }
+  /** Only questions wait. */
+  | { kind: "question"; count: number }
+  /** Everything decided and nothing failed: approved, dismissed, or nothing left. */
+  | { kind: "done"; ended: "approved" | "dismissed" | "nothing left" }
+  /** Its thread's last turn did not go through (`turn`), or approved cards failed to run. */
+  | { kind: "failed"; turn: boolean; count: number }
+  /** Noted on a work item. */
+  | { kind: "noted" }
+  /** Not read yet (new, or changed since it was read), and a reading will come. */
+  | { kind: "unread" }
+  /** Not read, and no reading will come (an earlier day, reading off): Ask only. */
+  | { kind: "not_read" }
+  /** Read; the reading left it alone. */
+  | { kind: "alone" }
+  /** Under the private heading: never sent. */
+  | { kind: "private" }
+  /** It has a thread whose summary is not loaded yet. */
+  | { kind: "loading" };
+
+/**
+ * What a thread's summary gives the mark: a last turn that did not go through
+ * first (the error stays until a turn succeeds), then what waits, else how it
+ * ended.
+ */
+export function threadMark(t: ThreadSummary): MarkState {
+  if (t.status === "dismissed") return { kind: "done", ended: "dismissed" };
+  if (t.error) return { kind: "failed", turn: true, count: t.failed };
+  if (t.waiting) return { kind: "waiting", count: t.waiting, questions: t.questions };
+  if (t.questions) return { kind: "question", count: t.questions };
+  if (t.failed) return { kind: "failed", turn: false, count: t.failed };
+  if (t.approved) return { kind: "done", ended: "approved" };
+  return { kind: "done", ended: "nothing left" };
 }
 
-/** Whether a card or a question waits for the user. */
-export const stripWaits = (t: ThreadSummary) =>
-  t.status !== "dismissed" && t.waiting + t.questions > 0;
+/** A block's mark state, from its row (or none), its words and its thread. */
+export function markState(b: {
+  /** Its row's status, or "unread" without one. */
+  status: BlockStatus | "unread";
+  /** Its words changed since its row was read. */
+  changed: boolean;
+  /** Under the private heading now. */
+  private: boolean;
+  /** Its conversation, if any. */
+  threadId: string | null;
+  /** That conversation's summary; undefined while it loads. */
+  thread: ThreadSummary | undefined;
+  /** A reading will come (today, with reading on). */
+  reads: boolean;
+}): MarkState {
+  if (b.private || b.status === "private") return { kind: "private" };
+  if (b.status === "unread" || b.changed) return { kind: b.reads ? "unread" : "not_read" };
+  if (b.threadId) return b.thread ? threadMark(b.thread) : { kind: "loading" };
+  if (b.status === "context") return { kind: "noted" };
+  return { kind: "alone" };
+}
+
+/** The mark's words, for its label: "2 cards waiting", "1 question", "approved"... */
+export function markLabel(m: MarkState): string {
+  switch (m.kind) {
+    case "waiting":
+      return `${count(m.count, "card")} waiting${m.questions ? `, ${count(m.questions, "question")}` : ""}`;
+    case "question":
+      return count(m.count, "question");
+    case "done":
+      return m.ended;
+    case "failed":
+      return m.turn ? "did not go through" : `${m.count} failed`;
+    case "noted":
+      return "noted on a work item";
+    case "unread":
+      return "not read yet";
+    case "not_read":
+      return "not read";
+    case "alone":
+      return "nothing to do";
+    case "private":
+      return "private, never sent";
+    case "loading":
+      return "reading...";
+  }
+}

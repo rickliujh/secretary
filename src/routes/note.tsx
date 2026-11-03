@@ -2,19 +2,16 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { BookOpenCheck, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { toastError } from "@/app/errors";
 import { useSettings } from "@/app/hooks";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
-import { useInvalidateAfterDecision } from "@/components/inbox/use-inbox";
+import { BlockCardLayer } from "@/components/note/block-card";
 import { type NoteCardsData, threadOf } from "@/components/note/block-marks";
-import { MENU_SHORTCUT } from "@/components/note/block-strip";
-import { SlotStore } from "@/components/note/cards-extension";
-import { CardsLayer } from "@/components/note/cards-layer";
+import { NoteCardStore } from "@/components/note/card-store";
 import { NoteEditor } from "@/components/note/note-editor";
-import { ThreadSheet } from "@/components/note/thread-sheet";
 import { useNoteEditor } from "@/components/note/use-note";
 import { PageHeader } from "@/components/page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -22,14 +19,14 @@ import { Button } from "@/components/ui/button";
 import { isRealDate, localDate } from "@/lib/dates";
 import { relativeTime, shortDate } from "@/lib/time";
 import { DailyNote, type SyncStatus } from "@/services/note";
-import { blocksOf, stripWaits, threadSummaries } from "@/services/note/cards";
+import { blocksOf, threadSummaries } from "@/services/note/cards";
 import { dayBefore } from "@/services/note/queries";
 import { describeRead } from "@/services/note/read";
 
 export const Route = createFileRoute("/note")({
   validateSearch: z.object({
     date: z.string().optional(),
-    /** A conversation of the note, open in the sheet (D67). */
+    /** A conversation of the note: its block's card is pinned and scrolled to (D67). */
     thread: z.string().optional(),
   }),
   component: NotePage,
@@ -59,9 +56,10 @@ function syncLine(vaultName: string | null, status: SyncStatus | null): string {
  * Secretary, the vault's own daily note is the file of record. The secretary
  * reads what is new at each work pass, a minute after typing stops, and on
  * Read now; the line under the note says what the last reading did. Each
- * read block carries a mark in the margin, a block that led to a conversation
- * a strip under it, and the conversation opens in a sheet on the page (D67).
- * Showing the page makes no model call; only Ask and the readings do.
+ * block carries a small mark in the margin, and hovering it opens its card
+ * beside the line (D67); the hover and the pin live in the card store and the
+ * card's own component, never in this page's render. Showing the page makes
+ * no model call; only Ask, Read this now and the readings do.
  */
 function NotePage() {
   const { date: asked, thread: openThread } = Route.useSearch();
@@ -102,7 +100,7 @@ function NotePage() {
     queryKey: queryKeys.noteThreads(threadIds),
     queryFn: ({ signal }) => run(threadSummaries(threadIds), signal),
     enabled: threadIds.length > 0,
-    // A new thread on the page keeps the other strips while the summaries load.
+    // A new thread on the page keeps the other marks while the summaries load.
     placeholderData: (previous) => previous,
   });
   const privateHeading = cfg?.privateHeading ?? "Private";
@@ -110,47 +108,32 @@ function NotePage() {
     () => new Map((threads.data ?? []).map((t) => [t.id, t])),
     [threads.data],
   );
+  const reads = editable && !!cfg?.enabled;
   const cards = useMemo<NoteCardsData>(
     () => ({
       privateHeading,
       rows: new Map((blocks.data ?? []).map((b) => [b.hash, b])),
-      waiting: new Set([...byThread.values()].filter(stripWaits).map((t) => t.id)),
+      threads: byThread,
+      reads,
     }),
-    [privateHeading, blocks.data, byThread],
+    [privateHeading, blocks.data, byThread, reads],
   );
-  // The editor's nodes for marks and strips; the app's components go in by portal.
-  const [slots] = useState(() => new SlotStore());
-  const openSheet = useCallback(
-    (id: string | null) =>
-      void navigate({ search: (prev) => ({ ...prev, thread: id ?? undefined }) }),
-    [navigate],
-  );
-  const openThreadSheet = useCallback((id: string) => openSheet(id), [openSheet]);
-  const invalidate = useInvalidateAfterDecision();
-  const flush = useRef(editor.flush);
-  flush.current = editor.flush;
-  const ask = useMutation({
-    mutationFn: async (hash: string) => {
-      // The stored note is what Ask reads: save what is on screen first.
-      if (editable) await flush.current();
-      return run(Effect.flatMap(DailyNote, (n) => n.ask(date, hash)));
-    },
-    onSuccess: (r) => openSheet(r.inboxItemId),
-    onError: (e) => toastError(e),
-    onSettled: () => invalidate(),
-  });
-  // One Ask at a time: the menus offer none while one runs.
-  const askMutate = ask.mutate;
-  const askingHash = ask.isPending ? (ask.variables ?? null) : null;
-  const askBlock = useCallback(
-    (hash: string) => {
-      if (!askingHash) askMutate(hash);
-    },
-    [askMutate, askingHash],
+  // The hover cards: the block under the pointer, the open card, its anchor (D67).
+  const [store] = useState(() => new NoteCardStore());
+  const flushRef = useRef(editor.flush);
+  flushRef.current = editor.flush;
+  const flush = useCallback(() => flushRef.current(), []);
+  const readMutate = read.mutate;
+  const readNow = useCallback(() => readMutate(), [readMutate]);
+  usePinThread(
+    store,
+    openThread,
+    blocks.isSuccess && editor.text !== null,
+    () => void navigate({ search: (prev) => ({ ...prev, thread: undefined }), replace: true }),
   );
 
   return (
-    <div className="mx-auto flex h-full max-w-4xl flex-col gap-3">
+    <div className="mx-auto flex h-full max-w-5xl flex-col gap-3">
       <PageHeader
         title="Note"
         description="Your daily note: write anything. The secretary reads what is new and turns what needs doing into cards in the Inbox."
@@ -219,7 +202,7 @@ function NotePage() {
         <NoteEditor
           key={date}
           label={`Note for ${date}`}
-          className="flex-1"
+          className="w-full max-w-[44rem] flex-1"
           value={editor.text}
           readOnly={!editable}
           placeholder={
@@ -229,21 +212,21 @@ function NotePage() {
           }
           onChange={editor.onChange}
           cards={cards}
-          slots={slots}
+          store={store}
+          overlay={
+            <BlockCardLayer
+              store={store}
+              date={date}
+              editable={editable}
+              reads={reads}
+              threads={byThread}
+              flush={flush}
+              onReadNow={readNow}
+              reading={read.isPending}
+            />
+          }
         />
       )}
-      <CardsLayer
-        slots={slots}
-        threads={byThread}
-        onOpen={openThreadSheet}
-        onAsk={askBlock}
-        askingHash={askingHash}
-      />
-      <p className="text-xs text-muted-foreground">
-        The mark beside a line says what the secretary did with it; {MENU_SHORTCUT} on a line opens
-        its menu.
-      </p>
-      <ThreadSheet id={openThread ?? null} onClose={() => openSheet(null)} />
       {editable && (
         <p className="text-sm text-muted-foreground">
           {!cfg?.enabled ? (
@@ -264,3 +247,52 @@ function NotePage() {
     </div>
   );
 }
+
+/**
+ * `/note?thread=<id>` (the Inbox's "Note · <date>" badge): pins the card of
+ * that thread's block and scrolls to it once the editor has its marks, then
+ * `done` drops the parameter, so closing the card is not undone. When the
+ * day's blocks are loaded (`ready`) and no block shows the thread within a
+ * moment (its line was edited away), the parameter is dropped too, so a mark
+ * appearing later does not pin out of the blue. The store may call its
+ * listeners inside an editor update, so the pin runs after it.
+ */
+function usePinThread(
+  store: NoteCardStore,
+  thread: string | undefined,
+  ready: boolean,
+  done: () => void,
+) {
+  const doneRef = useRef(done);
+  doneRef.current = done;
+  useEffect(() => {
+    if (!thread) return;
+    let over = false;
+    let queued = false;
+    const finish = () => {
+      over = true;
+      unsubscribe();
+      clearTimeout(giveUp);
+      doneRef.current();
+    };
+    const tryPin = () => {
+      if (over || queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        if (!over && store.pinThread(thread)) finish();
+      });
+    };
+    const unsubscribe = store.subscribe(tryPin);
+    const giveUp = ready ? setTimeout(() => !over && finish(), PIN_GIVE_UP_MS) : undefined;
+    tryPin();
+    return () => {
+      over = true;
+      unsubscribe();
+      clearTimeout(giveUp);
+    };
+  }, [store, thread, ready]);
+}
+
+/** How long a `?thread=` waits for its block once the day's blocks are loaded. */
+const PIN_GIVE_UP_MS = 2000;
