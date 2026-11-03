@@ -570,6 +570,52 @@ Phase 26, FR-19.8 Phase 27 and FR-19.9 Phase 28. The picture is
   A sync that shows PLAT-812 done records the event and changes the item's
   current step. A sync with no change makes no model call.
 
+### FR-20 The daily note (D65)
+
+Approved 2026-11-02. The user's words: "a daily note that I can put on secretary,
+it's loose format and can include everything, secretary checks it once in a while
+and makes an action out of it", and "a page but in sync with obsidian daily note
+if data source is connected". The note is where the user already thinks; the
+secretary reads it instead of asking the user to paste from it. The hard rules do
+not change: every Jira write is still a proposal the user approves, and code
+decides what is read and when. FR-20 is Phase 29.
+
+- FR-20.1 (Must) The page. A Note page holds one free-form markdown note per
+  local day, saved as the user types with no model call. Earlier days stay
+  readable. The note may hold anything; nothing in it is sent anywhere until the
+  secretary reads it (FR-20.3).
+- FR-20.2 (Must) In sync with Obsidian. When a data source (FR-12, D41) is
+  connected and chosen for the note, the vault's own daily note is the file of
+  record: the page shows it and edits it, and lines written in Obsidian appear on
+  the page. Edits made in both places since the last sync are merged line by line;
+  nothing either side wrote is lost. Without a chosen vault the page alone is the
+  record; choosing one later merges the two.
+- FR-20.3 (Must) The reading. Once in a while (at each work pass, shortly after the
+  user stops typing, and on request) the secretary reads what is new in today's
+  note, block by block, and decides for each block whether it leads to an action
+  (then it is handled like a message the user typed: proposals in an Inbox thread
+  that names the note), is a remark about a piece of their work (then it lands on
+  that work item's timeline as the user's words), or is nothing for the secretary
+  (then it is left alone and never read again). The same block is never proposed
+  twice; a block the user edits before deciding its cards revises them instead of
+  adding more. Blocks under a heading the user names as private are never sent to
+  a model.
+- FR-20.4 (Should) Checkboxes. A `- [ ]` line is an ask for the user like any
+  other block; ticking a line whose ticket was created from it proposes closing
+  that ticket.
+- FR-20.5 (Should) Chat. "Note this: …" appends to today's note; "what's in my
+  note?" reads it.
+- AC (Phase 29, against the mock Jira): with a wait on Sarah for the cert open on
+  PAY-12, writing "PAY-12: Sarah says the cert is Friday now" in the note and
+  letting the secretary read it gives one Update wait card in a thread marked as
+  from the note, and no second card after a second read. "Lunch with Mia" gives
+  nothing and is not sent again. "- [ ] send Dana the Q3 numbers" gives one small
+  ask card; editing that line before approval revises the same thread; ticking it
+  after the ticket exists proposes closing the ticket. A line under a "Private"
+  heading reaches no model call. With a fake vault connected, a line added on the
+  file side appears on the page, a line typed on the page appears in the file, and
+  edits on both sides since the last sync are both kept.
+
 ## 5. Non-functional requirements
 
 - NFR-1 Works offline for browsing cached data, drafting from cache and editing

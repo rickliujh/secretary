@@ -2427,3 +2427,92 @@ Why
   process" came back as one Epic whose description was the user's sentence.
   The prompt rewarded one ticket and said nothing about what a description
   holds or how an epic and its steps relate.
+
+## Phase 29: The daily note (2026-11-02)
+
+Built
+- Migration 0021: `daily_notes` (one note per local day, with the merge
+  `base`, `synced_at` and `vault_source_id`) and `daily_note_blocks` (what
+  was read, unique on day and hash); both in the export. `inbox_items.source`
+  gains `note`.
+- The page `/note` ("Note" after Today, lucide `NotebookPen`): today's note
+  in a shadcn `textarea`, saved 500 ms after the last keystroke with no model
+  call; day arrows, earlier days read-only; the sync line; Read now; one line
+  on what the last reading did ("Read at 10:42: 1 card, 1 note on <item>,
+  2 left alone"). Webview timers only: the reading a minute after typing
+  stops, the vault on open, on focus and every 30 s while the page is open.
+- In sync with Obsidian: Rust `daily_note_read` / `daily_note_write` find
+  the vault's daily note through the read-only `vault info=path` and
+  `daily:path` (added to the allowlist with the `info` key), check it is a
+  `.md` file inside the vault (links resolved), and write it through a
+  temporary file only when it still holds the text last read
+  (compare-and-swap). The webview merges page and file against `base` with
+  `node-diff3` (`services/note/merge.ts`); a write that finds the file
+  changed reads again and merges once more.
+- The reading (`services/note/read.ts`): blocks split and hashed in code
+  (`blocks.ts`); today's and yesterday's new blocks, at most 30, oldest
+  first, in one `note_triage` call (fast tier, flat schema, enums of block
+  numbers and candidate item ids); act goes to `Intake.triage` with source
+  `note` (the user's own words; `>` lines as pasted input), context records a
+  `note` event on the item, skip is recorded. Private blocks are stored and
+  never sent. A block edited while its thread has undecided proposals is sent
+  as `Intake.reply` "The note now says: «...»"; a ticked `- [ ]` whose ticket
+  exists gets a `transition_issue` card in its thread. No new blocks, no call.
+- `DailyNote` service (`load`, `save`, `append`, `sync`, `read`,
+  `lastRead`); saves and syncs take turns, readings take turns.
+- The work scheduler reads the note after each pass; the chat gains
+  `daily_note` (read, append) and a line in its prompt; Settings > Secretary
+  gains the Daily note card (the switch, the vault, the private heading);
+  note threads show "Note · <date>" linking back to the note.
+- Tests: blocks, merge, the prompt and its validation, sync over a fake
+  vault file (first connect, each side, both, a changed file at write, a
+  missing note, unreachable), the reading on the db (act, skip, private,
+  `>` quotes, revise, close, the 30-block cap, a failed call, context), the
+  chat tool, Rust path checks and compare-and-swap, and the mock-Jira AC.
+  Live eval: `src/test/eval/note-eval.live.test.ts` over `note-cases.ts`.
+
+Departures
+- The pass's note reading runs in the webview scheduler after `runWorkPass`,
+  not inside it, so the pass keeps its dependencies; the scheduler now also
+  runs while the work model is off when the note is on (the note only).
+- "Note · <date>" lives in the first message's `noteDate`; no new column.
+- A `>` quote makes the block's input pasted (untrusted) and the user's own
+  lines its instruction, so such a thread is not the user's own words.
+- The page says "conflict" only when both sides changed the same lines;
+  lines both only added at one place are kept, the file's first, quietly.
+- `note_triage` ignores an item given with act or skip instead of asking
+  for a repair.
+- A changed block is matched to the gone one at its position, else to the
+  most alike gone block (word overlap at least one half).
+- Ticking while the ticket's create waits for approval is checked again at
+  the next reading; the close status is the project's most used done status
+  in the cache ("Done" when none), which the Executor checks on approval.
+- A block moved out of the private section is read as new; a failed
+  `note_triage` call records nothing, so its blocks are read again.
+- The last reading's result is kept in `sync_state` `note.lastRead`.
+
+Known limits
+- Not verified in the running app or against a real Obsidian: the page, the
+  settings card, the focus and poll timers and the Tauri commands are
+  covered by typecheck, build, Rust unit tests and the service tests only.
+  `vault info=path` and `daily:path` are taken as the spec names them.
+- The live eval was not run (no key in this environment).
+- Only today's note syncs with the vault; yesterday's is read from the page.
+
+Review fixes
+- A save is a compare-and-swap on the body the page last loaded; when a
+  sync or the chat changed the note since, the page's text is merged onto it
+  and shown, so a keystroke after a reading no longer deletes a line written
+  in Obsidian.
+- The daily-note commands take `launch`: only opening the page and Read now
+  start Obsidian; the poll, focus and the passes show "Obsidian is not
+  running" instead.
+- Ticking a line in a dismissed thread does nothing.
+- The chat's note read leaves the private sections out.
+- An unclosed code fence no longer pulls a private section into a sent
+  block; a leading `---` over non-YAML lines is a rule, not frontmatter.
+- The merge keeps the page's blank lines and separates the file's lines
+  from the page's with one, so paragraphs stay their own blocks.
+- A pass reads the note only after a minute without typing.
+- A page left open past midnight moves to the new day.
+- Blocks are clipped to 4000 characters in the `note_triage` prompt.
