@@ -15,12 +15,14 @@ export const INTENT_LABELS: Record<MessageIntent, string> = {
   thank_you: "Thank you",
 };
 
-export const SOURCE_LABELS: Record<Source, string> = {
+export const SOURCE_LABELS: Record<Source | "secretary", string> = {
   teams: "Teams",
   email: "Email",
   meeting: "Meeting notes",
   typed: "Typed",
   other: "Other",
+  /** An outcome card (Phase 25). */
+  secretary: "Secretary",
 };
 
 export const CHANNEL_LABELS: Record<DraftChannel, string> = {

@@ -17,7 +17,7 @@ const scheduler = new PassScheduler(async () => {
   if (!enabled) return;
   try {
     const r = await run(runWorkPass());
-    if (r.created || r.attached || r.calls || r.asked) {
+    if (r.created || r.attached || r.calls || r.asked || r.offered) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
       void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
     }

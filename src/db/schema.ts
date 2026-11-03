@@ -10,7 +10,8 @@
  * Raw `db.all(sql...)` returns positional arrays through the proxy; prefer a
  * typed `select` (for FTS: `rowid IN (SELECT rowid FROM ..._fts WHERE ... MATCH ?)`).
  */
-import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const bool = (name: string) => integer(name, { mode: "boolean" });
 
@@ -256,6 +257,11 @@ export const communications = sqliteTable(
     }),
     /** What the message should say: the request from the composer, a proposal or a chase (D24). */
     notesMd: text("notes_md"),
+    /**
+     * Someone else's words the message answers (Phase 25), untrusted: the draft
+     * prompt shows them in an untrusted block, apart from the request.
+     */
+    quoteMd: text("quote_md"),
     /** Generated `{ short, standard }` bodies; null until the first generation. */
     variants: text("variants", { mode: "json" }).$type<{ short: string; standard: string }>(),
     /** Regeneration instructions so far, oldest first. */
@@ -300,7 +306,10 @@ export const inboxItems = sqliteTable(
   "inbox_items",
   {
     id: text("id").primaryKey(),
-    source: text("source", { enum: ["teams", "email", "meeting", "typed", "other"] }).notNull(),
+    /** `secretary`: an outcome card the consequence rules made (D61, Phase 25), not input. */
+    source: text("source", {
+      enum: ["teams", "email", "meeting", "typed", "other", "secretary"],
+    }).notNull(),
     senderPersonId: text("sender_person_id").references(() => people.id, {
       onDelete: "set null",
     }),
@@ -317,10 +326,19 @@ export const inboxItems = sqliteTable(
      * about that item, not input to classify. Null for every other thread.
      */
     workItemId: text("work_item_id"),
+    /**
+     * An outcome card's situation (Phase 25): `<rule>:<work_item_id>:<fingerprint
+     * of the facts>`, so the same situation is offered once and a changed fact
+     * makes a new key. Null for every other thread.
+     */
+    situationKey: text("situation_key"),
   },
   (t) => [
     index("inbox_items_received_idx").on(t.receivedAt),
     index("inbox_items_work_idx").on(t.workItemId),
+    uniqueIndex("inbox_items_situation_idx")
+      .on(t.situationKey)
+      .where(sql`${t.situationKey} IS NOT NULL`),
   ],
 );
 
@@ -399,6 +417,12 @@ export const proposals = sqliteTable(
     result: text("result", { mode: "json" }).$type<unknown>(),
     createdAt: text("created_at").notNull(),
     decidedAt: text("decided_at"),
+    /**
+     * A step of an outcome card (Phase 25): the card's inbox item id, and the
+     * rule that made it. Steps run in `seq` order through `approveBundle`.
+     */
+    bundleId: text("bundle_id"),
+    bundleKind: text("bundle_kind"),
   },
   (t) => [
     index("proposals_inbox_idx").on(t.inboxItemId),

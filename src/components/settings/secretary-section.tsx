@@ -16,7 +16,13 @@ import {
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { type AppSettings, WorkSettingsSchema } from "@/services/settings/schema";
+import {
+  type AppSettings,
+  RULE_NAMES,
+  type RuleName,
+  WorkSettingsSchema,
+} from "@/services/settings/schema";
+import { RULE_LABELS } from "@/services/work/rules";
 
 const whole = (schema: z.ZodNumber, message: string) =>
   z
@@ -40,8 +46,65 @@ const toValues = (s: AppSettings): Values => ({
   groupSizeCap: String(s.work.groupSizeCap),
 });
 
-/** Settings > Secretary (D61): the work model's switch and budgets. */
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * The consequence rules' switches (FR-19.6, Phase 25): each offers outcome
+ * cards when its fact changes. A switch saves at once.
+ */
+function RuleSwitches() {
+  const { data: settings } = useSettings();
+  const update = useUpdateSettings();
+  const rules = settings?.secretary.rules;
+  const set = (rule: RuleName, on: boolean) =>
+    update.mutate((s) => ({
+      ...s,
+      secretary: { ...s.secretary, rules: { ...s.secretary.rules, [rule]: on } },
+    }));
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Follow-ups</CardTitle>
+        <CardDescription>
+          When a fact changes, the secretary works out what else is now out of date and offers the
+          follow-ups as one card in the Inbox and on Today, each step one you can leave out, with
+          one Approve. Nothing runs until you approve it. A kind you dismiss twice on the same work
+          item goes quiet there; ask for it again from the item's Work tab.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FieldGroup>
+          {RULE_NAMES.map((rule) => (
+            <Field key={rule} orientation="horizontal">
+              <Switch
+                id={`rule-${rule}`}
+                checked={rules?.[rule] ?? true}
+                disabled={!rules || update.isPending || settings?.work.enabled === false}
+                onCheckedChange={(on) => set(rule, on)}
+              />
+              <div className="flex flex-col gap-0.5">
+                <FieldLabel htmlFor={`rule-${rule}`}>{capital(RULE_LABELS[rule].name)}</FieldLabel>
+                <FieldDescription>{RULE_LABELS[rule].offers}</FieldDescription>
+              </div>
+            </Field>
+          ))}
+        </FieldGroup>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Settings > Secretary (D61): the work model's switch and budgets, and the follow-up rules. */
 export function SecretarySection() {
+  return (
+    <div className="flex flex-col gap-6">
+      <WorkCard />
+      <RuleSwitches />
+    </div>
+  );
+}
+
+function WorkCard() {
   const { data: settings } = useSettings();
   const update = useUpdateSettings();
   const form = useForm<Values>({

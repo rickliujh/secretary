@@ -298,6 +298,13 @@ function PayloadView({
             )}
           </Row>
           <Row label="Say">{p.notes}</Row>
+          <Row label="Their words">
+            {p.quote && (
+              <blockquote className="border-l-2 pl-2 text-muted-foreground italic">
+                {p.quote}
+              </blockquote>
+            )}
+          </Row>
         </dl>
       );
     case "needs_clarification":
@@ -321,8 +328,20 @@ function Confidence({ value }: { value: number | null }) {
   );
 }
 
-export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lookups: Lookups }) {
-  const { approve, reject } = useDecisions();
+export function ProposalCard({
+  proposal,
+  lookups,
+  inBundle = false,
+}: {
+  proposal: ProposalView;
+  lookups: Lookups;
+  /**
+   * A step of an outcome card (Phase 25): approved with the card, so the card
+   * here only shows and edits it; an edit is saved on the step, not approved.
+   */
+  inBundle?: boolean;
+}) {
+  const { approve, reject, saveEdit } = useDecisions();
   const [editing, setEditing] = useState(false);
   const payload = proposal.editedPayload ?? proposal.payload;
   const result = proposal.result as {
@@ -348,8 +367,9 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
     !!proposal.editedPayload &&
     JSON.stringify(withoutCodeFields(proposal.editedPayload)) !==
       JSON.stringify(withoutCodeFields(proposal.payload));
-  const canApprove = pending || proposal.status === "failed";
-  const canEdit = canApprove && isEditable(payload);
+  const canDecide = pending || proposal.status === "failed";
+  const canApprove = canDecide && !inBundle;
+  const canEdit = (inBundle ? pending : canDecide) && isEditable(payload);
   // Dependency proposals are one line with one approve button (D46).
   const compact = isCompact(payload);
   const [expanded, setExpanded] = useState(false);
@@ -414,7 +434,7 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
   const revokeControl = <RevokeControl proposal={proposal} />;
   // A create's Sprint row (D57): the switch while it can run, what happened once it ran.
   const sprintRow =
-    payload.kind !== "create_issue" ? undefined : canApprove ? (
+    payload.kind !== "create_issue" ? undefined : canDecide ? (
       <SprintSwitch proposal={proposal} layout="card" />
     ) : proposal.status === "executed" && !payload.parent && !/^epic$/i.test(payload.issueType) ? (
       <Row label="Sprint">{sprintOutcome(proposal.result)}</Row>
@@ -461,7 +481,7 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
         onKeyDown={(e) => {
           if (e.target !== e.currentTarget || busy) return;
           if (e.key === "a" && canApprove) approve.mutate({ id: proposal.id });
-          if (e.key === "r" && pending) reject.mutate(proposal.id);
+          if (e.key === "r" && pending && !inBundle) reject.mutate(proposal.id);
         }}
       >
         <div className="flex items-center gap-2">
@@ -499,7 +519,7 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget || busy) return;
         if (e.key === "a" && canApprove) approve.mutate({ id: proposal.id });
-        if (e.key === "r" && pending) reject.mutate(proposal.id);
+        if (e.key === "r" && pending && !inBundle) reject.mutate(proposal.id);
         if (e.key === "e" && canEdit) setEditing(true);
       }}
     >
@@ -526,6 +546,13 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
       {outcome}
       {proposal.status === "executed" && proposal.payload.kind !== "needs_clarification" && (
         <footer className="flex gap-2">{revokeControl}</footer>
+      )}
+      {inBundle && canEdit && (
+        <footer className="flex gap-2">
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing(true)}>
+            <Pencil /> Edit
+          </Button>
+        </footer>
       )}
       {canApprove && (
         <footer className="flex gap-2">
@@ -558,7 +585,17 @@ export function ProposalCard({ proposal, lookups }: { proposal: ProposalView; lo
         open={editing}
         onOpenChange={setEditing}
         busy={busy}
+        {...(inBundle ? { submitLabel: "Save changes" } : {})}
         onApprove={(changed) => {
+          // A step of an outcome card keeps the edit; the card's Approve runs it.
+          if (inBundle) {
+            saveEdit.mutate({
+              id: proposal.id,
+              edited: changed,
+              inboxItemId: proposal.inboxItemId,
+            });
+            return;
+          }
           // The dialog's form does not hold the sprint switch; carry its current value.
           const current = pendingEdit ?? payload;
           approve.mutate({

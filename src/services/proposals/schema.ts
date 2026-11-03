@@ -164,6 +164,12 @@ export const UpdateDependency = z
     channel: z.enum(FOLLOWUP_CHANNELS).default("other"),
     issueKey: IssueKey.nullable().default(null),
     label: z.string().nullable().default(null),
+    /**
+     * False on an outcome card's planned follow-up (Phase 25): only the date is
+     * set, no timeline entry, since nothing was said or sent yet; sending the
+     * chase draft logs the follow-up.
+     */
+    logged: z.boolean().default(true),
   })
   .refine((p) => p.action !== "reschedule" || !!p.expectedAt || !!p.nextFollowupAt, {
     message: "A reschedule needs a new expected date or follow-up date",
@@ -247,6 +253,14 @@ export const DraftMessage = z.object({
   recipientTeamId: z.string().nullable().default(null),
   issueKeys: z.array(IssueRef).default([]),
   notes: z.string().default(""),
+  /** The wait it chases (Phase 25): marking the draft sent logs the follow-up on it. */
+  dependencyId: z.string().min(1).nullable().default(null),
+  /**
+   * Someone else's words the message answers (Phase 25: a teammate's comment).
+   * Untrusted: the draft prompt shows them in an untrusted block, never as the
+   * user's request (`notes`).
+   */
+  quote: z.string().max(2000).nullable().default(null),
 });
 
 export const NeedsClarification = z.object({

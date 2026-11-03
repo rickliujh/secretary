@@ -173,6 +173,33 @@ export const WorkSettingsSchema = z.object({
 });
 export type WorkSettings = z.infer<typeof WorkSettingsSchema>;
 
+/**
+ * The consequence rules (FR-19.6, D61, Phase 25), in priority order: when a
+ * fact changes, the follow-ups they offer as one outcome card per situation.
+ */
+export const RULE_NAMES = [
+  "expected_date_moved",
+  "blocker_closed",
+  "commitment_due",
+  "teammate_touched",
+  "wait_unanswered",
+] as const;
+export type RuleName = (typeof RULE_NAMES)[number];
+
+/** Settings > Secretary beyond the work model: the rules' switches (standing instructions come later). */
+export const SecretarySettingsSchema = z.object({
+  rules: z
+    .object({
+      expected_date_moved: z.boolean().default(true),
+      blocker_closed: z.boolean().default(true),
+      commitment_due: z.boolean().default(true),
+      teammate_touched: z.boolean().default(true),
+      wait_unanswered: z.boolean().default(true),
+    })
+    .prefault({}),
+});
+export type SecretarySettings = z.infer<typeof SecretarySettingsSchema>;
+
 export const SettingsSchema = z.object({
   version: z.literal(1).default(1),
   providers: z.array(ProviderSchema).default([]),
@@ -223,6 +250,7 @@ export const SettingsSchema = z.object({
     })
     .prefault({}),
   work: WorkSettingsSchema.prefault({}),
+  secretary: SecretarySettingsSchema.prefault({}),
   dataSources: z.array(DataSourceSchema).default([]),
   /** Suggested questions for the chat, in order (D42). */
   suggestedPrompts: z.array(SuggestedPromptSchema).max(12).default(DEFAULT_SUGGESTED_PROMPTS),

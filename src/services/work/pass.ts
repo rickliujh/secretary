@@ -10,6 +10,8 @@
  *    current item first, within the day's budget. A result that fails code's
  *    checks after one repair leaves the previous state with `needs_look`.
  * 6. What could not be settled is asked, rationed.
+ * 7. The consequence rules run for the active items and offer outcome cards
+ *    (Phase 25, `outcomes.ts`), even when no model call was made.
  *
  * Nothing here writes to Jira. A pass with no new events makes no model call.
  */
@@ -35,6 +37,7 @@ import { attachPending } from "./attach";
 import { appendEvents } from "./events";
 import { loadItemFacts } from "./facts";
 import { noteStillHolds } from "./note";
+import { runOutcomes } from "./outcomes";
 import { regroup } from "./queries";
 import { askQuestions, expireQuestions, type MeaningAsk } from "./questions";
 import {
@@ -58,6 +61,8 @@ export type PassResult = {
   /** Items left for a later pass because the day's budget ran out. */
   deferred: number;
   asked: number;
+  /** Outcome cards offered (Phase 25). */
+  offered: number;
 };
 
 /** Start of the local day `now` is in, as an ISO time (the budgets count from here). */
@@ -112,6 +117,7 @@ export const actorName = (actor: string, contacts: ReadonlyMap<string, string>) 
   if (actor === "me") return "the user";
   if (actor === "sync") return "Jira";
   if (actor === "unknown") return "someone";
+  if (actor === "secretary") return "the secretary";
   if (actor.startsWith("contact:")) return contacts.get(actor.slice(8)) ?? "a contact";
   if (actor.startsWith("jira:")) return actor.slice(5);
   return actor;
@@ -310,6 +316,7 @@ export const runWorkPass = (opts: { now?: Date } = {}) =>
       failed: 0,
       deferred: 0,
       asked: 0,
+      offered: 0,
     };
     if (!settings.work.enabled) return { ...result, skipped: "disabled" } satisfies PassResult;
 
@@ -352,9 +359,10 @@ export const runWorkPass = (opts: { now?: Date } = {}) =>
       dayStart,
     });
     result.asked = asked.length;
-    if (result.calls || result.created || result.asked)
+    result.offered = (yield* runOutcomes({ now, settings })).offered;
+    if (result.calls || result.created || result.asked || result.offered)
       logger.info(
-        `Work pass: ${result.created} new items, ${result.attached} attached, ${result.calls} state updates, ${result.asked} questions`,
+        `Work pass: ${result.created} new items, ${result.attached} attached, ${result.calls} state updates, ${result.asked} questions, ${result.offered} outcome cards`,
       );
     return result;
   });

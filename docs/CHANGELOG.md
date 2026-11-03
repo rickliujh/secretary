@@ -2024,3 +2024,114 @@ Known limits
   refreshing after `note_work` are covered by typecheck and build only.
 - The block's waits are cut to those `pickWaits` keeps (12); an item with many
   waits may show fewer than it has.
+
+## Phase 25: Consequence rules and outcome cards (2026-10-19)
+
+Built
+- Migration 0018: `proposals.bundle_id` and `bundle_kind` (an outcome card's
+  inbox item id and its rule), `inbox_items.situation_key` (indexed,
+  `<rule>:<work_item_id>:<fingerprint of the facts>`); `inbox_items.source`
+  gains `secretary`. The export carries the columns as part of their tables.
+- Rules (`services/work/rules.ts`, pure, no model call): `expected_date_moved`,
+  `blocker_closed`, `commitment_due`, `teammate_touched`, `wait_unanswered`, in
+  that priority order. Each returns situations (title, the facts in one line,
+  tickets, facts used, steps); a step is a canonical proposal payload with a
+  label and `required` (the others hang on it). Step texts are templates from
+  the facts ("PLAT-812 is done; picking this up again."); messages are
+  `draft_message` steps the Drafts page writes. A step a pending proposal (or
+  an earlier rule's step) already covers is left out. Switches
+  `secretary.rules.<rule>` (default on) and a quiet list derived from the
+  item's `outcome_dismissed` and `rule_resumed` events.
+- Outcomes (`services/work/outcomes.ts`): at the end of every work pass (after
+  sync, triage, decisions; with or without a model call) the rules run for
+  the active items; a new key becomes one card (inbox item with the situation
+  in `triage`, the steps as pending proposals of one bundle in `seq` order,
+  an `outcome_offered` event). At most 5 a pass, the current item first, then
+  by rule. What the rules saw per item (next expected date, each wait's
+  expected date, last event read) is kept in `sync_state` `work.outcomes`.
+- `Proposals.approveBundle(bundleId, keep, edits)`: runs the kept steps in
+  order, stops at a failed required step (the rest stay to retry), rejects
+  the steps left out (a required one takes its dependents) and records each
+  as a `step_left_out` correction on the work item; a card with no steps is
+  filed. `dismiss` of a card records `outcome_dismissed`; `approveAll` on a
+  card runs it as its bundle. Edits of a step are no classify examples.
+- UI: `components/inbox/outcome-card.tsx` in place of the thread view for
+  `secretary` items (title, why, the item and tickets, a checkbox per step
+  with the dependents greyed while the required step is off, each step
+  opening to its proposal card for edits saved on the step, one Approve,
+  Dismiss, "Got it" for a reminder). Today's Your move leads with `outcome`
+  rows (title, item, steps) and hides the plain wait, woken and comment rows
+  of their tickets. Settings > Secretary gains Follow-ups: the five switches.
+  The Work tab gains an item menu with "Ask again about ..." for quiet rules.
+- Tests: each rule (fires once per change, switch and quiet, payloads parse,
+  the fingerprint moves with the fact); outcomes over the db (one bundle per
+  card, dedupe by key whatever the card's status, the cap and order, a moved
+  date seen once, no old news on the first run); `approveBundle` (order, a
+  failed required step stops, left-out corrections, a required step left out
+  takes its dependents, edits, dismiss and quiet); Today with cards; the
+  mock-Jira AC (date moved, two steps in order with one correction, PLAT-812
+  done resumes PAY-12 and comments, two dismissed chases and then nothing).
+
+Decisions and defaults
+- "Since the last run" is what the rules last saw per item, not the state
+  before the pass, so a move counts once also across restarts; an item seen
+  for the first time has nothing moved. The first run ever reads no old
+  events; an item first seen later reads its last 48 hours. The event
+  watermark never passes an event no item holds yet.
+- `expected_date_moved`'s key is the date things move to, so the state moving
+  and then the wait following it is one situation. The wait step goes to a
+  wait still on the old date; the next follow-up is the working day after the
+  new date. Due dates move only for open primary tickets due before it.
+- `blocker_closed`: resumes to the status the ticket left for its blocked-like
+  one (from its events), else the project's in-progress status by name; no
+  name found, no move. The wait resolved is the one whose label or reference
+  names the blocker, or owned by the blocker's assignee. Key: blocker and day.
+- `teammate_touched`: comments by contacts and other Jira users on primary
+  tickets; a field change counts only with a known author, which sync does
+  not have (D61), so today it is comments. A reply draft needs the author to
+  be a contact. The comment's words are not in the notes (see review fixes).
+- `commitment_due` and `teammate_touched` may be cards with no steps
+  (reminders); the other rules offer nothing without a step.
+- `wait_unanswered`: due by `timing` (not while the owner is away); the next
+  follow-up is the day after a future expected date, else the chase interval.
+- Quiet: two `outcome_dismissed` on one item and rule since the last
+  `rule_resumed`; approving with steps left out does not count.
+- New event kinds `outcome_offered`, `outcome_dismissed`, `rule_resumed`
+  (timeline only) and actor `secretary`.
+
+Review fixes
+- A teammate's words never reach the draft prompt as the user's: the notes
+  only name the comment, and the words travel as `draft_message.quote`
+  (`communications.quote_md`, migration 0018), shown in an untrusted block.
+  A test checks no word of the comment appears outside one.
+- A chase plans the next follow-up only ("Follow-up planned for <date>",
+  `update_dependency.logged: false`: the date is set, no timeline entry); the
+  chase draft carries its wait (`draft_message.dependencyId`), so marking it
+  sent logs the follow-up.
+- A first expected date is no move: one step gives the only undated wait the
+  date ("Expected <date>"), no due-date step, no "new date" draft.
+  `expected_date_moved` keys on from and to, so a date moving back is new.
+- A pending reschedule covers a step only with the same dates.
+- `blocker_closed` fires on a move into done only and once per blocker until
+  it reopens; a wait's owner matches the assignee by Jira user first.
+- The first run ever offers nothing and records what already holds as known;
+  every item's memory advances to what was seen, and situations the cap left
+  wait in a per-item `deferred` list, so nothing is read or offered twice.
+  `situation_key` is a partial unique index.
+- A card with a failed step stays open: Retry on the step, or "Done anyway"
+  (`Proposals.fileBundle`). A failed required step left out takes its
+  dependents. A dismissal after a step ran does not count toward quiet.
+- Today hides only the waits a card names, a woken row for a blocker card and
+  a comment row for a teammate card about that comment.
+- Tests: the rules' fixes, the first run and the cap over the db, a failed
+  optional step, a failed required step left out, Approve all on a card, a
+  revoked step, a dismissal after a run, the planned follow-up, Today's
+  narrower hiding, and the draft prompt's untrusted quote.
+
+Known limits
+- Not verified in the running app: the card's layout, the checkbox greying,
+  the Today row and the Work tab menu are covered by typecheck and build only.
+- A deferred situation is offered as it was found; its steps are not
+  recomputed if the facts move again before it is offered.
+- A card with steps on a wait that changes before approval runs against the
+  wait as it is then; the step texts are not refreshed.

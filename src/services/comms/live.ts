@@ -165,6 +165,7 @@ const make = Effect.gen(function* () {
           ...(person?.notesMd ? [person.notesMd.slice(0, 500)] : []),
         ],
         notes: row.notesMd ?? "",
+        quote: row.quoteMd ?? null,
         instructions,
       } satisfies DraftContext;
     });

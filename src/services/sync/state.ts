@@ -30,6 +30,11 @@ export const SYNC_KEYS = {
   blockers: "jira.blockers",
   /** JSON UnreadBlockers: blockers Jira answered 404 or 403 for, so they are not read every sync (D45). */
   blockersUnread: "jira.blockersUnread",
+  /**
+   * JSON OutcomeMemory (Phase 25): per work item, the dates and the last event
+   * the consequence rules saw, so a move is seen once.
+   */
+  outcomes: "work.outcomes",
   /** JSON CleanupResult of the last storage cleanup (D34). */
   lastCleanup: "app.lastCleanup",
 } as const;

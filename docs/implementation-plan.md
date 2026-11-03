@@ -690,11 +690,107 @@ and the report draw on the same facts. No new Jira writes, no new tables.
       PAY-12 now" → the Work tab shows it current and the note on the timeline;
       the morning brief names an overdue commitment.
 
-## Phase 25: Consequence rules and outcome cards (FR-19.6)
+## Phase 25: Consequence rules and outcome cards (FR-19.6, D61)
 
-Proposal bundles (`bundle_id`, `bundle_kind`), the outcome card with steps the user
-can leave out and one Approve, the first five rules with switches and the per-item
-quiet list, run from the pass.
+Branch `feat/25-outcomes` from `feat/24-work-reads`. When an event changes a fact,
+pure rules work out what else is now stale and the app proposes the follow-ups as
+one card per situation: its steps listed, each one the user can leave out, one
+Approve. No model call anywhere in a rule: step texts are templates code fills
+from the facts; words that need writing (a message to a person) are
+`draft_message` proposals that the Drafts page writes as today. No live Jira
+lookups (Phase 26).
+
+### Tasks
+
+1. **Schema (migration 0018).** `proposals` gains `bundle_id` and `bundle_kind`
+   (nullable text; `bundle_kind` is the rule name). `inbox_items.source` gains
+   `secretary` (an outcome card is an inbox item whose `raw_text` is the situation
+   in plain words, `work_item_id` its item, and `triage` the situation record:
+   rule, keys, facts used), and `inbox_items` gains `situation_key` (text, indexed):
+   `<rule>:<work_item_id>:<fingerprint of the facts>` so the same situation is
+   offered once; a changed fact makes a new key. Export includes the columns.
+   `services/work/schema.ts` gets the `Situation` zod type.
+2. **Rules** in `services/work/rules.ts`, pure:
+   `rule(input: { item, facts, state, previousState, newEvents, waits, today, settings }) -> Situation[]`,
+   each `Situation = { rule, key, title, why, steps: StepDraft[] }` where a
+   `StepDraft` is a canonical proposal payload (the same zod payloads classify
+   produces, so validation and the Executor are unchanged) plus `required`
+   (a step the others hang on; leaving it out drops the dependents) and `label`.
+   The five rules, in priority order:
+   - `expected_date_moved`: a wait's `expected_at` changed, or the state's
+     `nextExpected.on` moved, since the last run. Steps: `update_dependency`
+     (new expected date and follow-up) when the wait row still has the old date;
+     `update_issue` due date for each primary ticket whose due date is now before
+     the expected date (set to the expected date); `draft_message` to each person
+     the state lists an open commitment to, with the new date as the key point.
+   - `blocker_closed`: a related ticket turned Done (sync `jira_change` or the
+     blocker map). Steps: `transition_issue` of the waiting primary ticket back to
+     an in-progress status when it is in a Blocked-like status (names from the
+     project's statuses: Blocked, On hold, Waiting); `add_comment` on it
+     ("<KEY> is done; picking this up again."); `update_dependency` resolving the
+     wait whose owner or label matches the blocker.
+   - `commitment_due`: an open commitment with `dueOn` today or past and no
+     `draft_sent` to that person since it was made. One step: `draft_message` to
+     the person with what was promised.
+   - `teammate_touched`: a `jira_comment` or `jira_change` by someone else on a
+     primary ticket since the last run. Steps: `draft_message` to the author when
+     the comment asks something (a question mark, or the user's name or
+     username), key point "answer their question on <KEY>: <quote>"; nothing
+     else, so the card is also the "read it" reminder.
+   - `wait_unanswered`: an open wait with `next_followup_at` today or past and
+     no `wait_chased` or `draft_sent` to the owner since the last follow-up.
+     Steps: `draft_message` chase (reuse `chaseNotes`), `update_dependency` with
+     the next follow-up date (`nextFollowupAfter`).
+   Each rule has a switch `secretary.rules.<rule>` (default on). Quiet list: a
+   rule that was dismissed twice on the same item (two `secretary` inbox items
+   with that rule and `work_item_id` dismissed, derived from history, no new
+   column) produces nothing there until the user turns it back on from the
+   Work tab's item menu ("Ask again about ...").
+3. **Outcomes** in `services/work/outcomes.ts`: after every state pass and after
+   a sync (even when no model call was made), run the rules for the items with
+   new events or changed facts, drop situations whose key exists (any status),
+   create the inbox item plus its proposals in step order with `bundle_id` =
+   the inbox item id, `bundle_kind` = the rule, `seq` the step order, and record
+   a `work_event` kind `outcome_offered`. At most 5 new cards a pass, most
+   consequential first (the rule order above), the current item first.
+   `Proposals.approveBundle(ids, edits)` generalises `track`: runs the given
+   steps in `seq` order, stops when a `required` step fails, rejects the steps
+   left out and records each as a correction (`memories` example
+   `{ type: "step_left_out", rule, kind }`, subject `work_item`), and dismissing
+   the card rejects all steps without corrections. Approving with steps left
+   out is not a rejection for the quiet list. Executed steps produce the usual
+   proposal events; `Proposals.dismiss` on a `secretary` item records
+   `outcome_dismissed`.
+4. **UI.** `components/inbox/outcome-card.tsx`: title, why (the facts in one
+   line), the steps as a checkbox list (shadcn `checkbox`, all on; the required
+   step's dependents grey out when it is off), each step expandable to the
+   existing proposal card for edits, one Approve, Dismiss. The Inbox shows
+   `secretary` items with this card instead of the thread view. Today's "Your
+   move" gains kind `outcome` (title, item name, step count) and hides the plain
+   `wait`, `woken` and `comment` rows for a ticket that has a pending outcome
+   card. Settings > Secretary gets the five rule switches with one line each.
+5. **Tests.** Unit tests per rule (fires once per fact change, respects
+   switches and quiet, step payloads validate with the proposals schema, the
+   fingerprint changes with the fact). `outcomes.test.ts`: dedupe by key, cap,
+   ordering, bundle rows. `approveBundle`: order, required-step stop, left-out
+   corrections, dismiss. Mock-Jira AC: PAY-12 waits on Platform, expected 17 Oct;
+   a paste moves it to 24 Oct; after the pass one card exists with the wait
+   update, the due-date update and the ETA draft; approving with the draft left
+   out executes two steps on the mock in order and records one correction; a
+   sync that turns PLAT-812 Done gives a `blocker_closed` card whose approval
+   transitions PAY-12 and comments; dismissing a `wait_unanswered` card twice on
+   the same item makes the third run offer nothing.
+6. **Docs.** D61 "Built (Phase 25)" tail; design.md section 4 table rows and
+   section 8; CHANGELOG entry.
+
+### Checklist
+
+- [ ] `bun run typecheck`, `bun test`, `bun run lint`, `bun run build` green
+- [ ] Rick: with PAY-12 waiting on someone, paste a new date → one card in the
+      Inbox and on Today listing the wait update, a due date and a draft; untick
+      the draft, Approve → two Jira writes in order, the card done; dismiss a
+      chase card twice → it stops coming for that item; Settings > Secretary
+      switches work.
 
 ## Phase 26: Playbooks and standing instructions (FR-19.7)
 

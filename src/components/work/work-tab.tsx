@@ -12,6 +12,7 @@ import {
   Check,
   GitMerge,
   MessageSquare,
+  MoreHorizontal,
   Pencil,
   Scissors,
   Star,
@@ -35,6 +36,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -47,6 +55,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { onSelect } from "@/lib/select-change";
 import { dateTime, relativeTime, shortDate } from "@/lib/time";
+import { resumeRule } from "@/services/work/outcomes";
 import {
   addNote,
   editNote,
@@ -58,6 +67,7 @@ import {
   type WorkItemDetail,
   workItemDetail,
 } from "@/services/work/queries";
+import { RULE_LABELS, type RuleName } from "@/services/work/rules";
 
 const NEW_ITEM = "__new__";
 
@@ -80,6 +90,9 @@ const KIND_LABEL: Record<string, string> = {
   note: "Your note",
   answer: "Your answer",
   correction: "Changed",
+  outcome_offered: "Follow-up",
+  outcome_dismissed: "Dismissed",
+  rule_resumed: "Changed",
 };
 
 function useWorkMutation<I, A, E>(f: (input: I) => Effect.Effect<A, E, AppServices>) {
@@ -256,6 +269,34 @@ function SplitDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The item menu: "Ask again about ..." for each follow-up rule the user
+ * dismissed twice on this item (Phase 25). Shown only when one is quiet.
+ */
+function ItemMenu({ detail }: { detail: WorkItemDetail }) {
+  const resume = useWorkMutation((rule: RuleName) => resumeRule(detail.item.id, rule));
+  if (detail.quiet.length === 0) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="icon" variant="ghost" className="size-8" aria-label="Work item menu">
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          Follow-ups you dismissed twice here
+        </DropdownMenuLabel>
+        {detail.quiet.map((rule) => (
+          <DropdownMenuItem key={rule} onSelect={() => resume.mutate(rule)}>
+            Ask again about {RULE_LABELS[rule].name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -474,6 +515,7 @@ export function WorkTab({ issueKey }: { issueKey: string }) {
           <Star className={d.item.current ? "fill-current" : undefined} />
           {d.item.current ? "You are on this" : "I'm on this now"}
         </Button>
+        <ItemMenu detail={d} />
       </div>
       {d.item.needsLook && (
         <p className="text-sm text-muted-foreground">

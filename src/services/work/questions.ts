@@ -9,7 +9,7 @@
  * unanswered question expires after seven days with its event attached as
  * `unsure`, listed on the timeline and never read into the state.
  */
-import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import {
   inboxItems,
@@ -83,7 +83,8 @@ export const workThread = (itemId: string, name: string) =>
       d
         .select({ id: inboxItems.id })
         .from(inboxItems)
-        .where(eq(inboxItems.workItemId, itemId))
+        // Outcome cards name their item too (Phase 25); the questions thread is the other one.
+        .where(and(eq(inboxItems.workItemId, itemId), ne(inboxItems.source, "secretary")))
         .get(),
     );
     if (found) return found.id;

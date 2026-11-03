@@ -22,6 +22,8 @@ export type FactTicket = {
   status: string | null;
   statusCategory: string | null;
   assignee: string | null;
+  /** The assignee's Jira user, when cached (the display name is `assignee`). */
+  assigneeUser?: string | null;
   dueDate: string | null;
   sprint: string | null;
   storyPoints: number | null;
@@ -99,6 +101,7 @@ export const loadItemFacts = (
           status: r?.status ?? fresh?.status ?? null,
           statusCategory: r?.statusCategory ?? fresh?.statusCategory ?? null,
           assignee: r ? (r.assigneeDisplay ?? r.assignee ?? null) : null,
+          assigneeUser: r?.assignee ?? null,
           dueDate: r?.dueDate ?? null,
           sprint: r?.sprint ?? null,
           storyPoints: r?.storyPoints ?? null,

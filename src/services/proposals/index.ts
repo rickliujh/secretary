@@ -67,6 +67,23 @@ export interface ProposalsShape {
     edits?: Readonly<Record<string, ProposalPayload>>,
   ) => Effect.Effect<DecisionResult[], ProposalError | DbError>;
   /**
+   * An outcome card (Phase 25, D61), generalising Track: runs the steps of the
+   * bundle the user kept, in `seq` order, with edits saved on them, and stops
+   * when a required step fails. Steps left out are rejected and recorded as
+   * corrections (`step_left_out`); leaving out a required step leaves out what
+   * hangs on it. A card with no steps is filed. Not a rejection for the quiet list.
+   */
+  readonly approveBundle: (
+    bundleId: string,
+    keep: readonly string[],
+    edits?: Readonly<Record<string, ProposalPayload>>,
+  ) => Effect.Effect<DecisionResult[], ProposalError | DbError>;
+  /**
+   * "Done anyway" on an outcome card a failed step keeps open (Phase 25): files
+   * it as it is, failed steps staying failed, with no correction recorded.
+   */
+  readonly fileBundle: (bundleId: string) => Effect.Effect<void, DbError>;
+  /**
    * Keeps an edit on a pending proposal without approving it, so every way of
    * approving it later (its card, Approve all, Track) uses the edit (D44). An edit
    * equal to the proposal clears it. The correction is recorded at approval.
@@ -96,7 +113,11 @@ export interface ProposalsShape {
     id: string,
     confirmed?: readonly string[],
   ) => Effect.Effect<RevokeResult, ProposalError | JiraError | DbError>;
-  /** Marks the inbox item dismissed and rejects its pending proposals without recording corrections. */
+  /**
+   * Marks the inbox item dismissed and rejects its pending proposals without
+   * recording corrections. On an outcome card it records `outcome_dismissed`,
+   * which the quiet list counts (D61).
+   */
   readonly dismiss: (inboxItemId: string) => Effect.Effect<void, DbError>;
 }
 

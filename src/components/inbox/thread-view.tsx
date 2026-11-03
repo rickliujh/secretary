@@ -34,6 +34,7 @@ import { threadRefs } from "@/services/proposals/thread-refs";
 import { executedRefs, groupSmallAsks } from "@/services/small-asks/bundle";
 import { Composer, type ComposerMessage } from "./composer";
 import { PASTED_HIGHLIGHT } from "./message-doc";
+import { OutcomeCard } from "./outcome-card";
 import { ProposalCard } from "./proposal-card";
 import { SmallAskRow } from "./small-ask-row";
 import { useDecisions, useReply } from "./use-inbox";
@@ -302,6 +303,8 @@ export function ThreadView({ id }: { id: string }) {
   const d = detail.data;
   if (detail.isPending) return <Loader2 className="m-6 animate-spin text-muted-foreground" />;
   if (!d) return <p className="p-6 text-sm text-muted-foreground">This thread no longer exists.</p>;
+  // An outcome card is no conversation: its steps, one Approve (Phase 25).
+  if (d.item.source === "secretary") return <OutcomeCard detail={d} />;
 
   const pendingActions = d.proposals.filter(
     (p) => p.status === "pending" && p.kind !== "needs_clarification",

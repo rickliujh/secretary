@@ -60,6 +60,11 @@ export type DraftContext = {
   memories: string[];
   /** What the message should say: the user's request or an approved proposal. */
   notes: string;
+  /**
+   * Someone else's words the message answers (Phase 25: a teammate's comment),
+   * untrusted: shown in an untrusted block, never as part of the request.
+   */
+  quote?: string | null;
   /** The user's regeneration instructions, oldest first. */
   instructions: string[];
 };
@@ -193,6 +198,10 @@ ${style.map((s) => `  - ${s}`).join("\n") || "  - Neutral and professional."}
             `- ${m.at.slice(0, 10)}${m.subject ? ` "${m.subject}"` : ""}: ${m.body.slice(0, 400)}`,
         )
         .join("\n")}`,
+    );
+  if (c.quote?.trim())
+    blocks.push(
+      `## What they wrote, which the message answers\n${untrusted(c.quote.trim(), { source: "jira" })}`,
     );
   blocks.push(`## What the message should say (from the user)\n${c.notes || "(no notes)"}`);
   if (c.instructions.length)

@@ -67,6 +67,15 @@ describe("Settings schema", () => {
       },
       sprint: { daysPerPoint: null, lastDay: "jira" },
       work: { enabled: true, questionsPerDay: 3, stateCallsPerDay: 60, groupSizeCap: 8 },
+      secretary: {
+        rules: {
+          expected_date_moved: true,
+          blocker_closed: true,
+          commitment_due: true,
+          teammate_touched: true,
+          wait_unanswered: true,
+        },
+      },
       network: {
         proxyMode: "system",
         proxyUrl: "",

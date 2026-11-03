@@ -234,6 +234,19 @@ export function useDecisions() {
         Effect.zipRight(afterWrites({ ids: i.ids }), p.track(i.ids, i.edits)),
     ),
   );
+  /** An outcome card (Phase 25): the steps the user kept, in order, after their saved edits. */
+  const approveBundle = useDecisionMutation(
+    withProposals((p, i: { bundleId: string; keep: readonly string[] }) =>
+      Effect.zipRight(
+        afterWrites({ inboxItemId: i.bundleId }),
+        p.approveBundle(i.bundleId, i.keep),
+      ),
+    ),
+  );
+  /** "Done anyway": files an outcome card a failed step keeps open (Phase 25). */
+  const fileBundle = useDecisionMutation(
+    withProposals((p, bundleId: string) => p.fileBundle(bundleId)),
+  );
   /**
    * Keeps a row change or the sprint switch on a pending proposal, so any
    * approve uses it (D44, D57). It changes only that proposal, so only the
@@ -255,5 +268,16 @@ export function useDecisions() {
     (inboxItemId: string) => Effect.flatMap(Intake, (i) => i.retriage(inboxItemId)),
     INTAKE_TURN_MUTATION,
   );
-  return { approve, reject, approveAll, track, saveEdit, dismiss, retriage, revoke };
+  return {
+    approve,
+    reject,
+    approveAll,
+    track,
+    approveBundle,
+    fileBundle,
+    saveEdit,
+    dismiss,
+    retriage,
+    revoke,
+  };
 }

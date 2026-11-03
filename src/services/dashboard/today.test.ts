@@ -30,9 +30,11 @@ const build = (p: Partial<TodayInputs> = {}, today = TODAY, now = NOW) =>
 const keyOf = (r: Today["yourMove"][number] | Today["theirMove"][number]) =>
   r.kind === "thread"
     ? `thread:${r.thread.id}`
-    : r.kind === "wait"
-      ? `wait:${r.dependency.id}`
-      : r.issue.key;
+    : r.kind === "outcome"
+      ? `outcome:${r.outcome.id}`
+      : r.kind === "wait"
+        ? `wait:${r.dependency.id}`
+        : r.issue.key;
 
 describe("buildToday over a mixed snapshot", () => {
   const t = build();

@@ -127,6 +127,13 @@
       "when": 1792358046620,
       "tag": "0017_wakeful_professor_monster",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792369999067,
+      "tag": "0018_rainy_ares",
+      "breakpoints": true
     }
   ]
 }

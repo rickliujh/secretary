@@ -167,7 +167,9 @@ describe("Today against the mock Jira", () => {
     expect(r.t.smallAsks.open.length).toBe(40);
     // Each ask is in one place: an ask row, a comment row, or behind a blocker.
     const placed = [
-      ...r.t.yourMove.flatMap((x) => (x.kind === "thread" ? [] : [x.issue.key])),
+      ...r.t.yourMove.flatMap((x) =>
+        x.kind === "thread" || x.kind === "outcome" ? [] : [x.issue.key],
+      ),
       ...r.t.theirMove.flatMap((x) => (x.kind === "blocked" ? [x.issue.key] : [])),
     ];
     for (const a of r.t.smallAsks.open) expect(placed).toContain(a.issue.key);

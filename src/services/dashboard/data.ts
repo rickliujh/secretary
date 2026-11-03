@@ -10,6 +10,7 @@ import { listDependencies } from "@/services/dependencies/queries";
 import { parseIssueLinks } from "@/services/jira/schemas";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, parseSprintState, SYNC_KEYS } from "@/services/sync/state";
+import { pendingOutcomes } from "@/services/work/outcomes";
 import { workByIssue } from "@/services/work/queries";
 import { buildEpicHealth, type DashboardInputs, type DashIssue } from "./sections";
 import { buildToday, groupThreads, type TodayInputs } from "./today";
@@ -69,6 +70,7 @@ export const loadDashboardInputs = (now = new Date()) =>
     const comments = yield* query((d) =>
       d
         .select({
+          id: jiraComments.id,
           issueKey: jiraComments.issueKey,
           author: jiraComments.author,
           authorDisplay: jiraComments.authorDisplay,
@@ -122,6 +124,7 @@ const pendingInbox = query((d) =>
       createdAt: proposals.createdAt,
       summary: inboxItems.summary,
       sender: people.displayName,
+      source: inboxItems.source,
     })
     .from(proposals)
     .innerJoin(inboxItems, eq(inboxItems.id, proposals.inboxItemId))
@@ -142,9 +145,13 @@ export const loadTodayInputs = (now = new Date()) =>
     return {
       ...base,
       woken,
+      // Outcome cards are rows of their own (Phase 25), not threads.
       threads: groupThreads(
-        pending.flatMap((p) => (p.inboxItemId ? [{ ...p, inboxItemId: p.inboxItemId }] : [])),
+        pending.flatMap((p) =>
+          p.inboxItemId && p.source !== "secretary" ? [{ ...p, inboxItemId: p.inboxItemId }] : [],
+        ),
       ),
+      outcomes: yield* pendingOutcomes,
       smallAskLabel: home.projectKey && home.label.trim() ? home.label.trim() : null,
       workItems: yield* workByIssue,
     } satisfies TodayInputs;

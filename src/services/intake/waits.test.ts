@@ -124,6 +124,7 @@ describe("intake and waits (FR-3 AC)", () => {
         channel: "teams",
         issueKey: "PAY-2",
         label: "Q3 numbers from finance",
+        logged: true,
       },
     ]);
     expect(r.decided).toMatchObject({
