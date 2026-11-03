@@ -618,6 +618,23 @@ decides what is read and when. FR-20 is Phase 29.
   Whatever a block arrives as, the classify call is told which tickets were
   recently created on the user's approval and never creates one that a listed
   ticket already covers.
+- FR-20.7 (Must) Cards on the line. What the secretary did with a block is
+  shown at the block: a mark in the margin and, for a block that led to a
+  conversation, a one-line strip under it saying what waits. The conversation
+  opens in place, with its cards to approve or reject, its questions, and a box
+  to continue it; what is said there and what the note's later edits say are one
+  conversation. The user can ask the secretary about any block that has no
+  conversation, and the answer is a conversation on that block. Showing the
+  page sends nothing to a model.
+- AC (Phase 31, against the mock Jira): after a reading, the block that made a
+  card shows "1 card waiting"; opening it shows the card, and approving it there
+  changes the strip to "approved" and the Inbox agrees; a reply typed in the
+  opened conversation is a turn of the same thread the Inbox shows; "Ask the
+  secretary about this" on a block the reading left alone makes a thread and a
+  strip, and editing that block afterwards revises that thread; a private block
+  offers no Ask; an earlier day shows its marks and strips with the text
+  read-only. The note's text is unchanged by the new editor: typing, sync and
+  the reading work as in the Phase 29 and 30 ACs.
 - AC (Phase 30, against the mock Jira): a block that made an Epic and a Story,
   both approved, gives nothing at a second read of the unchanged note; editing
   that block gives new cards in the same thread, and the thread's classify
