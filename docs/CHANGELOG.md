@@ -2600,3 +2600,88 @@ Known limits
   new created-epic case failed with 403 "Key limit exceeded"), so the new
   case and a regression check of version 17 are still to run.
 - Not verified in the running app.
+
+## Phase 31: Cards on the note's blocks (2026-11-03)
+
+Built
+- The Note page's editor is CodeMirror 6 (`@uiw/react-codemirror` 4.25 with
+  `@codemirror/lang-markdown` 6.5, `components/note/note-editor.tsx`): the
+  note's text byte for byte (lines split on "\n" only; Enter inserts "\n"
+  and Backspace deletes one character; pasted "\r\n" becomes "\n"; no
+  typing aid that changes text), line wrapping, monospace, the app's light or dark theme
+  from next-themes through its CSS variables, read-only for earlier days. A
+  sync or the chat's append reaches the editor as one change over the common
+  prefix and suffix (`doc-change.ts`), outside the undo history, so the
+  cursor and scroll stay and undo never takes it back. Save, sync and the
+  reading are unchanged.
+- Marks and strips (`block-marks.ts`, `cards-extension.ts`): a gutter mark
+  on each read block's first line (conversation, noted on a work item, read
+  with nothing to do, private; amber when a card or question waits), and a
+  one-line block widget under a block with a conversation ("1 card
+  waiting", "1 question", "approved", "dismissed", "nothing left", the
+  summary, created tickets as ticket links, Open) or a work item note
+  ("Noted on <item>"). The widgets are empty nodes the page fills with the
+  app's components through portals (`block-strip.tsx`, `cards-layer.tsx`);
+  they follow the text as it is typed, on earlier days too. A block being
+  edited keeps its mark, strip and row, shown as "changed, not read yet",
+  until the reading records the new words. Ctrl+. (Cmd+. on a Mac) opens
+  the menu of the block at the cursor; the marks are not hidden from
+  assistive tech.
+- The conversation opens in a sheet on the page (`thread-sheet.tsx`) with
+  the Inbox's own `ThreadView` (only its note badge's link changed): cards, questions and the composer; a reply
+  there is a turn of the same thread. `/note?thread=<id>` opens it, and the
+  Inbox's "Note · <date>" badge links to it.
+- "Ask the secretary about this" in the mark's menu of a block without a
+  conversation, not private: `DailyNote.ask(date, hash)` (`services/note/
+  ask.ts`) routes the block as the reading does (its conversation, a
+  carried-over block's thread, a changed block's thread, a named ticket's
+  thread) and otherwise starts a thread exactly as the reading's act; the
+  block is recorded acted, so later edits revise that thread. The reading's
+  routing steps are exported from `read.ts` and shared.
+- `services/note/cards.ts`: `blocksOf(date)`, `threadSummaries(ids)` and
+  `stripBadge`; `NoteBlock.fromLine`/`toLine`; `queryKeys.noteBlocks` and
+  `noteThreads` under "note", refreshed by readings, syncs, decisions,
+  replies, triage, the chat's threads, the work and day-end passes and
+  park/unpark. A bundle's steps are one card waiting. `NoteError` kinds
+  `not_found` and `private`.
+- Tests: block line ranges (frontmatter, blank lines, CRLF); the minimal
+  change; Enter, Backspace and external changes out of the undo history;
+  marks and strips from text and rows, and in an `EditorState` as the text
+  changes, an edited block keeping its strip, and Mod-.'s block; `cards.ts` on the database and the badge; Ask (a new
+  thread then revised by an edit, a changed block's thread, private, gone,
+  an earlier day, clicked twice, racing a reading, carried over, a named
+  ticket); the FR-20.7 AC at the service level against the mock
+  Jira (strip after a reading, approve, a reply as a turn of the same
+  thread, Ask then edit, private).
+
+Departures
+- The page's data reaches the editor through a state field and an effect,
+  not a compartment, so a reconfigure (the theme switch) keeps it.
+- Ask opens an existing conversation without a call, joins a carried-over
+  block's thread only when it had one, applies the changed-block rule only
+  to blocks not read yet, and works on earlier days; a failed triage that
+  left its thread opens it; one that left none records nothing. One Ask
+  at a time on the page.
+- The badge also says "N cards waiting, M questions", "did not go through"
+  and "N failed".
+- A block not read yet has a mark that shows only on hover or keyboard
+  focus, for its Ask menu; a block under the private heading never offers
+  Ask.
+- Enter and Backspace are bound to plain newline and one-character delete
+  above CodeMirror's defaults; Mod-. opens a block's menu.
+- `useNoteEditor` also returns `flush`, so Ask saves the screen first.
+- `@codemirror/state`, `view`, `language`, `commands` and `@lezer/highlight`
+  are direct dependencies (already installed through the wrapper).
+- `noteChanged` refreshes the Inbox after a reading that only continued
+  threads.
+
+Known limits
+- Not verified in the running app: typing, cursor and scroll through a
+  sync or an append, the marks' menus, the strips' layout, the sheet, Ask
+  from the page, Mod-. and the focus after it, a screen reader on the marks,
+  the theme switch and the `?thread=` link were checked by type, unit and
+  service tests only.
+- Review fixes before merge: the keymap, undo history, paste, edited blocks,
+  keyboard and assistive access to the marks, re-renders per keystroke,
+  private Ask, a failed Ask without a thread, stable markers, refresh after
+  chat, passes and park, bundles, one Ask at a time, the sheet's close.
