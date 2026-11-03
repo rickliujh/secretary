@@ -615,12 +615,80 @@ in-progress ticket shows a sensible group and status note; pasting a teammate's
 message about it updates the note without a new item; a paste about two tickets at
 once asks which.
 
-## Phase 24: Intake and chat read the state (FR-19.5)
+## Phase 24: Intake and chat read the state (FR-19.5, D61)
 
-The retrieval snapshot's `work` block (a new classify prompt version), the chat's
-`work_items` and `note_work` tools, the brief and the report reading the state.
-Eval cases: "Sarah says Friday now" becomes an `update_dependency` on the existing
-wait; "where am I on the cert" is answered from the state.
+Branch `feat/24-work-reads` from `feat/23-work-model`. Everything that already
+decides something for the user reads the work model first: classify sees the
+state of the items an input touches before the candidate tickets, the chat
+answers "where am I" questions from the state and the event log, and the brief
+and the report draw on the same facts. No new Jira writes, no new tables.
+
+### Tasks
+
+1. **The `work` block in the retrieval snapshot.** `ItemSnapshot` gains
+   `work?: WorkItemSnapshot[]` (prompt version 15), filled by `Retrieval.snapshot`
+   from `services/work/queries.ts` for the items reached by: the keys the input
+   names, the thread's tickets, the sender's open waits, the named contacts' open
+   waits, and the current item when the input is the user's own words and names
+   nothing. At most 3 items, the current item first. Each entry: `id`, `name`,
+   `goal`, `currentStep`, `nextExpected`, `keys` (with status), `waits` (open, with
+   owner name, label, expected date and the wait id so `update_dependency` can pick
+   it), `commitments` (open, with to-whom and due), `lastEvents` (5, one line each,
+   pasted text excerpted and marked untrusted), `needsLook`. Token budget
+   `BUDGETS.work = 1200`; older snapshots without the block replay as they ran.
+2. **Classify reads it.** `src/prompts/classify.ts`: render the block as
+   "## The user's work" before the candidates, one item per paragraph in the form
+   "PAY-12, PLAT-812: cert renewal. Now: waiting on Platform for the cert (Sarah),
+   expected 17 Oct. Promised Dana an ETA by 15 Oct." Rules added to the system
+   prompt: an input about a person, a thing or a date that matches an open wait
+   of a listed item is a change to that wait (`update_dependency` on its id), not
+   a new `link_dependency` and not a new ticket; an input that reports progress on
+   a listed item's ticket is an `add_comment` or a transition on that ticket, not
+   a create; the candidates list is for tickets the work block does not cover.
+   Validation unchanged. `CLASSIFY_PROMPT_VERSION = 15`.
+3. **Chat tools.** `work_items` (read): `list` (active items, current first:
+   name, goal, current step, next expected, open commitment count), `item`
+   (one item by id, key or name: state, tickets, open waits, commitments, the
+   timeline's last 20 events), `changes` (events since an ISO time or "this
+   morning"/"yesterday" resolved by code, across items or for one). `note_work`
+   (write, local only, D17): records a `note` event with the user's words on the
+   item that the text's keys or the named item reach (asks through the normal
+   chat answer when none or several), sets `current` when the user says they are
+   on it, and requests a work pass. The chat system prompt (`src/prompts/chat.ts`)
+   says: for "where am I", "what changed", "what did I promise", "what's next on"
+   use `work_items` before `search_tickets`; for "I'm on X now" and "note that"
+   use `note_work`; the model never invents state it did not read. `my_focus`
+   stays and adds the current item's name.
+4. **Brief and report.** `BriefFacts` gains `work`: the current item (name, current
+   step, next expected), items whose next expected date is today or past, and
+   open commitments due today or past, each with the item name; the brief prompt
+   lists them under "Your work" and must mention overdue commitments by name. The
+   report's facts (`services/report/facts.ts`) gain, for each ticket in the
+   period, its item's name and goal, so `by_epic` and `talk_track` group by work
+   item when the ticket has no epic and name the goal in the first line. No new
+   model call in either.
+5. **Eval and tests.** `src/test/eval/cases.ts` gains (prompt v15) "Sarah says
+   the cert will be Friday now" with the PAY-12 item in the work block →
+   `update_dependency` on the existing wait with the new date and no
+   `link_dependency` or create; "PLAT-812 is done, picking the cert up" →
+   `add_comment`/`transition_issue` on PAY-12, no create; a control case with an
+   empty work block that still proposes `link_dependency`. Unit tests: the work
+   block's selection and budget; classify prompt rendering with and without the
+   block; `work_items` and `note_work` outputs on a seeded db; brief facts with an
+   overdue commitment; report grouping by item.
+6. **Docs.** D61 "Built (Phase 24)" tail; CHANGELOG entry; design.md 7.2 budget
+   row and section 8 chat tools line.
+
+### Checklist
+
+- [ ] `bun run typecheck`, `bun test`, `bun run lint`, `bun run build` green
+- [ ] Live eval on the configured model: the three new cases pass and the old
+      ones keep their score
+- [ ] Rick: paste "Sarah says the cert will be Friday now" with PAY-12 waiting on
+      Sarah → one `update_dependency` card on the existing wait; ask the chat
+      "where am I on the cert?" → the state in prose, no ticket search; "I'm on
+      PAY-12 now" → the Work tab shows it current and the note on the timeline;
+      the morning brief names an overdue commitment.
 
 ## Phase 25: Consequence rules and outcome cards (FR-19.6)
 

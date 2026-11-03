@@ -1,13 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { fixtureIssues } from "@/test/seed";
-import { contactTarget, EVAL_CASES, EVAL_OUTSIDE_ISSUES } from "./cases";
+import { contactTarget, EVAL_CASES, EVAL_OUTSIDE_ISSUES, workItemKeys } from "./cases";
 
 describe("eval cases", () => {
   test("every expected issue target exists in the fixtures or is served from outside", () => {
     const keys = new Set([...fixtureIssues.map((i) => i.key), ...Object.keys(EVAL_OUTSIDE_ISSUES)]);
     for (const c of EVAL_CASES) {
+      const own = new Set([...keys, ...workItemKeys(c)]);
+      for (const r of [...c.expect.required, ...(c.expect.anyOf ?? []).flat()]) {
+        if (r.target?.match(/^[A-Z]+-\d+$/)) expect(own.has(r.target)).toBe(true);
+      }
       for (const r of c.expect.required) {
-        if (r.target?.match(/^[A-Z]+-\d+$/)) expect(keys.has(r.target)).toBe(true);
         const blocker = r.fields?.blocker;
         if (typeof blocker === "string") expect(keys.has(blocker)).toBe(true);
       }

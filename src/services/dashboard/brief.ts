@@ -11,6 +11,7 @@ import { readJson } from "@/lib/json";
 import {
   type BriefFacts,
   BriefOutputSchema,
+  briefWorkKey,
   buildBriefPrompt,
   isEmpty,
   validateBrief,
@@ -19,6 +20,7 @@ import { query } from "@/services/db";
 import { Llm } from "@/services/llm";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, setState } from "@/services/sync/state";
+import { briefWork } from "@/services/work/reads";
 import { loadToday } from "./data";
 import { dueWaits, type Today, type WaitRow } from "./today";
 
@@ -49,14 +51,24 @@ function hashFacts(value: unknown): string {
   return (h >>> 0).toString(16);
 }
 
-/** The "since" window moves with each brief, so it is not part of the identity. */
-const briefHash = (facts: BriefFacts) => hashFacts({ ...facts, since: null });
+/**
+ * The "since" window moves with each brief, so it is not part of the identity;
+ * of the work facts only what the brief must say counts (`briefWorkKey`).
+ */
+export const briefHash = (facts: BriefFacts) =>
+  hashFacts({ ...facts, since: null, work: briefWorkKey(facts) });
 
 const readCache = Effect.map(getState(CACHE_KEY), (v) =>
   readJson(v, CachedBriefSchema.nullable(), null),
 );
 
-const collectFacts = (t: Today, since: string | null, today: string, outputLanguage: string) =>
+const collectFacts = (
+  t: Today,
+  since: string | null,
+  today: string,
+  outputLanguage: string,
+  withWork: boolean,
+) =>
   Effect.gen(function* () {
     const f = t.facts;
     // A wait on a snoozed ticket sleeps with it, so the brief leaves it out too.
@@ -140,6 +152,8 @@ const collectFacts = (t: Today, since: string | null, today: string, outputLangu
         why: w.reasons[0] ?? "",
       })),
       pendingProposals: Number(pending?.n ?? 0),
+      // The work model's view (D61 Reads); none while it is off.
+      ...(withWork ? { work: yield* briefWork(today) } : {}),
     };
     return facts;
   });
@@ -157,6 +171,7 @@ export const todayWithBrief = (now = new Date()) =>
       cached.generatedAt,
       localDate(now),
       settings.general.outputLanguage,
+      settings.work.enabled,
     );
     return { today, brief: cached, briefFresh: cached.hash === briefHash(facts) };
   });
@@ -168,7 +183,13 @@ export const generateBrief = (now = new Date()) =>
     const t = yield* loadToday(now);
     const previous = yield* readCache;
     const since = previous?.generatedAt ?? new Date(now.getTime() - 24 * 3_600_000).toISOString();
-    const facts = yield* collectFacts(t, since, localDate(now), settings.general.outputLanguage);
+    const facts = yield* collectFacts(
+      t,
+      since,
+      localDate(now),
+      settings.general.outputLanguage,
+      settings.work.enabled,
+    );
     let sections: CachedBrief["sections"];
     let model: string | null = null;
     let tier: string | null = null;

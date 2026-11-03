@@ -247,9 +247,35 @@ const unestimated = (s: NonNullable<Report["sprint"]>) =>
 
 // ---- styles --------------------------------------------------------------
 
+/**
+ * Tickets with no epic grouped by their work item (D61 Reads): each group's
+ * heading is the item's name and its first line the goal. Tickets with an epic
+ * or no item are left in `rest`.
+ */
+function byWorkItem(tickets: readonly ReportTicket[]) {
+  const groups = new Map<string, { name: string; goal: string | null; tickets: ReportTicket[] }>();
+  const rest: ReportTicket[] = [];
+  for (const t of tickets) {
+    if (t.epic || !t.work) {
+      rest.push(t);
+      continue;
+    }
+    const g = groups.get(t.work.id) ?? { name: t.work.name, goal: t.work.goal, tickets: [] };
+    g.tickets.push(t);
+    groups.set(t.work.id, g);
+  }
+  return { groups: [...groups.values()], rest };
+}
+
+/** The first line under a work item's heading: its goal, when it says more than the name. */
+const goalLine = (g: { name: string; goal: string | null }) =>
+  g.goal?.trim() && g.goal.trim().toLowerCase() !== g.name.trim().toLowerCase()
+    ? `Goal: ${esc(g.goal)}`
+    : "";
+
 /** A script to read out, then the facts per ticket. */
 function talkTrack(r: Report): string {
-  const tickets = ordered(r.tickets).map((t) => {
+  const entry = (t: ReportTicket) => {
     const status = t.group === "new" ? "NEW" : t.group === "blocked" ? "BLOCKED" : t.status;
     const head = [`**${title(t)}**`, esc(status.toUpperCase()), ...meta(t)].join(" · ");
     const lines = [
@@ -260,6 +286,22 @@ function talkTrack(r: Report): string {
       ...(t.next.trim() ? [`Next: ${esc(t.next)}`] : []),
     ];
     return lines.length ? `${head}\n${bullets(lines)}` : head;
+  };
+  // Finished, then in progress, blocked and the rest, as before; a work item's tickets
+  // with no epic are listed together, under its name and goal, where its first one falls.
+  const { groups } = byWorkItem(r.tickets);
+  const groupOf = new Map(groups.flatMap((g) => g.tickets.map((t) => [t.key, g] as const)));
+  const shown = new Set<(typeof groups)[number]>();
+  const tickets = ordered(r.tickets).flatMap((t) => {
+    const g = groupOf.get(t.key);
+    if (!g) return [entry(t)];
+    if (shown.has(g)) return [];
+    shown.add(g);
+    return [
+      [`**${esc(g.name)}**`, goalLine(g), ...ordered(g.tickets).map(entry)]
+        .filter(Boolean)
+        .join("\n\n"),
+    ];
   });
   const s = r.sprint;
   return join([
@@ -415,6 +457,7 @@ function byEpic(r: Report): string {
   };
   const group = (head: string, tickets: ReportTicket[]) =>
     tickets.length ? `${head}\n${bullets(ordered(tickets).map(line))}` : "";
+  const work = byWorkItem(r.tickets);
   const epics = [
     ...epicKeys.map((key) => {
       const tickets = r.tickets.filter((t) => t.epic?.key === key);
@@ -423,9 +466,14 @@ function byEpic(r: Report): string {
       const count = progress ? ` · ${progress.done}/${progress.total} done` : "";
       return group(`**${key}${name.trim() ? ` ${esc(name)}` : ""}**${count}`, tickets);
     }),
+    // Tickets with no epic under their work item, the goal on the first line.
+    ...work.groups.map((g) => {
+      const goal = goalLine(g);
+      return group(`**${esc(g.name)}**${goal ? `\n${goal}` : ""}`, g.tickets);
+    }),
     group(
-      "**No epic**",
-      r.tickets.filter((t) => !t.epic),
+      work.groups.length ? "**No epic or work item**" : "**No epic**",
+      work.rest.filter((t) => !t.epic),
     ),
   ].filter(Boolean);
 

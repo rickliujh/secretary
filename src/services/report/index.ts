@@ -73,6 +73,11 @@ export type ReportTicket = {
   points: number | null;
   group: ReportGroup;
   epic: { key: string; name: string } | null;
+  /**
+   * The work item the ticket belongs to (D61 Reads): its name and goal. Absent in
+   * reports made before Phase 24, null when it is in none.
+   */
+  work?: { id: string; name: string; goal: string | null } | null;
   dueDate: string | null;
   /** Short facts from code, e.g. "Blocked by OPS-7", "Due 2 Oct". */
   notes: string[];

@@ -7,6 +7,7 @@ import { Chat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { queryClient, queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
+import { requestWorkPass } from "@/app/work";
 import { logger } from "@/lib/log";
 import { saveConversation } from "@/services/chat/history";
 import type { Tier } from "@/services/llm";
@@ -23,7 +24,15 @@ let lastOpened: string | null = null;
 /** The conversation to show when the Chat page opens without one. */
 export const lastChat = () => lastOpened;
 
-const transport = new SecretaryTransport(() => tier);
+// A note or a request the chat recorded: a work pass reads it, and the Work tab
+// and Today show the item the user is on (D61).
+const transport = new SecretaryTransport(
+  () => tier,
+  () => {
+    requestWorkPass();
+    void queryClient.invalidateQueries({ queryKey: queryKeys.tickets });
+  },
+);
 const chats = new Map<string, Chat<UIMessage>>();
 
 const save = (id: string, messages: UIMessage[]) =>

@@ -41,9 +41,76 @@ export type EvalCase = {
    * seeded contact. update_dependency expectations name its ticket as target.
    */
   wait?: { issueKey: string; label: string; owner: "ana" | "tom"; expectedAt?: string };
+  /** Contacts that exist only while this case runs, by a handle the case uses. */
+  contacts?: Record<string, { displayName: string; team?: "Payments" | "Platform" | "Network" }>;
+  /** A work item that exists only while this case runs (D61 Reads, prompt version 15). */
+  workItem?: EvalWorkItem;
   expect: EvalExpectation;
   single: boolean;
 };
+
+/**
+ * A work item seeded after the sync (D61): its tickets (cached as the sync would
+ * have them), the state the secretary holds, open commitments (said in a note
+ * the user wrote) and an open wait, owned by a contact from `contacts`.
+ */
+export type EvalWorkItem = {
+  name: string;
+  issues: {
+    key: string;
+    summary: string;
+    status: string;
+    statusCategory: "new" | "indeterminate" | "done";
+    /** The user's ticket (assigned, in the active sprint); else one the item waits on. */
+    mine: boolean;
+    blockedBy?: string;
+  }[];
+  goal: string;
+  currentStep: string;
+  nextExpected?: { what: string; on: string | null };
+  commitments?: { what: string; to: string; dueOn: string | null }[];
+  wait?: { issueKey: string; label: string; owner: string; expectedAt?: string };
+};
+
+/** The cert renewal of the work model's plan (D61): PAY-12 waits on PLAT-812 and on Sarah. */
+const CERT_WORK: EvalWorkItem = {
+  name: "Renew the payment gateway cert",
+  issues: [
+    {
+      key: "PAY-12",
+      summary: "Renew the payment gateway cert",
+      status: "Blocked",
+      statusCategory: "indeterminate",
+      mine: true,
+      blockedBy: "PLAT-812",
+    },
+    {
+      key: "PLAT-812",
+      summary: "Issue the new gateway cert",
+      status: "In Progress",
+      statusCategory: "indeterminate",
+      mine: false,
+    },
+  ],
+  goal: "Renew the payment gateway cert before it expires",
+  currentStep: "Waiting on Platform (PLAT-812) to issue the new cert; Sarah is getting it",
+  nextExpected: { what: "Sarah sends the new cert", on: "2026-09-23" },
+  commitments: [{ what: "an ETA for the cert renewal", to: "dana", dueOn: "2026-09-25" }],
+  wait: {
+    issueKey: "PAY-12",
+    label: "the new gateway cert from Platform",
+    owner: "sarah",
+    expectedAt: "2026-09-23",
+  },
+};
+
+const CERT_CONTACTS: EvalCase["contacts"] = {
+  sarah: { displayName: "Sarah Kim", team: "Platform" },
+  dana: { displayName: "Dana Reyes", team: "Payments" },
+};
+
+/** Tickets a case's work item adds to the cache, so its expectations may name them. */
+export const workItemKeys = (c: EvalCase) => c.workItem?.issues.map((i) => i.key) ?? [];
 
 /**
  * An expected target that is a seeded contact (`contact:ana`), whose id is made
@@ -609,5 +676,48 @@ export const EVAL_CASES: EvalCase[] = [
       forbiddenKinds: ["add_comment", "create_issue", "needs_clarification"],
     },
     single: false,
+  },
+  // The work block (prompt version 15, D61 Reads). TODAY is Thursday 24 September.
+  {
+    name: "work: a new date for the cert is a change to the existing wait",
+    source: "typed",
+    contacts: CERT_CONTACTS,
+    workItem: CERT_WORK,
+    text: "Sarah says the cert will be Friday now",
+    expect: {
+      required: [{ kind: "update_dependency", target: "PAY-12", date: "2026-09-25" }],
+      forbiddenKinds: ["link_dependency", "create_issue"],
+    },
+    single: true,
+  },
+  {
+    name: "work: a blocker done and the work picked up acts on the item's own ticket",
+    source: "typed",
+    contacts: CERT_CONTACTS,
+    workItem: CERT_WORK,
+    text: "PLAT-812 is done, picking the cert up",
+    expect: {
+      required: [],
+      anyOf: [
+        [
+          { kind: "add_comment", target: "PAY-12" },
+          { kind: "transition_issue", target: "PAY-12" },
+        ],
+      ],
+      forbiddenKinds: ["create_issue", "link_dependency"],
+    },
+    single: true,
+  },
+  {
+    // The control: the same people, no work item and no wait, so the block is empty.
+    name: "work: with no work item a new wait is still a link_dependency",
+    source: "typed",
+    contacts: CERT_CONTACTS,
+    text: "PAY-4 is waiting on Sarah Kim from Platform for the new signing cert, she says Friday.",
+    expect: {
+      required: [{ kind: "link_dependency", target: "PAY-4", date: "2026-09-25" }],
+      forbiddenKinds: ["update_dependency", "create_issue"],
+    },
+    single: true,
   },
 ];

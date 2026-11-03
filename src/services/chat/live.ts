@@ -31,8 +31,10 @@ const make = Effect.gen(function* () {
       // Images a tool fetched in this turn, handed to every later step as user
       // messages; tool results cannot carry them to OpenAI-compatible models (D33).
       const images = new Map<string, ModelMessage>();
-      const tools = chatTools(exec, (callId, key, shown) =>
-        images.set(callId, imagesMessage(key, shown)),
+      const tools = chatTools(
+        exec,
+        (callId, key, shown) => images.set(callId, imagesMessage(key, shown)),
+        req.onWorkChanged,
       );
       const settings = yield* Effect.provide(Effect.flatMap(Settings, settingsOrDefault), deps);
       const me = yield* Effect.provide(getState(SYNC_KEYS.username), deps).pipe(

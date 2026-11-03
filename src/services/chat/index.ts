@@ -7,6 +7,8 @@ export type ChatRequest = {
   /** Overrides the chat task's routing (the tier picker). */
   tier?: Tier;
   abortSignal?: AbortSignal;
+  /** Runs after a tool recorded work events (a note, a request through intake), D61. */
+  onWorkChanged?: () => void;
 };
 
 export interface ChatShape {

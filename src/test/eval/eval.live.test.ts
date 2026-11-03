@@ -83,6 +83,7 @@ import {
   stopMessage,
   stopReason,
 } from "./harness";
+import { seedWorkItem } from "./work-seed";
 
 const env = process.env;
 const configured = !!(
@@ -340,7 +341,7 @@ const runCase = (c: EvalCase, label: string) =>
       name: "Payments",
       function: "Invoicing, ledger exports, refunds",
     });
-    yield* createTeam({
+    const platform = yield* createTeam({
       name: "Platform",
       function: "Shared infrastructure",
       contactFor: "Kubernetes, CI, incidents on shared services",
@@ -427,6 +428,15 @@ const runCase = (c: EvalCase, label: string) =>
         ownerPersonId: senders[c.wait.owner],
         expectedAt: c.wait.expectedAt ?? null,
       });
+    // Contacts and a work item that exist only while this case runs (D61 Reads).
+    const teamIds = { Payments: payments, Platform: platform, Network: network };
+    const extra: Record<string, string> = {};
+    for (const [handle, p] of Object.entries(c.contacts ?? {}))
+      extra[handle] = yield* createPerson({
+        displayName: p.displayName,
+        ...(p.team ? { teamId: teamIds[p.team] } : {}),
+      });
+    if (c.workItem) yield* seedWorkItem(c.workItem, extra);
     // A provider error (timeout, rate limit) fails this case; the run decides whether to go on.
     const intake = yield* Intake;
     const attempt = yield* Effect.either(

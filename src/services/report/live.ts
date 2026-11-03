@@ -22,6 +22,7 @@ import { parseIssueLinks } from "@/services/jira/schemas";
 import { Llm } from "@/services/llm";
 import { Settings, settingsOrDefault } from "@/services/settings";
 import { getState, parseSprintState, SYNC_KEYS, setState } from "@/services/sync/state";
+import { workOfTickets } from "@/services/work/reads";
 import { type Report, ReportError, type ReportRequest, Reports } from ".";
 import {
   askText,
@@ -210,8 +211,13 @@ const make = Effect.gen(function* () {
         ];
       });
 
+      // Each ticket's work item, so the styles can group by it and name its goal (D61 Reads).
+      const workOf = settings.work.enabled
+        ? yield* withDb(workOfTickets(scoped.map((i) => i.key)))
+        : undefined;
       const facts = buildRecapFacts({
         me,
+        workOf,
         since,
         until,
         today,

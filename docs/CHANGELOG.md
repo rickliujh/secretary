@@ -1936,3 +1936,91 @@ Known limits
   request asks for a pass only through the next sync or decision.
 - Answers typed in free words are matched to choices in code (number, key,
   name); anything else asks again.
+
+## Phase 24: Intake and chat read the state (2026-10-19)
+
+Built
+- The work block (`src/prompts/work-block.ts`, `services/work/reads.ts`): the
+  retrieval snapshot gains `work`, the items an input reaches, in this order:
+  the keys it names, the thread's other tickets, the sender's open waits, the
+  named contacts' open waits, and the item the user is on when the input is
+  their own words and names nothing. At most 3, the current item first. Each
+  entry holds its name, goal, current step, next expected, tickets with status
+  and role, open waits by id, open commitments, the last 5 events (one line,
+  an excerpt of the words, other people's inside an untrusted block) and
+  "needs your look". The items' tickets are candidates (reason `work`); a
+  block wait is listed only when `waits` offers it, so `update_dependency` on
+  it validates. Budget `BUDGETS.work = 1200`, at least one item. Nothing while
+  Settings > Secretary is off.
+- Classify (`CLASSIFY_PROMPT_VERSION = 15`): "## The user's work" before the
+  candidates, one paragraph per item ("PAY-12, PLAT-812: ... Now: ... Next: ...
+  Promised Dana Reyes: ..."); rules: a person, thing or date matching a listed
+  item's open wait is `update_dependency` on that wait, never `link_dependency`
+  or a create; progress on a listed item acts on its own ticket (comment or
+  transition), never a create; other candidates are for what the block does
+  not cover. Validation unchanged. Snapshots before 15 replay as they ran, block
+  or not.
+- Chat: `work_items` (list; one item by id, key or name with state, tickets,
+  open waits, commitments and the last 20 events; changes since an ISO time or
+  this morning, today, yesterday, this week, read by code) and `note_work` (a
+  `note` event with the user's words on the one item their keys or the named
+  item reach, current when they say they are on it; none or several reached
+  writes nothing and returns the choices to ask about). A note requests a work
+  pass and refreshes Today and the Work tab; `propose_actions` now requests a
+  pass too. `my_focus` gains `currentWork`. The chat prompt sends "where am I",
+  "what changed", "what did I promise", "what's next" to `work_items` before
+  `search_tickets` and the user's own news to `note_work`.
+- Brief: `BriefFacts.work` (the current item, items whose next step was
+  expected by today, open commitments due by today, each with its item) under
+  "Your work"; an overdue promise must be named with its person or the answer
+  is repaired.
+- Report: each ticket carries its work item (name, goal); By epic and the talk
+  track's details group tickets with no epic under their item, the goal on the
+  first line; the prompt names the item and asks the talk track to say its goal.
+- Eval (prompt v15): "Sarah says the cert will be Friday now" with the PAY-12
+  item in the block (`update_dependency` on PAY-12 dated Friday 25 Sep, no
+  `link_dependency` or create); "PLAT-812 is done, picking the cert up" (a
+  comment or a transition on PAY-12, no create); a control naming Sarah with no
+  item that still proposes `link_dependency`. Cases seed contacts and a work
+  item per run (`src/test/eval/work-seed.ts`); the scorer gains `anyOf`.
+- Tests: selection order, the current-item rule and the limit; the block from
+  the db (wait ids shared with `waits`, tickets as candidates, a named blocker,
+  off in settings, the budget); the classify prompt with and without the block
+  and for a v14 snapshot; `work_items` and `note_work` through the chat on a
+  seeded db; the brief with an overdue promise (repaired when it is left out);
+  the report grouped by item and the prompt naming it.
+
+Decisions and defaults
+- The block is computed for every v15 snapshot and stored as `[]` when no item
+  is reached; only a non-empty block reaches the prompt.
+- Dates in the block are YYYY-MM-DD like the rest of the prompt, not "17 Oct".
+- The state's own fields (goal, step, promises) are shown as the secretary's
+  record, outside the untrusted block; event lines other people wrote are
+  inside it.
+- `note_work`'s `onIt` is the chat model's reading of the user's words; only
+  an active item becomes current. A note reaching a finished item is recorded
+  but does not reopen it.
+- "Overdue" in the brief is a due date before today; a promise due today is
+  listed, not enforced. The check accepts the person's full or first name.
+- The report groups by item only for tickets with no epic; a ticket with an
+  epic stays under it.
+
+- Review fixes: at most 10 primary work tickets pass the candidate limit and
+  the rest rank after search, so search results stay; the current item comes
+  in only when neither the input nor its thread names a ticket or contact, and
+  never ahead of a named or thread item ("counts only when the input is
+  clearly about it" in the rule); events numbered e1..e5 in time order across
+  the own and untrusted lists; closed-by-revoke tickets left out unless named;
+  caps of 8 tickets, 8 waits and 5 commitments per item, summaries clipped,
+  the budget measured after the waits are cut; the brief skips unnamed
+  promises in its check and hashes only what it must say; `note_work` reads
+  lower-case keys and returns choices with ids; `since` takes only ISO shapes
+  and shortcuts; the talk track keeps its group order.
+
+Known limits
+- Live eval (GLM 5.3 Flash): the three work cases pass; the full run's
+  failures under concurrency were timeouts that pass alone.
+- Not verified in the running app: the chat's tool labels and the Work tab
+  refreshing after `note_work` are covered by typecheck and build only.
+- The block's waits are cut to those `pickWaits` keeps (12); an item with many
+  waits may show fewer than it has.
