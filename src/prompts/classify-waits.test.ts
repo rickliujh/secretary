@@ -277,3 +277,69 @@ describe("awayUntil on update_person (D47)", () => {
     );
   });
 });
+
+describe("reading a line by what it names (prompt version 18, D69)", () => {
+  const others = [
+    { summary: "A story for the Podman 6.0.2 install failure", quote: "Create a Story" },
+  ];
+  const thread = (noteLine: boolean) => ({
+    instructions: [],
+    decided: [],
+    pending: [],
+    others,
+    ...(noteLine ? { noteLine: true as const } : {}),
+  });
+  const at = (promptVersion: number, s: Partial<ItemSnapshot> = {}) =>
+    buildClassifyPrompt({ ...withWaits, promptVersion, ...s });
+  const NOTE_LINE =
+    "The input is a later line of the user's daily note, put in this conversation; it may be about other work. Read it against every candidate issue and open wait by what it names, and act on this conversation's tickets only when the line is about them.";
+  const PICK =
+    "When more than one wait could be meant, pick the one whose ticket, label or reference the input names. Never pick a wait because this conversation made or acts on its ticket when the input names something else.";
+  const SAYS =
+    'An add_comment, or an update_dependency reply, says what the input says: something the input asks to be done ("notify the owner", "close the incident") is not written as done.';
+  const REFERENCES =
+    "References found by code in this input and the earlier items of this conversation:";
+  const RESOLVE_IT = 'Use them to work out what "it", "that ticket" or "the issue" refers to.';
+
+  test("the version is 18", () => {
+    expect(CLASSIFY_PROMPT_VERSION).toBe(18);
+  });
+
+  test("(a) the note line sentence leads the earlier items only for a note line", () => {
+    const note = at(18, { thread: thread(true) }).prompt;
+    expect(note).toContain(
+      `## Earlier in this conversation (context only)\nThe other items in this thread, oldest first. ${NOTE_LINE} Do not act on them unless`,
+    );
+    expect(note).not.toContain(RESOLVE_IT);
+    expect(note).toContain(REFERENCES);
+    const typed = at(18, { thread: thread(false) }).prompt;
+    expect(typed).not.toContain(NOTE_LINE);
+    expect(typed).toContain(RESOLVE_IT);
+    expect(typed).toContain("References found by code: issues");
+  });
+
+  test("(b) the wait rule with open waits; (c) the comment rule always", () => {
+    expect(at(18).system).toContain(PICK);
+    expect(at(18).system).toContain(SAYS);
+    const noWaits = at(18, { waits: [] }).system;
+    expect(noWaits).not.toContain(PICK);
+    // Without waits update_dependency is not offered, so the rule names comments only.
+    expect(noWaits).not.toContain("update_dependency");
+    expect(noWaits).toContain(SAYS.replace(", or an update_dependency reply,", ""));
+  });
+
+  test("version 17 renders as before, the note line flag included", () => {
+    const old = at(17, { thread: thread(true) });
+    for (const text of [NOTE_LINE, PICK, SAYS, REFERENCES]) {
+      expect(old.system).not.toContain(text);
+      expect(old.prompt).not.toContain(text);
+    }
+    expect(old.prompt).toContain(RESOLVE_IT);
+    expect(old.system).toContain(
+      "Never propose link_dependency for a wait that list already has; update it instead.\n",
+    );
+    expect(old.system).toContain(
+      "When nothing should change on the ticket, propose nothing for it.\n",
+    );
+  });
+});

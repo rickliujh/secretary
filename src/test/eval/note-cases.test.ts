@@ -41,28 +41,52 @@ describe("note_triage eval cases", () => {
     ]);
   });
 
-  test("a thread case: one block continues a listed thread, one is new work, one is context (D66)", () => {
+  test("thread cases: one block continues a listed thread, one is new work, one is context (D66, D69)", () => {
     const threaded = NOTE_EVAL_CASES.filter((c) => c.threads?.length);
-    expect(threaded).toHaveLength(1);
-    const c = threaded[0];
-    const ids = (c?.threads ?? []).map((t) => t.id);
-    const continuing = c?.blocks.filter((b) => b.thread) ?? [];
-    expect(continuing).toHaveLength(1);
-    expect(ids).toContain(continuing[0]?.thread ?? "");
-    expect(c?.blocks.some((b) => b.expect === "act" && !b.thread)).toBe(true);
-    expect(c?.blocks.some((b) => b.expect === "context")).toBe(true);
-    // No block names a ticket: code would route that one itself.
-    for (const b of c?.blocks ?? []) expect(b.text).not.toMatch(/[A-Z]+-\d+/);
+    expect(threaded).toHaveLength(2);
+    for (const c of threaded) {
+      const ids = c.threads?.map((t) => t.id) ?? [];
+      const continuing = c.blocks.filter((b) => b.thread);
+      expect(continuing).toHaveLength(1);
+      expect(ids).toContain(continuing[0]?.thread ?? "");
+      expect(c.blocks.some((b) => b.expect === "act" && !b.thread)).toBe(true);
+      expect(c.blocks.some((b) => b.expect === "context")).toBe(true);
+      // No block names a ticket: code would route that one itself.
+      for (const b of c.blocks) expect(b.text).not.toMatch(/[A-Z]+-\d+/);
+      const answer = {
+        blocks: c.blocks.map((b, i) => ({
+          index: String(i + 1),
+          kind: b.expect,
+          item: b.item ?? NO_ITEM,
+          thread: NO_ITEM,
+        })),
+      };
+      expect(scoreNoteCase(c, answer)[0]).toContain(
+        `thread none, expected ${continuing[0]?.thread}`,
+      );
+    }
+  });
+
+  test("the related-work case: a new line shares words with a thread and is about another incident (D69)", () => {
+    const c = NOTE_EVAL_CASES.find((x) => x.name.includes("related work"));
+    const fresh = c?.blocks.find((b) => b.expect === "act" && !b.thread);
+    const summary = c?.threads?.[0]?.summary.toLowerCase() ?? "";
+    expect(summary).toContain("podman");
+    expect(fresh?.text.toLowerCase()).toContain("podman");
+    expect(fresh?.text.toLowerCase()).toContain("incident");
+    // The item it is about lists its own incident among its waits.
+    expect(c?.items.find((i) => i.id === "w-wsl")?.waits?.[0]).toContain("INC6650012");
+    // Answered as the thread's: the case reports it.
     const answer = {
       blocks: (c?.blocks ?? []).map((b, i) => ({
         index: String(i + 1),
         kind: b.expect,
         item: b.item ?? NO_ITEM,
-        thread: NO_ITEM,
+        thread: b.expect === "act" ? "t-podman" : NO_ITEM,
       })),
     };
     expect(scoreNoteCase(c ?? { name: "", blocks: [], items: [] }, answer)[0]).toContain(
-      "thread none, expected t-cert",
+      "thread t-podman, expected none",
     );
   });
 });

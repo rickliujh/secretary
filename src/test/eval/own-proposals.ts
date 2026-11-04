@@ -30,17 +30,21 @@ export function ownPayloads(
     });
 }
 
-/** The model's proposals of one thread, in order, as `ownPayloads` reads them. */
-export const classifyOwn = (inboxItemId: string) =>
+/**
+ * The model's proposals of one thread, in order, as `ownPayloads` reads them.
+ * `before`: intake items whose proposals are left out, so a note continuation's
+ * case scores only what the later line made (D69).
+ */
+export const classifyOwn = (inboxItemId: string, before: ReadonlySet<string> = new Set()) =>
   Effect.gen(function* () {
-    const rows = yield* query((d) =>
+    const rows = (yield* query((d) =>
       d
         .select()
         .from(proposals)
         .where(eq(proposals.inboxItemId, inboxItemId))
         .orderBy(asc(proposals.seq))
         .all(),
-    );
+    )).filter((r) => !r.intakeItemId || !before.has(r.intakeItemId));
     const stored = yield* query((d) =>
       d.select().from(bundles).where(eq(bundles.inboxItemId, inboxItemId)).all(),
     );

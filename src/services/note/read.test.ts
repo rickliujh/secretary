@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import {
   dailyNoteBlocks,
+  dependencies,
   inboxItems,
   intakeItems,
   jiraIssues,
@@ -361,6 +362,71 @@ describe("context and the work item", () => {
     expect(r.threads).toHaveLength(0);
     expect(promptOf(models.calls, 0)).toContain("w1: Renew the cert (the item the user is on now)");
     expect(describeRead(r.res, () => "9:00")).toBe("Read at 9:00: 1 note on Renew the cert.");
+  });
+
+  test("a listed item carries its tickets' open waits, newest first; resolved ones are left out (D69)", async () => {
+    const wait = (
+      id: string,
+      issueKey: string,
+      label: string,
+      externalRef: string | null,
+      status: "open" | "resolved",
+      requestedAt: string,
+    ) =>
+      query((d) =>
+        d.insert(dependencies).values({
+          id,
+          issueKey,
+          kind: externalRef ? "incident" : "person",
+          label,
+          externalRef,
+          status,
+          requestedAt,
+        }),
+      );
+    const { models } = await withNote({ "fast-m": [triage("act")] }, ({ note, today }) =>
+      Effect.gen(function* () {
+        yield* query((d) =>
+          d.insert(workItems).values([
+            { id: "w-wsl", name: "Podman inside WSL", createdAt: nowIso() },
+            { id: "w-quiet", name: "Rotate credentials", createdAt: nowIso() },
+          ]),
+        );
+        yield* query((d) =>
+          d.insert(workItemIssues).values([
+            { workItemId: "w-wsl", issueKey: "PAY-2", role: "primary", addedAt: nowIso() },
+            { workItemId: "w-wsl", issueKey: "PAY-3", role: "related", addedAt: nowIso() },
+            { workItemId: "w-quiet", issueKey: "PAY-4", role: "primary", addedAt: nowIso() },
+          ]),
+        );
+        yield* wait(
+          "d1",
+          "PAY-2",
+          "WSL kernel update",
+          "INC6650012",
+          "open",
+          "2026-11-01T09:00:00Z",
+        );
+        yield* wait("d2", "PAY-3", "Sam: the base image", null, "open", "2026-11-03T09:00:00Z");
+        yield* wait("d3", "PAY-2", "the old incident", "INC1", "resolved", "2026-11-04T09:00:00Z");
+        yield* wait("d4", "PAY-2", "INC2 for the proxy", "INC2", "open", "2026-10-20T09:00:00Z");
+        yield* wait("d5", "PAY-2", "the oldest one", null, "open", "2026-10-01T09:00:00Z");
+        yield* note.save(today, "WSL v3 works for podman\n");
+        yield* note.read("button");
+      }),
+    );
+    const p = promptOf(models.calls, 0);
+    // Newest first, at most three; a reference the label holds is not repeated.
+    const at = ["Sam: the base image", "WSL kernel update (INC6650012)", "INC2 for the proxy"].map(
+      (label) => p.indexOf(String.raw`label\">\n${label}\n</untrusted_input>`),
+    );
+    expect(p).toContain("Waits on:");
+    expect(at.every((n) => n > p.indexOf("Waits on:"))).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(p).not.toContain("the old incident");
+    expect(p).not.toContain("the oldest one");
+    // An item without open waits renders as before.
+    expect(p).toContain(String.raw`- w-quiet: Rotate credentials (tickets PAY-4)\n## Earlier`);
   });
 });
 

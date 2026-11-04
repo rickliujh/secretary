@@ -69,6 +69,23 @@ const QODER_THREAD: NoteTriageThread = {
   tickets: ["PAY-40"],
 };
 
+/** The work item and the conversation of the D69 case: two Podman works, two incidents. */
+const WSL = {
+  id: "w-wsl",
+  name: "Podman inside WSL",
+  tickets: ["PAY-37"],
+  now: "Waiting on the ServiceNow incident INC6650012 for the WSL kernel update",
+  current: false,
+  waits: ["ServiceNow incident INC6650012 (WSL kernel update)"],
+};
+const PODMAN_THREAD: NoteTriageThread = {
+  id: "t-podman",
+  date: "2026-10-30",
+  summary:
+    "Create a Story for the Podman 6.0.2 install failure linked to ServiceNow incident INC6779508",
+  tickets: ["PAY-41"],
+};
+
 export const NOTE_EVAL_CASES: NoteEvalCase[] = [
   {
     name: "a working morning",
@@ -146,6 +163,30 @@ export const NOTE_EVAL_CASES: NoteEvalCase[] = [
         text: "ledger export: staging run finished, every credit note matches",
         expect: "context",
         item: "w-ledger",
+      },
+    ],
+  },
+  {
+    // Related work is not the same conversation (FR-20.8, D69): the WSL line shares
+    // "podman" and "incident" with the Podman 6.0.2 thread but is about another
+    // incident, so it starts its own; a line about that thread's incident continues it.
+    name: "threads: related work with another incident starts its own",
+    items: [WSL, LEDGER],
+    threads: [PODMAN_THREAD, CERT_THREAD],
+    blocks: [
+      {
+        text: "I'm testing new WSL version v3 for podman, it works, notify owner that incident can be closed",
+        expect: "act",
+      },
+      {
+        text: "the 6.0.2 install fix is in, that incident can be closed",
+        expect: "act",
+        thread: "t-podman",
+      },
+      {
+        text: "WSL v3 testing: podman machine starts fine, volume mounts still to check",
+        expect: "context",
+        item: "w-wsl",
       },
     ],
   },

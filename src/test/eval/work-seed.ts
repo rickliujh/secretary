@@ -5,7 +5,7 @@
  * eval and checked without a model by `work-seed.test.ts`.
  */
 import { eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import { dependencies, inboxItems, proposals, workItemIssues, workItems } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
 import { query } from "@/services/db";
@@ -14,21 +14,19 @@ import { getState, SYNC_KEYS } from "@/services/sync/state";
 import { appendEvents } from "@/services/work/events";
 import type { WorkState } from "@/services/work/schema";
 import { blockedByLink, insertIssues, issue } from "@/test/work";
-import type { EvalCreated, EvalWorkItem } from "./cases";
+import type { EvalCreated, EvalWait, EvalWorkItem } from "./cases";
 
-/**
- * Seeds a ticket an earlier thread created on the user's approval (D66): the
- * thread with its executed create, two days before the eval's today, and the
- * ticket in the cache as the sync would hold it.
- */
-export const seedCreated = (c: EvalCreated) =>
+/** A case's seed could not be made from what the model proposed. */
+export class SeedError extends Data.TaggedError("SeedError")<{ readonly message: string }> {}
+
+/** A ticket the user's approval made, in the cache as the sync would hold it. */
+const cacheCreated = (key: string, summary: string, issueType: string, at: string) =>
   Effect.gen(function* () {
     const me = (yield* getState(SYNC_KEYS.username)) ?? "me";
-    const at = "2026-09-22T09:00:00.000Z";
     yield* insertIssues([
-      issue(c.key, {
-        summary: c.summary,
-        issueType: c.issueType,
+      issue(key, {
+        summary,
+        issueType,
         status: "To Do",
         statusCategory: "new",
         assignee: me,
@@ -39,6 +37,61 @@ export const seedCreated = (c: EvalCreated) =>
         syncedAt: at,
       }),
     ]);
+  });
+
+/**
+ * The user approves a thread's first turn (D69): its first create_issue is
+ * executed as `key` (and the ticket cached), and the wait it linked to that
+ * ticket, if any, is made as `wait` and its link_dependency executed. Fails
+ * when the turn proposed no create. Other proposals stay as they are.
+ */
+export const approveFirstTurn = (inboxItemId: string, key: string, wait?: EvalWait) =>
+  Effect.gen(function* () {
+    const rows = yield* query((d) =>
+      d.select().from(proposals).where(eq(proposals.inboxItemId, inboxItemId)).all(),
+    );
+    const live = rows.filter((r) => r.status === "pending");
+    const create = live.find((r) => r.kind === "create_issue");
+    const made = create?.payload as { ref?: string; summary?: string; issueType?: string } | null;
+    if (!create || !made)
+      return yield* new SeedError({ message: "the first turn proposed no create_issue" });
+    const at = nowIso();
+    yield* cacheCreated(key, made.summary ?? key, made.issueType ?? "Story", at);
+    yield* query((d) =>
+      d
+        .update(proposals)
+        .set({ status: "executed", result: { issueKey: key }, decidedAt: at })
+        .where(eq(proposals.id, create.id)),
+    );
+    if (!wait) return;
+    const dependencyId = yield* createDependency({
+      issueKey: key,
+      kind: wait.kind ?? "person",
+      label: wait.label,
+      externalRef: wait.externalRef ?? null,
+      expectedAt: wait.expectedAt ?? null,
+    });
+    const link = live.find(
+      (r) => r.kind === "link_dependency" && (r.payload as { target?: string }).target === made.ref,
+    );
+    if (link)
+      yield* query((d) =>
+        d
+          .update(proposals)
+          .set({ status: "executed", result: { dependencyId }, decidedAt: at })
+          .where(eq(proposals.id, link.id)),
+      );
+  });
+
+/**
+ * Seeds a ticket an earlier thread created on the user's approval (D66): the
+ * thread with its executed create, two days before the eval's today, and the
+ * ticket in the cache as the sync would hold it.
+ */
+export const seedCreated = (c: EvalCreated) =>
+  Effect.gen(function* () {
+    const at = "2026-09-22T09:00:00.000Z";
+    yield* cacheCreated(c.key, c.summary, c.issueType, at);
     const thread = newId();
     yield* query((d) =>
       d.insert(inboxItems).values({
@@ -162,9 +215,10 @@ export const seedWorkItem = (w: EvalWorkItem, contacts: Readonly<Record<string, 
     if (w.wait) {
       const waitId = yield* createDependency({
         issueKey: w.wait.issueKey,
-        kind: "person",
+        kind: w.wait.kind ?? "person",
         label: w.wait.label,
-        ownerPersonId: contactOf(w.wait.owner),
+        ownerPersonId: w.wait.owner ? contactOf(w.wait.owner) : null,
+        externalRef: w.wait.externalRef ?? null,
         expectedAt: w.wait.expectedAt ?? null,
       });
       // Asked before the eval's today, not when the case runs.

@@ -19,7 +19,7 @@ describe("eval cases", () => {
   });
 
   test("a created epic case: the epic is a seeded created ticket, a second epic is forbidden (D66)", () => {
-    const cases = EVAL_CASES.filter((c) => c.created);
+    const cases = EVAL_CASES.filter((c) => c.created?.issueType === "Epic");
     expect(cases).toHaveLength(1);
     const c = cases[0];
     expect(c?.created?.issueType).toBe("Epic");
@@ -122,6 +122,37 @@ describe("eval cases", () => {
     for (const c of away)
       expect(c.expect.required[0]?.target).toBe(contactTarget(c.sender ?? "ana"));
     for (const c of EVAL_CASES.filter((x) => x.wait))
-      expect(fixtureIssues.some((i) => i.key === c.wait?.issueKey)).toBe(true);
+      expect(
+        fixtureIssues.some((i) => i.key === c.wait?.issueKey) ||
+          workItemKeys(c).includes(c.wait?.issueKey ?? "-"),
+      ).toBe(true);
+  });
+
+  test("related work cases: two incident waits, typed and as a note continuation (D69)", () => {
+    const cases = EVAL_CASES.filter((c) => c.workItem?.name === "Podman inside WSL");
+    expect(cases).toHaveLength(2);
+    const [typed, note] = cases;
+    // Typed: the Podman story the user made waits on its own incident.
+    expect(typed?.source).toBe("typed");
+    expect(typed?.created?.key).toBe("PAY-41");
+    expect(typed?.wait).toMatchObject({ issueKey: "PAY-41", kind: "incident" });
+    expect(typed?.workItem?.wait?.externalRef).not.toBe(typed?.wait?.externalRef);
+    // The note: the Podman line first, the WSL line continued into its thread.
+    expect(note?.source).toBe("note");
+    expect(note?.followUpNote).toBe(typed?.text);
+    for (const c of cases) {
+      expect(c.expect.required).toEqual([
+        { kind: "update_dependency", target: "PAY-37", fields: { action: "resolve" } },
+      ]);
+      expect(c.expect.forbiddenKinds).toContain("create_issue");
+    }
+    // Both forbid touching the Podman story or its wait; in the note case the
+    // story and its wait are the thread's own, approved after the first turn.
+    expect(note?.approveFirst).toEqual({ key: "PAY-41", wait: typed?.wait });
+    for (const c of cases)
+      expect(c.expect.forbidden).toEqual([
+        { kind: "update_dependency", target: "PAY-41" },
+        { kind: "add_comment", target: "PAY-41" },
+      ]);
   });
 });
