@@ -80,7 +80,7 @@ export type BundleDraft = {
 };
 
 /** The chores a thread may already have proposed or dropped itself (Phase 26). */
-const CHORE_KINDS: readonly string[] = ["add_comment", "transition_issue", "draft_message"];
+export const CHORE_KINDS: readonly string[] = ["add_comment", "transition_issue", "draft_message"];
 
 /** The tickets a chore acts on. */
 export const choreTargets = (p: ProposalPayload): string[] =>
@@ -438,6 +438,11 @@ export const expandTurn = (
     dropped?: readonly ProposalPayload[];
     /** Ids of the proposals this turn replaces. */
     replacing?: ReadonlySet<string>;
+    /**
+     * The same turn's proposals already stored, of items decided before these
+     * (D68 writes a turn item by item): they count as this turn's own.
+     */
+    earlier?: readonly ProposalPayload[];
   },
 ) =>
   Effect.gen(function* () {
@@ -452,7 +457,7 @@ export const expandTurn = (
     // Settings > Secretary off: no playbooks, as no rules.
     if (!settings.work.enabled)
       return { proposals: turn.map(plain), bundles: [] } satisfies Expanded;
-    const creates = turn.map((p) => p.payload);
+    const creates = [...(ctx.earlier ?? []), ...turn.map((p) => p.payload)];
     // A chore the model proposes itself in this turn, or that the thread proposed
     // and the user or a revision dropped, is not added again on the same ticket.
     const avoid = new Set(

@@ -202,7 +202,9 @@ function RoutingCard({ settings }: { settings: AppSettings }) {
         <CardTitle>Task routing</CardTitle>
         <CardDescription>
           Each task names a tier, not a model. Escalation retries once on the next stronger tier
-          when output fails validation or confidence is low.
+          when output fails validation or confidence is low. A call that gets no answer in time (120
+          s for reading the Inbox), or fails with a server, rate-limit or network error, is tried
+          three times on the same tier, 2 s and then 5 s apart, before it fails.
         </CardDescription>
       </CardHeader>
       <CardContent>

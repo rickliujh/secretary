@@ -9,7 +9,17 @@ export type Scripted =
   | { text: string; finishReason?: "stop" | "content-filter" }
   | { status: number; body?: string }
   /** Streaming only: the model calls a tool (the chat's tool loop). */
-  | { toolCall: { name: string; input: unknown } };
+  | { toolCall: { name: string; input: unknown } }
+  /** No answer until the call is given up: its timeout, a stop or a skip (D68). */
+  | { hang: true };
+
+/** Never resolves; rejects as an abort when the call's signal fires. */
+const hang = (signal: AbortSignal | undefined) =>
+  new Promise<never>((_, reject) => {
+    const abort = () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    if (signal?.aborted) abort();
+    signal?.addEventListener("abort", abort);
+  });
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
@@ -46,6 +56,7 @@ export function makeScriptedModels(scripts: Record<string, Scripted[]>) {
         calls.push({ providerId: provider.id, model, apiKey, prompt: options.prompt });
         const next = queues.get(model)?.shift();
         if (!next) throw new Error(`No scripted response left for ${model}`);
+        if ("hang" in next) return hang(options.abortSignal);
         if ("status" in next) {
           throw new APICallError({
             message: `HTTP ${next.status}`,
@@ -68,6 +79,7 @@ export function makeScriptedModels(scripts: Record<string, Scripted[]>) {
         calls.push({ providerId: provider.id, model, apiKey, prompt: options.prompt });
         const next = queues.get(model)?.shift();
         if (!next) throw new Error(`No scripted response left for ${model}`);
+        if ("hang" in next) return hang(options.abortSignal);
         if ("status" in next)
           throw new APICallError({
             message: `HTTP ${next.status}`,

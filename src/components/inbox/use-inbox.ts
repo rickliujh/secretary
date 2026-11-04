@@ -1,25 +1,13 @@
-import {
-  type Mutation,
-  useIsMutating,
-  useMutation,
-  useMutationState,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { type Mutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
-import { useRef, useState } from "react";
-import { toast } from "sonner";
-import { isInterrupted } from "@/app/errors";
-import { useAppMutation, useErrorToast } from "@/app/hooks";
+import { useEffect, useRef, useState } from "react";
+import { useAppMutation } from "@/app/hooks";
+import { runStore, useNow, useRunFor, useRuns } from "@/app/intake-runs";
 import { queryKeys } from "@/app/query-client";
 import { type AppServices, run } from "@/app/runtime";
 import { requestWorkPass } from "@/app/work";
-import {
-  Intake,
-  type ReplyInput,
-  type Source,
-  type TriageInput,
-  type TriageResult,
-} from "@/services/intake";
+import type { ReplyInput, Source, TriageInput, TurnControl } from "@/services/intake";
+import { isActive, isRunning, type RunRequest, viewOf } from "@/services/intake/runs";
 import { hasInput, type MessagePart } from "@/services/intake/thread";
 import { type ProposalPayload, Proposals } from "@/services/proposals";
 
@@ -51,15 +39,8 @@ export function useInvalidateAfterDecision() {
   };
 }
 
-const summarise = (r: TriageResult) =>
-  r.proposals || r.questions
-    ? `${r.proposals} proposal${r.proposals === 1 ? "" : "s"}${r.questions ? ` and ${r.questions} question${r.questions === 1 ? "" : "s"}` : ""} to review`
-    : "Nothing to do in that input";
-
 /** Names saves of a pending proposal's edits (D44 rows, D57 sprint switch). */
 export const SAVE_EDIT_MUTATION = ["save-edit"] as const;
-/** Names intake turns that revise a thread: replies and re-triage. */
-export const INTAKE_TURN_MUTATION = ["intake-turn"] as const;
 
 export type SaveEditInput = { id: string; edited: ProposalPayload; inboxItemId?: string | null };
 
@@ -117,75 +98,67 @@ export function usePendingEdit(id: string): ProposalPayload | null {
   return pending.at(-1) ?? null;
 }
 
-/** An intake turn (a reply or a re-triage) is revising this thread. */
+/** An intake turn is reading or revising this thread (D68: the run store's). */
 export function useTurnRunning(inboxItemId: string | null) {
-  return (
-    useIsMutating({
-      mutationKey: INTAKE_TURN_MUTATION,
-      predicate: (m) => {
-        const v = m.state.variables as { inboxItemId?: string } | string | undefined;
-        return (
-          !!inboxItemId &&
-          (v === inboxItemId || (typeof v === "object" && v?.inboxItemId === inboxItemId))
-        );
-      },
-    }) > 0
-  );
+  const run = useRunFor(inboxItemId);
+  return !!run && isRunning(run);
 }
 
-/** Runs one intake turn with progress messages and a cancel button. */
+/**
+ * Sends one intake turn to the run store (D68): it starts now or waits behind
+ * the run going; the composer never waits. `isPending` while a turn this hook
+ * sent is queued or running; `progress` is its one line; `cancel` stops it.
+ */
 function useIntakeTurn<I>(
-  f: (
-    intake: Intake["Type"],
-    input: I,
-    onProgress: (m: string) => void,
-  ) => Effect.Effect<TriageResult, unknown>,
-  onDone?: (inboxItemId: string) => void,
-  mutationKey?: readonly unknown[],
+  request: (input: I) => RunRequest,
+  lane: (input: I) => string,
+  onStored?: (inboxItemId: string) => void,
 ) {
-  const onError = useErrorToast();
-  const invalidate = useInvalidateAfterDecision();
-  const [progress, setProgress] = useState<string | null>(null);
-  const controller = useRef<AbortController | null>(null);
-  const mutation = useMutation({
-    ...(mutationKey ? { mutationKey } : {}),
-    mutationFn: (input: I) => {
-      controller.current = new AbortController();
-      return run(
-        Effect.flatMap(Intake, (i) => f(i, input, setProgress)),
-        controller.current.signal,
-      );
-    },
-    onSuccess: (r) => {
-      toast.success(summarise(r));
-      onDone?.(r.inboxItemId);
-    },
-    onError: (e) => {
-      // A cancel is the user's choice, not an error.
-      if (!isInterrupted(e)) onError(e);
-    },
-    onSettled: () => {
-      setProgress(null);
-      invalidate();
-    },
+  const [ids, setIds] = useState<readonly string[]>([]);
+  const runs = useRuns();
+  const mine = runs.filter((r) => ids.includes(r.id));
+  const active = mine.filter(isActive);
+  const current = active.find(isRunning) ?? active[0] ?? null;
+  const now = useNow(!!current);
+  // A new thread opens as soon as its message is stored (FR-21.1).
+  const told = useRef(new Set<string>());
+  const stored = useRef(onStored);
+  stored.current = onStored;
+  useEffect(() => {
+    for (const r of mine)
+      if (r.inboxItemId && r.request.kind === "triage" && !told.current.has(r.id)) {
+        told.current.add(r.id);
+        stored.current?.(r.inboxItemId);
+      }
   });
-  return { ...mutation, progress, cancel: () => controller.current?.abort() };
+  return {
+    mutate: (input: I) => {
+      const id = runStore.startRun(request(input), { lane: lane(input) });
+      setIds((x) => [...x, id]);
+      return id;
+    },
+    isPending: active.length > 0,
+    progress: current ? viewOf(current, now).line : null,
+    cancel: () => {
+      if (current) runStore.stop(current.id);
+    },
+  };
 }
 
-/** Starts a thread (D22). */
-export function useTriage(onDone?: (inboxItemId: string) => void) {
+/** Starts a thread (D22); `onStored` gets its id as soon as the message is in it. */
+export function useTriage(onStored?: (inboxItemId: string) => void) {
   return useIntakeTurn(
-    (i, input: Omit<TriageInput, "onProgress">, onProgress) => i.triage({ ...input, onProgress }),
-    onDone,
+    (input: Omit<TriageInput, keyof TurnControl>): RunRequest => ({ kind: "triage", input }),
+    () => "new",
+    onStored,
   );
 }
 
 /** Replies in a thread: new input, an instruction or an answer (D22). */
 export function useReply() {
   return useIntakeTurn(
-    (i, input: Omit<ReplyInput, "onProgress">, onProgress) => i.reply({ ...input, onProgress }),
-    undefined,
-    INTAKE_TURN_MUTATION,
+    (input: Omit<ReplyInput, keyof TurnControl>): RunRequest => ({ kind: "reply", input }),
+    (input) => input.inboxItemId,
   );
 }
 
@@ -193,13 +166,17 @@ export function useReply() {
  * Replying in one thread as its view does (D22, D61): a typed reply answers
  * the newest open question unless the user opted out (`skip`); pasted input
  * starts new items instead; a choice answers its own question. The Inbox's
- * thread and the note's cards (D67) share it.
+ * thread and the note's cards (D67) share it. `reply.isPending` while a turn of
+ * this thread is queued or running, wherever it was sent from (D68).
  */
 export function useThreadReply<P extends { id: string; kind: string; status: string }>(
   inboxItemId: string,
   proposals: readonly P[] | undefined,
 ) {
-  const reply = useReply();
+  const sender = useReply();
+  const runs = useRuns();
+  const busy = runs.some((r) => isActive(r) && r.inboxItemId === inboxItemId);
+  const reply = { ...sender, isPending: busy };
   const [skipped, skip] = useState<string | null>(null);
   const open = (proposals ?? [])
     .filter((p) => p.kind === "needs_clarification" && p.status === "pending")
@@ -207,7 +184,7 @@ export function useThreadReply<P extends { id: string; kind: string; status: str
   const answering = open && open.id !== skipped ? open : null;
   const send = (m: { parts: MessagePart[]; source?: Source }) => {
     const withInput = hasInput(m.parts, true);
-    reply.mutate({
+    sender.mutate({
       inboxItemId,
       parts: m.parts,
       source: withInput ? m.source : undefined,
@@ -216,8 +193,26 @@ export function useThreadReply<P extends { id: string; kind: string; status: str
   };
   /** A one-click answer: the choice, typed, as the reply to that question (D61). */
   const choose = (proposalId: string, choice: string) =>
-    reply.mutate({ inboxItemId, parts: [{ type: "typed", text: choice }], answers: proposalId });
+    sender.mutate({ inboxItemId, parts: [{ type: "typed", text: choice }], answers: proposalId });
   return { reply, answering, skip, send, choose };
+}
+
+/**
+ * Re-triage through the run store (D68): a turn that stopped or failed part way
+ * reads the items it left; otherwise the thread is read again.
+ */
+function useRetriage(thread?: string) {
+  const runs = useRuns();
+  return {
+    mutate: (inboxItemId: string) =>
+      runStore.startRun({ kind: "retriage", inboxItemId }, { lane: inboxItemId }),
+    isPending: runs.some(
+      (r) =>
+        isActive(r) &&
+        r.inboxItemId === thread &&
+        (r.request.kind === "retriage" || r.request.kind === "resume"),
+    ),
+  };
 }
 
 /** A decision can partly apply before it fails, so views refresh either way. */
@@ -252,7 +247,8 @@ const withProposals =
   (input: I) =>
     Effect.flatMap(Proposals, (p) => f(p, input));
 
-export function useDecisions() {
+/** `inboxItemId`: the thread whose Re-triage `retriage.isPending` follows. */
+export function useDecisions(inboxItemId?: string) {
   const approve = useDecisionMutation(
     withProposals((p, i: { id: string; edited?: ProposalPayload }) =>
       Effect.zipRight(afterWrites({ ids: [i.id] }), p.approve(i.id, i.edited)),
@@ -308,10 +304,7 @@ export function useDecisions() {
     withProposals((p, i: RevokeInput) => p.revoke(i.id, i.confirmed)),
     REVOKE_MUTATION,
   );
-  const retriage = useDecisionMutation(
-    (inboxItemId: string) => Effect.flatMap(Intake, (i) => i.retriage(inboxItemId)),
-    INTAKE_TURN_MUTATION,
-  );
+  const retriage = useRetriage(inboxItemId);
   return {
     approve,
     reject,

@@ -35,13 +35,24 @@ function identity(p: ProposalPayload): string {
 /**
  * `reserved` holds refs already used in the thread (decided creates, and pending
  * proposals of items not being revised); new refs are numbered around them.
+ * `seed` holds proposals the same turn already wrote (a resumed turn, D68): a
+ * repeat of one collapses into it and is not returned again.
  */
 export function mergeItemProposals(
   items: readonly MappedProposal[][],
   reserved: ReadonlySet<string> = new Set(),
+  seed: readonly ProposalPayload[] = [],
 ): MergedProposal[] {
   const out: MergedProposal[] = [];
   const seen = new Map<string, MergedProposal>();
+  for (const payload of seed)
+    seen.set(identity(payload), {
+      payload,
+      rationale: "",
+      evidence: "",
+      confidence: Number.POSITIVE_INFINITY,
+      itemIndex: -1,
+    } as MergedProposal);
   const next = new Map<string, number>();
   // A ref's namespace: "$new", "$person" or "$team".
   const space = (ref: string) => ref.slice(0, ref.indexOf(":"));

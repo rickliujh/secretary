@@ -6,7 +6,7 @@ import { z } from "zod";
 import { type ProposalPayload, placeholderRefs } from "@/services/proposals/schema";
 import { SOURCES } from ".";
 
-const MessagePartSchema = z.object({
+export const MessagePartSchema = z.object({
   /** typed: the user's own words (trusted). pasted: someone else's text (untrusted). */
   type: z.enum(["typed", "pasted"]),
   text: z.string(),
