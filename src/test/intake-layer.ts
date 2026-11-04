@@ -5,7 +5,7 @@ import { CommsLive } from "@/services/comms/live";
 import { ConfluenceClientLive } from "@/services/confluence/live";
 import { IntakeLive } from "@/services/intake/live";
 import { LearningLive } from "@/services/learning/live";
-import { LlmLive } from "@/services/llm/live";
+import { LlmLive, type LlmOptions, makeLlmLayer } from "@/services/llm/live";
 import { makeScriptedModels, type Scripted } from "@/services/llm/test";
 import { DailyNoteLive } from "@/services/note/live";
 import { makeNoteFileTest } from "@/services/note/test";
@@ -29,6 +29,8 @@ export function intakeTestLayer(
     settings?: Partial<AppSettings>;
     /** The vaults' daily note files (D65), by vault name; null: not written yet. */
     noteFiles?: Record<string, string | null>;
+    /** Retry pauses and call timeout of the Llm (D68). */
+    llm?: LlmOptions;
   } = {},
 ) {
   const jira = syncedJiraLayer(extraRoutes, {
@@ -44,7 +46,7 @@ export function intakeTestLayer(
   const models = makeScriptedModels(scripts);
   const noteFile = makeNoteFileTest(opts.noteFiles);
   const llm = Layer.provideMerge(
-    Layer.merge(LlmLive, ConfluenceClientLive),
+    Layer.merge(opts.llm ? makeLlmLayer(opts.llm) : LlmLive, ConfluenceClientLive),
     Layer.merge(jira.layer, models.layer),
   );
   const layer = Layer.provideMerge(
