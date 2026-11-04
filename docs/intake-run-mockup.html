@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Intake run: a live, cancellable, retrying turn (mockup)</title>
+<style>
+  :root {
+    --bg:#fff; --fg:#18181b; --muted:#71717a; --muted-bg:#f4f4f5; --border:#e4e4e7; --card:#fff;
+    --shadow:0 1px 2px rgba(0,0,0,.06); --accent:#2563eb; --accent-bg:#eff6ff; --ok:#16a34a; --ok-bg:#f0fdf4;
+    --warn:#d97706; --warn-bg:#fffbeb; --bad:#dc2626; --bad-bg:#fef2f2; --font:-apple-system,"Inter","Segoe UI",system-ui,sans-serif; --mono:ui-monospace,Menlo,monospace;
+  }
+  [data-theme="dark"] { --bg:#09090b; --fg:#fafafa; --muted:#a1a1aa; --muted-bg:#18181b; --border:#27272a; --card:#111113; --shadow:0 1px 2px rgba(0,0,0,.5); --accent:#60a5fa; --accent-bg:#172554; --ok:#4ade80; --ok-bg:#052e16; --warn:#fbbf24; --warn-bg:#451a03; --bad:#f87171; --bad-bg:#450a0a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 var(--font); }
+  a { color:var(--accent); text-decoration:none; }
+  button { font:inherit; cursor:pointer; }
+  .btn { border:1px solid var(--border); background:var(--card); color:var(--fg); border-radius:6px; padding:4px 10px; font-size:12.5px; }
+  .btn.primary { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+  .btn.ghost { border-color:transparent; background:transparent; color:var(--muted); }
+  .btn.danger { color:var(--bad); }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .shell { display:grid; grid-template-columns:200px 300px 1fr; min-height:100vh; }
+  .nav { border-right:1px solid var(--border); padding:16px 12px; color:var(--muted); font-size:13px; }
+  .nav .brand { color:var(--fg); font-weight:600; margin-bottom:14px; padding-left:8px; }
+  .nav .item { padding:6px 8px; border-radius:6px; display:flex; align-items:center; gap:6px; }
+  .nav .item.on { background:var(--muted-bg); color:var(--fg); }
+  .spin { display:inline-block; width:11px; height:11px; border:1.5px solid var(--muted); border-top-color:transparent; border-radius:50%; animation:spin .9s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .pill { display:inline-flex; align-items:center; gap:5px; padding:1px 8px; border-radius:999px; font-size:11.5px; font-weight:600; }
+  .pill.run { background:var(--accent-bg); color:var(--accent); }
+  .pill.ok { background:var(--ok-bg); color:var(--ok); }
+  .pill.warn { background:var(--warn-bg); color:var(--warn); }
+  .pill.bad { background:var(--bad-bg); color:var(--bad); }
+  .pill.muted { background:var(--muted-bg); color:var(--muted); }
+  /* thread list */
+  .list { border-right:1px solid var(--border); padding:12px 0; }
+  .list h3 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 12px 8px; }
+  .row { padding:10px 14px; border-left:3px solid transparent; }
+  .row.on { background:var(--muted-bg); border-left-color:var(--fg); }
+  .row .t { font-weight:500; display:flex; justify-content:space-between; gap:8px; }
+  .row .s { color:var(--muted); font-size:12.5px; margin-top:2px; display:flex; align-items:center; gap:6px; }
+  /* thread */
+  main { padding:22px 32px 60px; max-width:900px; }
+  .review { border:1px solid var(--border); background:var(--muted-bg); border-radius:10px; padding:14px 18px; margin-bottom:22px; font-size:13px; }
+  .review h1 { font-size:15px; margin:0 0 6px; }
+  .states { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .states .btn.on { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+  .head { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  .head h2 { margin:0; font-size:17px; }
+  .msg { display:flex; gap:10px; margin:14px 0; }
+  .msg .who { width:26px; height:26px; border-radius:50%; background:var(--muted-bg); display:grid; place-items:center; font-size:11px; font-weight:600; color:var(--muted); flex:none; }
+  .msg .body { flex:1; }
+  .msg .meta { color:var(--muted); font-size:12px; display:flex; gap:10px; align-items:center; }
+  .msg .meta .edit { opacity:0; transition:opacity .12s; }
+  .msg:hover .meta .edit { opacity:1; }
+  .bubble { background:var(--muted-bg); border-radius:10px; padding:8px 12px; margin-top:4px; white-space:pre-wrap; }
+  .pasted { background:var(--accent-bg); border-radius:4px; padding:0 3px; }
+  /* the run card */
+  .run { border:1px solid var(--border); border-radius:10px; background:var(--card); box-shadow:var(--shadow); padding:12px 14px; margin-top:8px; }
+  .run .top { display:flex; align-items:center; gap:10px; }
+  .run .top .title { font-weight:600; }
+  .run .top .time { font:12px var(--mono); color:var(--muted); }
+  .run .top .sp { flex:1; }
+  .steps { list-style:none; margin:10px 0 0; padding:0; display:grid; gap:5px; font-size:13px; }
+  .steps li { display:flex; align-items:center; gap:8px; color:var(--muted); }
+  .steps li .dot { width:14px; height:14px; border-radius:50%; border:1.5px solid var(--border); display:grid; place-items:center; flex:none; font-size:9px; }
+  .steps li.done { color:var(--fg); } .steps li.done .dot { background:var(--ok); border-color:var(--ok); color:#fff; }
+  .steps li.now { color:var(--fg); font-weight:500; } .steps li.now .dot { border-color:var(--accent); border-top-color:transparent; animation:spin .9s linear infinite; }
+  .steps li.bad .dot { background:var(--bad); border-color:var(--bad); color:#fff; }
+  .steps li .sub { color:var(--muted); font-weight:400; font-size:12px; }
+  .notice { margin-top:10px; border-radius:8px; padding:8px 10px; font-size:13px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .notice.warn { background:var(--warn-bg); color:var(--warn); }
+  .notice.bad { background:var(--bad-bg); color:var(--bad); }
+  .notice.ok { background:var(--ok-bg); color:var(--ok); }
+  .notice .txt { flex:1; min-width:200px; }
+  .notice .btn { font-size:12px; }
+  .card { border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:8px; }
+  .card .k { font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; font-weight:600; }
+  .card .w { margin:2px 0 6px; }
+  .card .r { display:flex; gap:6px; }
+  .ghostcard { border:1px dashed var(--border); border-radius:8px; padding:10px; margin-top:8px; color:var(--muted); font-size:12.5px; display:flex; gap:8px; align-items:center; }
+  .shimmer { height:10px; border-radius:5px; background:linear-gradient(90deg,var(--muted-bg) 25%,var(--border) 50%,var(--muted-bg) 75%); background-size:200% 100%; animation:sh 1.4s infinite; }
+  @keyframes sh { 0% { background-position:200% 0 } 100% { background-position:-200% 0 } }
+  .inline-note { display:flex; gap:6px; margin-top:10px; }
+  .inline-note input { flex:1; font:inherit; font-size:13px; padding:6px 9px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--fg); }
+  /* composer */
+  .composer { position:sticky; bottom:0; margin-top:24px; border:1px solid var(--border); border-radius:10px; background:var(--card); padding:10px 12px; }
+  .composer .queued { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12.5px; margin-bottom:8px; }
+  .composer .box { min-height:44px; color:var(--muted); }
+  .composer .bar { display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .composer .bar .sp { flex:1; }
+  .composer select { font:inherit; font-size:12.5px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--fg); padding:3px 6px; }
+  .hint { color:var(--muted); font-size:13px; margin-top:22px; }
+  .section-note { color:var(--muted); font-size:12px; margin:26px 0 6px; text-transform:uppercase; letter-spacing:.04em; }
+  kbd { font:11px var(--mono); border:1px solid var(--border); border-bottom-width:2px; border-radius:4px; padding:0 4px; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="nav">
+    <div class="brand">Secretary</div>
+    <div class="item">Today</div>
+    <div class="item">Note</div>
+    <div class="item on">Inbox <span class="pill run" id="navpill" style="margin-left:auto"><span class="spin"></span> 1 running</span></div>
+    <div class="item">Waiting</div>
+    <div class="item">Tickets</div>
+    <div class="item">Sprint</div>
+    <div class="item">People</div>
+    <div class="item">Chat</div>
+  </aside>
+
+  <aside class="list">
+    <h3>Threads</h3>
+    <div class="row on">
+      <div class="t"><span>Sarah on the cert and the Q3 numbers</span><span class="pill run" id="rowpill"><span class="spin"></span></span></div>
+      <div class="s" id="rowsub">Deciding item 1 of 2 · <span class="elapsed">0:24</span></div>
+    </div>
+    <div class="row">
+      <div class="t"><span>Qoder migration</span><span class="pill muted">2</span></div>
+      <div class="s">Note · Nov 3</div>
+    </div>
+    <div class="row">
+      <div class="t"><span>Ledger export staging run</span><span class="pill ok">done</span></div>
+      <div class="s">Teams · from Priya</div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="review">
+      <h1>Mockup for review: the intake run as a live card</h1>
+      Today the page greys out while a message is read, the only signs of life are the Send button's spinner and a small pulsing line, there is no way to stop or change anything, and a 120 s model timeout kills the whole turn. In this design the message lands in the thread at once, a run card under it shows each step with its time, cards appear per item as they finish, you can stop the run or pull the message back to edit, the composer stays open (a second message queues), and a timed-out call is retried up to three times on its own. Pick a state:
+      <div class="states">
+        <button class="btn on" onclick="show('running',this)">Running</button>
+        <button class="btn" onclick="show('partial',this)">First item done</button>
+        <button class="btn" onclick="show('slow',this)">Slow call</button>
+        <button class="btn" onclick="show('retry',this)">Retrying</button>
+        <button class="btn" onclick="show('failed',this)">Failed after 3</button>
+        <button class="btn" onclick="show('cancelled',this)">Stopped</button>
+        <button class="btn" onclick="show('done',this)">Done</button>
+        <span style="flex:1"></span>
+        <button class="btn ghost" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? '' : 'dark'">Light / dark</button>
+      </div>
+    </div>
+
+    <div class="head"><h2 id="title">Reading…</h2><span class="pill muted">Teams · from Sarah</span><span style="flex:1"></span><button class="btn">Approve all</button></div>
+
+    <!-- the message, with Edit while it runs -->
+    <div class="msg">
+      <div class="who">You</div>
+      <div class="body">
+        <div class="meta"><span>just now</span><span class="edit" id="editlink"><a href="#" title="Stops the run and puts the text back in the box">Edit</a> · <a href="#" title="Stops the run; the message stays">Stop</a></span></div>
+        <div class="bubble">Sarah: <span class="pasted">The cert will be ready Friday now, not Wednesday. Also can you send Dana the Q3 numbers before the review?</span>
+make a wait for the cert and a task for the numbers</div>
+      </div>
+    </div>
+
+    <!-- the run card -->
+    <div class="msg">
+      <div class="who">S</div>
+      <div class="body">
+        <div class="run" id="run">
+          <div class="top">
+            <span class="title" id="runtitle">Reading your message</span>
+            <span class="pill run" id="runpill"><span class="spin"></span> running</span>
+            <span class="sp"></span>
+            <span class="time"><span class="elapsed">0:24</span> · standard · claude-haiku-5-5</span>
+            <button class="btn ghost" id="cancelbtn">Stop</button>
+          </div>
+          <ul class="steps" id="steps">
+            <li class="done"><span class="dot">✓</span>Split into items <span class="sub">2 items · 1 s</span></li>
+            <li class="done"><span class="dot">✓</span>Looked up tickets, people and your work <span class="sub">PAY-12, Sarah, Dana · 0.3 s</span></li>
+            <li class="now" id="s3"><span class="dot"></span>Deciding item 1 of 2 <span class="sub" id="s3sub">the cert date · 22 s</span></li>
+            <li id="s4"><span class="dot"></span>Deciding item 2 of 2 <span class="sub">the Q3 numbers</span></li>
+            <li id="s5"><span class="dot"></span>Checking the answer and writing cards</li>
+          </ul>
+
+          <!-- slow -->
+          <div class="notice warn hidden" id="slow">
+            <span class="txt">This call is taking long (<span class="elapsed2">48 s</span>). It gets 120 s; then I try again, up to three times.</span>
+            <button class="btn">Try again now</button><button class="btn">Use the fast tier</button>
+          </div>
+          <!-- retry -->
+          <div class="notice warn hidden" id="retrying">
+            <span class="txt"><b>Attempt 2 of 3.</b> The first call gave no answer in 120 s. Trying the same model again; the third attempt would use the fast tier.</span>
+            <button class="btn">Skip to fast tier</button>
+          </div>
+          <!-- failed -->
+          <div class="notice bad hidden" id="failed">
+            <span class="txt"><b>Three attempts timed out</b> on claude-haiku-5-5 (6 min in all). Item 1's cards are kept; item 2 was not read. Your message is kept.</span>
+            <button class="btn primary">Try item 2 again</button><button class="btn">Fast tier</button><button class="btn">Edit message</button><a href="#" style="font-size:12px">Models in Settings</a>
+          </div>
+          <!-- cancelled -->
+          <div class="notice ok hidden" id="cancelled" style="background:var(--muted-bg);color:var(--muted)">
+            <span class="txt">Stopped after 31 s. Item 1's cards are kept; nothing was proposed for item 2.</span>
+            <button class="btn">Resume item 2</button><button class="btn">Edit message</button>
+          </div>
+          <!-- done -->
+          <div class="notice ok hidden" id="done">
+            <span class="txt">Done in 41 s · 3 cards, 0 questions · 2 model calls (1 repair).</span>
+          </div>
+
+          <!-- partial results: item 1 cards -->
+          <div id="item1" class="hidden">
+            <div class="card">
+              <div class="k">Update wait · PAY-12 · from item 1</div>
+              <div class="w">Cert from Sarah: expected Friday Nov 7 (was Wednesday)</div>
+              <div class="r"><button class="btn primary">Approve</button><button class="btn">Edit</button><button class="btn ghost">Reject</button></div>
+            </div>
+          </div>
+          <div id="item2" class="hidden">
+            <div class="card">
+              <div class="k">Create Task · ASK · from item 2</div>
+              <div class="w">Send Dana the Q3 numbers before the review</div>
+              <div class="r"><button class="btn primary">Approve</button><button class="btn">Edit</button><button class="btn ghost">Reject</button></div>
+            </div>
+            <div class="card">
+              <div class="k">Comment · PAY-12 · from item 2</div>
+              <div class="w">Q3 numbers go to Dana before the review; the cert lands Friday.</div>
+              <div class="r"><button class="btn primary">Approve</button><button class="btn">Edit</button><button class="btn ghost">Reject</button></div>
+            </div>
+          </div>
+          <div id="ghost2" class="ghostcard hidden"><span class="spin"></span> Item 2's cards appear here when it is decided <span class="shimmer" style="flex:1"></span></div>
+
+          <!-- a note while it runs -->
+          <div class="inline-note" id="inlinenote">
+            <input placeholder="Add something while it runs: “assign the task to me”, “the wait is on Platform, not Sarah”. Applied as soon as the run ends.">
+            <button class="btn">Add</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- composer -->
+    <div class="composer">
+      <div class="queued" id="queued"><span class="pill muted">1 queued</span> “also link it to the cert wait” · sent when this run ends · <a href="#">remove</a></div>
+      <div class="box">Type or paste the next thing… (the run keeps going; a message sent now waits its turn)</div>
+      <div class="bar">
+        <select><option>Teams</option><option>Email</option><option>Meeting</option></select>
+        <span class="sp"></span>
+        <span style="color:var(--muted);font-size:12px">Esc stops the run · <kbd>⌘</kbd><kbd>↵</kbd> sends</span>
+        <button class="btn primary" id="sendbtn">Queue</button>
+      </div>
+    </div>
+
+    <p class="hint">What changes under the hood: the run's progress becomes a stream of events (step, item, attempt, elapsed, cards of a finished item) that the thread, the list row and the nav badge all read, so leaving the page never loses it; a model call that times out or gets a 5xx/429 is retried on its own (attempt 2 same tier, attempt 3 fast tier, short pauses between), and only then does the turn fail; the cards of each item are written as that item finishes, so a failure or a stop keeps what was done; Stop and Edit cancel the calls in flight; the composer never greys out, and a message sent during a run waits for it, as does a note added from the run card.</p>
+
+    <div class="section-note">Open questions for you</div>
+    <ul class="hint" style="margin-top:0">
+      <li>A message sent while a run is going: queue it behind the run (as here) or start a second run at once?</li>
+      <li>Edit during a run: stop and put the text back in the box (as here), or keep the run and apply the edit afterwards as a follow-up?</li>
+      <li>Retries: attempt 3 on the fast tier (as here) or all three on the same tier?</li>
+      <li>The step list: always shown (as here) or a plain spinner for the first 5 s and the list only when it takes longer?</li>
+      <li>Per-call timeout stays 120 s? It is a setting today; a shorter one (60 s) with three attempts fails faster on a stuck provider.</li>
+    </ul>
+  </main>
+</div>
+<script>
+  const $ = id => document.getElementById(id);
+  const all = ['slow','retrying','failed','cancelled','done','item1','item2','ghost2'];
+  function setStep(id, cls, sub) { const li = $(id); li.className = cls; if (sub !== undefined) li.querySelector('.sub') ? li.querySelector('.sub').textContent = sub : null; }
+  function show(state, btn) {
+    document.querySelectorAll('.states .btn').forEach(b => b.classList.remove('on')); btn.classList.add('on');
+    all.forEach(id => $(id).classList.add('hidden'));
+    const running = !['failed','cancelled','done'].includes(state);
+    $('runpill').innerHTML = running ? '<span class="spin"></span> running' : state === 'done' ? 'done' : state === 'failed' ? 'failed' : 'stopped';
+    $('runpill').className = 'pill ' + (running ? 'run' : state === 'done' ? 'ok' : state === 'failed' ? 'bad' : 'muted');
+    $('rowpill').innerHTML = $('runpill').innerHTML; $('rowpill').className = $('runpill').className;
+    $('navpill').classList.toggle('hidden', !running);
+    $('cancelbtn').classList.toggle('hidden', !running);
+    $('inlinenote').classList.toggle('hidden', !running);
+    $('editlink').style.opacity = running ? '' : '0';
+    $('queued').classList.toggle('hidden', !running);
+    $('sendbtn').textContent = running ? 'Queue' : 'Send';
+    $('title').textContent = running ? 'Reading…' : 'Sarah on the cert and the Q3 numbers';
+    // steps
+    setStep('s3','now','the cert date · 22 s'); setStep('s4','', 'the Q3 numbers'); setStep('s5','');
+    $('runtitle').textContent = 'Reading your message';
+    if (state === 'running') { $('rowsub').innerHTML = 'Deciding item 1 of 2 · <span class="elapsed">0:24</span>'; }
+    if (state === 'partial') { setStep('s3','done','the cert date · 23 s · 1 card'); setStep('s4','now','the Q3 numbers · 6 s'); $('item1').classList.remove('hidden'); $('ghost2').classList.remove('hidden'); $('rowsub').innerHTML = 'Deciding item 2 of 2 · 1 card so far'; }
+    if (state === 'slow') { $('slow').classList.remove('hidden'); setStep('s3','now','the cert date · 48 s'); $('rowsub').innerHTML = 'Slow call · 0:48'; }
+    if (state === 'retry') { $('retrying').classList.remove('hidden'); setStep('s3','now','the cert date · attempt 2 · 4 s'); $('rowsub').innerHTML = 'Attempt 2 of 3 · 2:04'; }
+    if (state === 'failed') { $('failed').classList.remove('hidden'); setStep('s3','done','the cert date · 23 s · 1 card'); setStep('s4','bad','the Q3 numbers · 3 attempts timed out'); $('item1').classList.remove('hidden'); $('runtitle').textContent = 'Could not finish'; $('rowsub').innerHTML = 'Failed · 1 card kept'; }
+    if (state === 'cancelled') { $('cancelled').classList.remove('hidden'); setStep('s3','done','the cert date · 23 s · 1 card'); setStep('s4','','the Q3 numbers · stopped'); $('item1').classList.remove('hidden'); $('runtitle').textContent = 'Stopped'; $('rowsub').innerHTML = 'Stopped · 1 card kept'; }
+    if (state === 'done') { $('done').classList.remove('hidden'); setStep('s3','done','the cert date · 23 s · 1 card'); setStep('s4','done','the Q3 numbers · 15 s · 2 cards'); setStep('s5','done'); $('item1').classList.remove('hidden'); $('item2').classList.remove('hidden'); $('runtitle').textContent = 'Read in 41 s'; $('rowsub').innerHTML = '3 cards waiting'; }
+    const d4 = $('s4').querySelector('.dot'); d4.textContent = $('s4').classList.contains('done') ? '✓' : $('s4').classList.contains('bad') ? '!' : '';
+    $('s3').querySelector('.dot').textContent = $('s3').classList.contains('done') ? '✓' : '';
+    $('s5').querySelector('.dot').textContent = $('s5').classList.contains('done') ? '✓' : '';
+  }
+  // live clock on the running states
+  let t = 24; setInterval(() => { t++; const m = Math.floor(t/60), s = String(t%60).padStart(2,'0'); document.querySelectorAll('.elapsed').forEach(e => e.textContent = `${m}:${s}`); document.querySelectorAll('.elapsed2').forEach(e => e.textContent = `${t+24} s`); }, 1000);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { const b = [...document.querySelectorAll('.states .btn')].find(b => b.textContent === 'Stopped'); show('cancelled', b); } });
+</script>
+</body>
+</html>
