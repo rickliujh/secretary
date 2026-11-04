@@ -33,9 +33,10 @@
  * tickets. No new blocks, no model call. Nothing here calls `JiraClient`; the
  * close is a proposal like any other.
  */
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { Effect, Either } from "effect";
 import {
+  dependencies,
   inboxItems,
   inboxMessages,
   intakeItems,
@@ -51,6 +52,7 @@ import { ISSUE_KEY_SCAN } from "@/prompts/classify";
 import {
   buildNoteTriagePrompt,
   buildNoteTriageSchema,
+  MAX_ITEM_WAITS,
   NOTE_TRIAGE_MAX_BLOCKS,
   type NoteTriageItem,
   type NoteTriageOutput,
@@ -130,17 +132,43 @@ const candidateItems = Effect.gen(function* () {
       )
       .all(),
   );
+  // Their tickets' open waits, newest first (D69): which incident is whose.
+  const keys = [...new Set(links.map((l) => l.issueKey))];
+  const waits = keys.length
+    ? yield* query((d) =>
+        d
+          .select({
+            issueKey: dependencies.issueKey,
+            label: dependencies.label,
+            externalRef: dependencies.externalRef,
+          })
+          .from(dependencies)
+          .where(and(inArray(dependencies.issueKey, keys), ne(dependencies.status, "resolved")))
+          .orderBy(desc(dependencies.requestedAt), desc(dependencies.id))
+          .all(),
+      )
+    : [];
   return items.map((i): NoteTriageItem => {
     const state = parseState(i.state);
+    const tickets = links.filter((l) => l.workItemId === i.id).map((l) => l.issueKey);
+    const open = waits
+      .filter((w) => tickets.includes(w.issueKey))
+      .slice(0, MAX_ITEM_WAITS)
+      .map((w) => waitLine(w.label, w.externalRef));
     return {
       id: i.id,
       name: i.name,
-      tickets: links.filter((l) => l.workItemId === i.id).map((l) => l.issueKey),
+      tickets,
       now: state?.currentStep || null,
       current: i.current,
+      ...(open.length ? { waits: open } : {}),
     };
   });
 });
+
+/** A wait as the triage sees it: "label (reference)", the reference left out when the label has it. */
+export const waitLine = (label: string, ref: string | null) =>
+  ref && !label.includes(ref) ? `${label} (${ref})` : label;
 
 /** The newest note thread that created or acts on a ticket the block names (D66). */
 export function namedThread(text: string, threads: readonly NoteThread[]): NoteThread | null {

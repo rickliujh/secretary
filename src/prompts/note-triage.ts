@@ -3,7 +3,9 @@
  * note lead to anything. One call per reading for up to 30 blocks, fast tier.
  * Per block: `act` (handled like a message the user typed), `context` (a
  * remark about one of the work items code listed) or `skip`; with `act`, the
- * earlier note thread it continues, if any (version 2, D66). The schema is
+ * earlier note thread it continues, if any (version 2, D66), which is the
+ * same ticket, incident or ask, not merely related work (version 3, D69;
+ * each item shows its open waits so the call sees whose incident is whose). The schema is
  * flat and portable (D21): enums built from the block numbers, the candidate
  * item ids and the listed thread ids, "(none)" for no item and no thread.
  * Every output is checked in code.
@@ -14,8 +16,15 @@
 import { z } from "zod";
 import { untrusted } from "./common";
 
-/** 2: the earlier note threads and the `thread` answer (D66). */
-export const NOTE_TRIAGE_PROMPT_VERSION = 2;
+/**
+ * 3: the thread rule of D69 (the same ticket, incident, ask or to-do, not the
+ * same product or kind of thing; in doubt a new conversation) and each work
+ * item's open waits; 2: the earlier note threads and the `thread` answer (D66).
+ */
+export const NOTE_TRIAGE_PROMPT_VERSION = 3;
+
+/** Most open waits listed under one work item (D69). */
+export const MAX_ITEM_WAITS = 3;
 
 /** Most blocks in one call; the rest wait for the next reading (design.md 7.2). */
 export const NOTE_TRIAGE_MAX_BLOCKS = 30;
@@ -41,6 +50,11 @@ export type NoteTriageItem = {
   /** One line of what the secretary believes now, if anything. */
   now: string | null;
   current: boolean;
+  /**
+   * The open waits of its tickets as "label (reference)", newest first, at
+   * most `MAX_ITEM_WAITS` shown (version 3, D69); absent or empty: none.
+   */
+  waits?: string[];
 };
 
 /** An earlier conversation that came from the note (D66), as code lists it. */
@@ -138,7 +152,15 @@ export function buildNoteTriagePrompt(input: NoteTriageInput) {
   const items = input.items.length
     ? input.items.map(
         (i) =>
-          `- ${i.id}: ${i.name}${i.current ? " (the item the user is on now)" : ""} (tickets ${i.tickets.join(", ") || "none"})${i.now ? `\n  Now: ${i.now}` : ""}`,
+          `- ${i.id}: ${i.name}${i.current ? " (the item the user is on now)" : ""} (tickets ${i.tickets.join(", ") || "none"})${i.now ? `\n  Now: ${i.now}` : ""}${
+            i.waits?.length
+              ? `\n  Waits on:\n${i.waits
+                  .slice(0, MAX_ITEM_WAITS)
+                  // A label may come from a model reading pasted text: it stays untrusted.
+                  .map((w) => untrusted(oneLine(w), { source: "a wait's label" }))
+                  .join("\n")}`
+              : ""
+          }`,
       )
     : ["(none)"];
   const threads = input.threads?.length
@@ -156,7 +178,7 @@ Rules you must follow:
 - context: the block is only a remark about the progress of one of the listed work items, with nothing to do ("PAY-12 going well, halfway through the tests"). Give that item's id. Never context for an item that is not listed.
 - skip: everything else. Headings or links alone, personal lines ("Lunch with Mia", "gym at 6"), moods and thoughts with no ticket, person or date, notes to self with nothing to do.
 - When a block both reports progress and asks for something, it is act.
-- thread: for act, when the block continues, changes or reports on what one of the earlier conversations from the note is about (the same work, the same tickets), give that conversation's id. Act without one ("${NO_ITEM}") for anything else. thread is "${NO_ITEM}" for context and skip.
+- thread: for act, give an earlier conversation's id only when the block continues, changes or reports on the same ticket, incident, ask or to-do that conversation is about. The same product, tool, team or kind of thing is not enough: a block about related work with a different ticket, incident or ask is "${NO_ITEM}", a new conversation. A work item's "Waits on" list shows which incident or wait belongs to which work. When in doubt, "${NO_ITEM}": a new conversation still sees the tickets the earlier ones made. thread is "${NO_ITEM}" for context and skip.
 - Answer for every block exactly once, by its number. item is "${NO_ITEM}" unless kind is context.`,
     prompt: [
       `Today is ${input.today}.`,

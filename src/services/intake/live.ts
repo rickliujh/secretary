@@ -120,6 +120,11 @@ type Job = {
   source?: string;
   /** The input is the user's own typed words, not pasted and not the chat's (D55). */
   ownInput: boolean;
+  /**
+   * A later line of the daily note placed in this thread by the note's reading
+   * (D69): it may be about other work, and the prompt says so.
+   */
+  noteLine?: boolean;
   /** The questions the model asked about this item so far (D55 answers). */
   questions?: string[];
   /** Proposals this turn replaces (every revised item's), so none is offered as existing. */
@@ -429,6 +434,8 @@ const make = Effect.gen(function* () {
               decided: ctx.thread.decided,
               pending,
               others,
+              // A note line continued into a thread with other items (D69).
+              ...(job.noteLine && others.length ? { noteLine: true as const } : {}),
               ...(questions.length ? { questions } : {}),
               ...(Object.keys(sprintChoices).length ? { sprintChoices } : {}),
             }
@@ -927,6 +934,8 @@ const make = Effect.gen(function* () {
           askedOn: snapshot?.askedOn ?? snapshot?.today,
           source: snapshot?.source ?? (idx === 0 ? thread.item.source : "other"),
           ownInput: snapshot?.ownInput ?? first,
+          // A note line placed in this thread stays one when it is revised (D69).
+          ...(snapshot?.thread?.noteLine ? { noteLine: true } : {}),
           questions: thread.questionsByIdx.get(idx) ?? [],
         };
       });
@@ -976,6 +985,8 @@ const make = Effect.gen(function* () {
           revising: [],
           source,
           ownInput,
+          // A daily note block the reading continued this thread with (D66, D69).
+          ...(asInput && source === "note" ? { noteLine: true } : {}),
         }));
         const results = yield* classifyAll(
           inboxItemId,
