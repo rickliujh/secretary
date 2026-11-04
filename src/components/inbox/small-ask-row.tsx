@@ -27,6 +27,7 @@ import { parsePointsInput, pointsText } from "@/services/tickets/edit";
 import { ProposalCard } from "./proposal-card";
 import { editedPoints, issueOptions } from "./proposal-fields";
 import { RevokeControl, RevokeOutcome } from "./revoke-control";
+import { LockHint, useRunLocked } from "./run-lock";
 import { SMALL_ASK_KEYS } from "./small-ask-keys";
 import { SprintChip } from "./sprint-choice";
 import { useDecisions, useTurnRunning } from "./use-inbox";
@@ -77,7 +78,9 @@ export function SmallAskRow({
   const pendingIds = [create, ...members].filter((p) => p.status === "pending").map((p) => p.id);
   // Track waits for saves of the row's fields and switch (D57); a running turn locks the chip.
   const turn = useTurnRunning(create.inboxItemId);
-  const busy = track.isPending || rejecting;
+  // A run reading its item again locks the row until it is done (D68).
+  const locked = useRunLocked(create.id, ...members.map((m) => m.id));
+  const busy = track.isPending || rejecting || locked;
   const result = create.result as Result;
   const failed = [create, ...members].filter((p) => p.status === "failed");
   const warnings = [create, ...members]
@@ -253,16 +256,18 @@ export function SmallAskRow({
           )}
           <span className="text-xs text-muted-foreground">in {payload.projectKey}</span>
           <span className="ml-auto" />
-          <Button size="sm" disabled={busy || ids.length === 0} onClick={onTrack}>
-            {track.isPending ? (
-              <Loader2 className="animate-spin" />
-            ) : create.status === "failed" ? (
-              <RotateCcw />
-            ) : (
-              <Check />
-            )}
-            {create.status === "failed" ? "Retry" : "Track"}
-          </Button>
+          <LockHint locked={locked}>
+            <Button size="sm" disabled={busy || ids.length === 0} onClick={onTrack}>
+              {track.isPending ? (
+                <Loader2 className="animate-spin" />
+              ) : create.status === "failed" ? (
+                <RotateCcw />
+              ) : (
+                <Check />
+              )}
+              {create.status === "failed" ? "Retry" : "Track"}
+            </Button>
+          </LockHint>
           {create.status === "pending" && (
             <Button size="sm" variant="ghost" disabled={busy} onClick={onReject}>
               <X /> Reject

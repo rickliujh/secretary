@@ -106,4 +106,31 @@ describe("mergeItemProposals", () => {
     expect(merged.map((x) => x.payload.kind)).toEqual(["create_issue", "transition_issue"]);
     expect(merged[1]?.confidence).toBe(0.9);
   });
+
+  test("a resumed turn's repeat of what it already wrote collapses into it (seed)", () => {
+    const written = ProposalPayloadSchema.parse({
+      kind: "create_issue",
+      ref: "$new:1",
+      projectKey: "PAY",
+      issueType: "Story",
+      summary: "Export refunds",
+    });
+    const merged = mergeItemProposals(
+      [
+        [
+          m({
+            kind: "create_issue",
+            ref: "$new:1",
+            projectKey: "PAY",
+            issueType: "Story",
+            summary: "Export refunds",
+          }),
+          m({ kind: "add_comment", target: "$new:1", bodyMd: "context" }),
+        ],
+      ],
+      new Set(["$new:1"]),
+      [written],
+    );
+    expect(merged.map((x) => x.payload)).toMatchObject([{ kind: "add_comment", target: "$new:1" }]);
+  });
 });

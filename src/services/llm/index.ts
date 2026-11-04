@@ -1,10 +1,10 @@
 import type { LanguageModel, ModelMessage, PrepareStepFunction, ToolSet, UIMessageChunk } from "ai";
 import { Context, type Effect } from "effect";
 import type { z } from "zod";
-import type { LlmError } from "./errors";
+import type { LlmError, LlmErrorKind } from "./errors";
 import type { ModelRequest } from "./providers";
 import type { TaskRoute } from "./routing";
-import type { TaskType, Tier } from "./tasks";
+import type { InternalTask, TaskType, Tier } from "./tasks";
 
 export * from "./errors";
 export * from "./tasks";
@@ -20,7 +20,61 @@ export type CallInfo = {
   usage: Usage;
 };
 
-export type ObjectRequest<T> = {
+/**
+ * Retries in the call runner (D68): a call that times out or fails with a 5xx,
+ * 429 or network error is tried again on the same tier, up to this many
+ * attempts in all, with these pauses between them.
+ */
+export const RETRY_ATTEMPTS = 3;
+export const RETRY_PAUSES_MS: readonly number[] = [2_000, 5_000];
+/** The error kinds a retry can cure; schema, auth, refusal and config failures are not retried. */
+export const RETRYABLE_KINDS: readonly LlmErrorKind[] = ["timeout", "network", "rate_limit"];
+
+/** One provider call attempt about to start (D68), for progress. */
+export type AttemptEvent = {
+  task: TaskType | InternalTask;
+  /** 1-based; counts every attempt, including the ones the user cut short. */
+  number: number;
+  /** Failed attempts so far that count against `of` (the user's "try again now" does not). */
+  failures: number;
+  of: number;
+  /** Why it is tried again: null for the first attempt, "user" when the user asked. */
+  reason: LlmErrorKind | "user" | null;
+  /** Milliseconds of pause before it starts. */
+  pauseMs: number;
+  tier: Tier | null;
+  providerId: string;
+  model: string;
+  repair: boolean;
+  escalated: boolean;
+  /** Epoch ms when the attempt was scheduled; it starts `pauseMs` later. */
+  at: number;
+};
+
+/** The user cut the call short: try again now, on this tier when given (D68). */
+export type SkipRequest = { tier?: Tier };
+
+export type CallHooks = {
+  onAttempt?: (e: AttemptEvent) => void;
+  /**
+   * Called for each attempt and each pause; resolves when the user asks to stop
+   * waiting for it ("Try again now", "Use the fast tier"). Aborted when the
+   * attempt ends on its own.
+   */
+  skip?: (signal: AbortSignal) => Promise<SkipRequest>;
+};
+
+/** Per-call options of `object` and `text`. */
+export type CallOptions = {
+  /**
+   * A one-off tier instead of the task's routing (D68: the fast-tier buttons);
+   * escalation still follows the routing, from that tier.
+   */
+  tier?: Tier;
+  hooks?: CallHooks;
+};
+
+export type ObjectRequest<T> = CallOptions & {
   schema: z.ZodType<T>;
   system?: string;
   prompt: string;
@@ -41,7 +95,7 @@ export type ObjectResult<T> = CallInfo & {
   lowConfidence: boolean;
 };
 
-export type TextRequest = { system?: string; prompt: string };
+export type TextRequest = CallOptions & { system?: string; prompt: string };
 
 /** A streamed tool loop (chat, design.md D25). */
 export type StreamRequest = {

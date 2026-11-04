@@ -23,6 +23,7 @@ import { directoryName } from "@/services/proposals/thread-refs";
 import { ProposalEditDialog } from "./proposal-edit-dialog";
 import { isEditable, viewPayload } from "./proposal-fields";
 import { RevokeControl, RevokeOutcome } from "./revoke-control";
+import { LockHint, useRunLocked } from "./run-lock";
 import { SprintSwitch, sprintOutcome } from "./sprint-choice";
 import { useDecisions, usePendingEdit } from "./use-inbox";
 
@@ -359,7 +360,9 @@ export function ProposalCard({
   const drafts = useDraftPanel();
   const draftId = result?.communicationId;
   const pending = proposal.status === "pending";
-  const busy = approve.isPending || reject.isPending;
+  // Its item is being read again by a run (D68): it waits for the run.
+  const locked = useRunLocked(proposal.id);
+  const busy = approve.isPending || reject.isPending || locked;
   // The sprint switch alone is code's field, not an edit of the proposal (D57).
   const edited =
     !!proposal.editedPayload &&
@@ -438,16 +441,18 @@ export function ProposalCard({
       <Row label="Sprint">{sprintOutcome(proposal.result)}</Row>
     ) : undefined;
   const approveButton = (
-    <Button size="sm" disabled={busy} onClick={() => approve.mutate({ id: proposal.id })}>
-      {approve.isPending ? (
-        <Loader2 className="animate-spin" />
-      ) : proposal.status === "failed" ? (
-        <RotateCcw />
-      ) : (
-        <Check />
-      )}
-      {proposal.status === "failed" ? "Retry" : "Approve"}
-    </Button>
+    <LockHint locked={locked}>
+      <Button size="sm" disabled={busy} onClick={() => approve.mutate({ id: proposal.id })}>
+        {approve.isPending ? (
+          <Loader2 className="animate-spin" />
+        ) : proposal.status === "failed" ? (
+          <RotateCcw />
+        ) : (
+          <Check />
+        )}
+        {proposal.status === "failed" ? "Retry" : "Approve"}
+      </Button>
+    </LockHint>
   );
   const expandButton = compact && (
     <Button

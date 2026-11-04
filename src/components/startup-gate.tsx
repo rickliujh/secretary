@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { AlertCircle, Loader2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { describeError } from "@/app/errors";
+import { recoverRunsOnce } from "@/app/intake-runs";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -18,7 +19,13 @@ export function StartupGate({ children }: { children: ReactNode }) {
     queryFn: () => run(Effect.all([Db, Effect.flatMap(Settings, (s) => s.get)])),
     staleTime: Number.POSITIVE_INFINITY,
   });
-  if (startup.isPending) {
+  // Once per launch, outside the query (a refetch must not stop a running turn):
+  // turns in flight at quit become stopped ones, a kept queue comes back as drafts (D68).
+  const [recovered, setRecovered] = useState(false);
+  useEffect(() => {
+    if (startup.isSuccess) void recoverRunsOnce().then(() => setRecovered(true));
+  }, [startup.isSuccess]);
+  if (startup.isPending || (startup.isSuccess && !recovered)) {
     return (
       <div className="flex h-svh items-center justify-center text-muted-foreground">
         <WindowBar />

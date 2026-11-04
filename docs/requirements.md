@@ -662,6 +662,47 @@ decides what is read and when. FR-20 is Phase 29.
   file side appears on the page, a line typed on the page appears in the file, and
   edits on both sides since the last sync are both kept.
 
+### FR-21 The intake run (D68)
+
+Approved 2026-11-04. The user's words: "when it runs, it kind of frozen, only the
+send button indicates that it's running, and I can't cancel it or update before
+it finishes, and the 120 s timeout comes up often enough to be annoying (an auto
+retry 3 times will be good)". The mockup he approved is
+`docs/intake-run-mockup.html`; his answers: a message sent during a run queues
+behind it; Edit during a run stops it and puts the text back in the box; three
+attempts on the same tier; a plain spinner for the first 5 s and the step list
+only when it takes longer; the per-call timeout stays 120 s. FR-21 is Phase 32.
+
+- FR-21.1 (Must) Nothing freezes. A sent message appears in its thread at once.
+  The composer stays usable; a message sent while a run is going waits behind it
+  and says so, and can be withdrawn. Leaving the page does not lose the run: the
+  thread list row and the Inbox entry in the navigation show that it is running.
+- FR-21.2 (Must) The run is visible. Under the message, a spinner with the time
+  elapsed for the first 5 s, then a card listing the steps (split into items,
+  lookups, deciding each item, writing cards) with the time each took, the tier
+  and model, and what each finished item produced.
+- FR-21.3 (Must) Stop and Edit. The run can be stopped at any time (a button,
+  Esc in the thread); items already decided keep their cards and the rest can be
+  resumed. Edit on the sent message stops the run and puts the text back in the
+  composer. A correction typed into the run card while it runs is applied as a
+  follow-up as soon as the run ends.
+- FR-21.4 (Must) Retries. A model call that gives no answer in time, or fails
+  with a server, rate-limit or network error, is retried on its own up to three
+  attempts on the same tier, with short pauses; the card shows the attempt. After
+  30 s on one call the card says so and offers to retry now or use the fast tier
+  for that call. Only after the third failure does the item fail, keeping the
+  other items' cards and offering retry, the fast tier, or editing the message.
+- FR-21.5 (Should) Partial results. The cards of each item are written and shown
+  as that item finishes, not all at the end.
+- AC (Phase 32, service level against the mock Jira and a scripted model; the
+  look against the mockup by the user): a two-item message whose second item's
+  first two calls time out finishes on the third attempt with every card and a
+  run record of three attempts; a stop after item 1 keeps item 1's cards and a
+  resume decides only item 2; Edit withdraws the message and the empty thread;
+  a message sent during a run starts after it; a correction added during the run
+  is applied as a follow-up; a run survives leaving and reopening the thread; a
+  timed-out third attempt fails that item only.
+
 ## 5. Non-functional requirements
 
 - NFR-1 Works offline for browsing cached data, drafting from cache and editing

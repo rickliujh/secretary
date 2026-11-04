@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   AlertCircle,
   CheckCheck,
@@ -11,7 +11,9 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
+import { toastError } from "@/app/errors";
+import { runStore, useActiveRuns, useRunFor } from "@/app/intake-runs";
 import { type Lookups, useLookups } from "@/app/queries";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
@@ -29,6 +31,8 @@ import { dateTime, relativeTime, shortDate } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { inboxDetail, type ProposalView, type ThreadMessage } from "@/services/inbox/queries";
 import type { Source } from "@/services/intake";
+import { revisedCards, unreadOf } from "@/services/intake/record";
+import { isRunning, type Run } from "@/services/intake/runs";
 import { hasInput, type MessagePart } from "@/services/intake/thread";
 import { describePayload } from "@/services/proposals/schema";
 import { threadRefs } from "@/services/proposals/thread-refs";
@@ -40,6 +44,9 @@ import { PASTED_HIGHLIGHT } from "./message-doc";
 import { BundleCard, OutcomeCard } from "./outcome-card";
 import { ThreadPark } from "./park";
 import { ProposalCard } from "./proposal-card";
+import { RunCard } from "./run-card";
+import { runFromRecord } from "./run-card-content";
+import { LockHint, RunLockProvider } from "./run-lock";
 import { SmallAskRow } from "./small-ask-row";
 import { useDecisions, useThreadReply } from "./use-inbox";
 
@@ -114,6 +121,7 @@ function UserBubble({
   answer,
   noteDate = null,
   pending = false,
+  actions,
 }: {
   parts: readonly MessagePart[];
   /** Written in the message box (D56); older messages show pastes as blocks. */
@@ -123,14 +131,21 @@ function UserBubble({
   /** A later block of the daily note that continued the thread (D66): its day. */
   noteDate?: string | null;
   pending?: boolean;
+  /** Edit and Stop while its run goes, shown on hover (D68). */
+  actions?: ReactNode;
 }) {
   return (
     <div
       className={cn(
-        "ml-auto flex max-w-[85%] flex-col gap-2 rounded-lg bg-muted px-3 py-2 text-sm",
+        "group ml-auto flex max-w-[85%] flex-col gap-2 rounded-lg bg-muted px-3 py-2 text-sm",
         pending && "opacity-60",
       )}
     >
+      {actions && (
+        <span className="flex justify-end gap-1 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          {actions}
+        </span>
+      )}
       {answer && <span className="text-xs text-muted-foreground">Answer</span>}
       {noteDate && (
         <span className="text-xs text-muted-foreground">from the note, {shortDate(noteDate)}</span>
@@ -325,10 +340,28 @@ export function ThreadView({ id }: { id: string }) {
     queryFn: ({ signal }) => run(inboxDetail(id), signal),
   });
   const lookups = useLookups();
-  const { approveAll, dismiss, retriage } = useDecisions();
+  const { approveAll, dismiss, retriage } = useDecisions(id);
   // Approve all waits for a save in this thread (the sprint switch, a row field) to land (D57).
   // The newest open question is what a reply answers, unless the user opts out.
   const { reply, answering, skip, send, choose } = useThreadReply(id, detail.data?.proposals);
+  const navigate = useNavigate();
+  const live = useRunFor(id);
+  const busy = useActiveRuns().length > 0;
+  const going = !!live && isRunning(live);
+  // Esc in the thread stops its run (FR-21.3), unless a dialog, menu or select is open.
+  useEffect(() => {
+    if (!going || !live) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      const open = document.querySelector(
+        '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]',
+      );
+      if (open) return;
+      runStore.stop(live.id);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [going, live]);
   const d = detail.data;
   if (detail.isPending) return <Loader2 className="m-6 animate-spin text-muted-foreground" />;
   if (!d) return <p className="p-6 text-sm text-muted-foreground">This thread no longer exists.</p>;
@@ -350,22 +383,50 @@ export function ThreadView({ id }: { id: string }) {
   const firstUser = d.messages.find((m) => m.role === "user");
   const origin = firstUser?.role === "user" ? firstUser.origin : null;
   const noteDate = firstUser?.role === "user" ? firstUser.noteDate : null;
-  const unanswered = !reply.isPending && last?.role === "user" && d.item.error;
+  // The runs the thread shows (D68): the store's, and each turn that stopped or
+  // failed with items not read (kept whatever ran since, or from before a restart).
+  const unread = unreadOf(d.item.triage);
+  const cards: Run[] = [
+    ...unread
+      .filter((r) => !live || live.messageId !== r.messageId || !live.messageId)
+      .map((r) => runFromRecord(id, r, d.item.error)),
+    ...(live ? [live] : []),
+  ];
+  const seqOf = (r: Run) => {
+    const at = d.messages.findIndex((m) => m.id === r.messageId);
+    return at < 0 ? Number.POSITIVE_INFINITY : at;
+  };
+  const newest = [...cards].sort((a, b) => seqOf(a) - seqOf(b)).at(-1) ?? null;
+  // The newest card offers the Resume of other turns' items not read.
+  const elsewhere = unread.filter((r) => r.messageId !== newest?.messageId);
+  const unreadNote = elsewhere.length
+    ? {
+        count: elsewhere.reduce((n, r) => n + r.undecided.length, 0),
+        messageId: elsewhere[0]?.messageId ?? null,
+      }
+    : null;
+  const unanswered =
+    !reply.isPending && cards.length === 0 && last?.role === "user" && d.item.error;
+  // While a run revises items, their cards and Approve all wait for it (D68).
+  const locked = going ? revisedCards(d.item.triage, d.items, d.proposals) : new Set<string>();
+  const userMessages = d.messages.filter((m) => m.role === "user");
 
-  const sending = reply.isPending ? reply.variables : null;
+  /** Edit (FR-21.3): stop, take the message back, its text back in the box. */
+  const edit = (r: Run) => {
+    const message = d.messages.find((m) => m.id === r.messageId);
+    const parts = message?.role === "user" ? message.parts : [];
+    // The thread's only message takes the thread with it: the text goes to a new one.
+    const alone = userMessages.length === 1 && userMessages[0]?.id === r.messageId;
+    const lane = alone ? "new" : id;
+    if (r.id.startsWith("record:")) {
+      if (r.messageId)
+        void runStore.withdrawMessage(r.messageId, { lane, parts }).catch((e) => toastError(e));
+    } else runStore.edit(r.id, { lane, parts });
+    if (alone) void navigate({ to: "/inbox", search: { item: undefined } });
+  };
 
-  const turn = (m: ThreadMessage) =>
-    m.role === "user" ? (
-      <UserBubble
-        key={m.id}
-        parts={m.parts}
-        inline={m.inline}
-        source={m.source}
-        answer={!!m.answers}
-        // The first message's day is in the header; a later note block says its own.
-        noteDate={m.id !== firstUser?.id ? m.noteDate : null}
-      />
-    ) : (
+  const answerOf = (m: ThreadMessage) =>
+    m.role === "assistant" ? (
       <AssistantTurn
         key={m.id}
         summary={m.summary}
@@ -376,7 +437,66 @@ export function ThreadView({ id }: { id: string }) {
         onChoose={reply.isPending ? undefined : choose}
         bundles={d.bundles}
       />
+    ) : null;
+  const inCard = new Set(
+    cards.flatMap((r) => (r.assistantMessageId ? [r.assistantMessageId] : [])),
+  );
+  const cardOf = (r: Run) => {
+    const answer = d.messages.find((m) => m.id === r.assistantMessageId);
+    return (
+      <RunCard
+        key={`run-${r.id}`}
+        run={r}
+        onEdit={() => edit(r)}
+        unread={r === newest ? unreadNote : null}
+      >
+        {answer && answerOf(answer)}
+      </RunCard>
     );
+  };
+  const unplaced = cards.filter((r) => !d.messages.some((m) => m.id === r.messageId));
+
+  const turn = (m: ThreadMessage) => {
+    if (m.role !== "user") return inCard.has(m.id) ? null : answerOf(m);
+    const mine = cards.filter((r) => r.messageId === m.id);
+    const shown = live && live.messageId === m.id ? live : null;
+    const running = !!shown && isRunning(shown);
+    return [
+      <UserBubble
+        key={m.id}
+        parts={m.parts}
+        inline={m.inline}
+        source={m.source}
+        answer={!!m.answers}
+        // The first message's day is in the header; a later note block says its own.
+        noteDate={m.id !== firstUser?.id ? m.noteDate : null}
+        actions={
+          running && shown ? (
+            <>
+              <button
+                type="button"
+                className="underline"
+                title="Stops the run and puts the text back in the box"
+                onClick={() => edit(shown)}
+              >
+                Edit
+              </button>
+              ·
+              <button
+                type="button"
+                className="underline"
+                title="Stops the run; the message stays"
+                onClick={() => runStore.stop(shown.id)}
+              >
+                Stop
+              </button>
+            </>
+          ) : null
+        }
+      />,
+      ...mine.map(cardOf),
+    ];
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -405,14 +525,17 @@ export function ThreadView({ id }: { id: string }) {
           pending={d.proposals.filter((p) => p.status === "pending").length}
         />
         <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            disabled={pendingActions === 0 || approveAll.isPending}
-            onClick={() => approveAll.mutate(id)}
-          >
-            {approveAll.isPending ? <Loader2 className="animate-spin" /> : <CheckCheck />}
-            Approve all ({pendingActions})
-          </Button>
+          {/* A run on the thread may replace cards: Approve all waits for it (D68). */}
+          <LockHint locked={reply.isPending && pendingActions > 0}>
+            <Button
+              size="sm"
+              disabled={pendingActions === 0 || approveAll.isPending || reply.isPending}
+              onClick={() => approveAll.mutate(id)}
+            >
+              {approveAll.isPending ? <Loader2 className="animate-spin" /> : <CheckCheck />}
+              Approve all ({pendingActions})
+            </Button>
+          </LockHint>
           {!origin && (
             <Button
               size="sm"
@@ -431,73 +554,54 @@ export function ThreadView({ id }: { id: string }) {
           )}
         </div>
       </header>
-      <Conversation className="min-h-0 flex-1 rounded-lg border">
-        <ConversationContent className="gap-4 p-4">
-          {d.messages.map(turn)}
-          {/* Proposals made before threads existed have no turn of their own. */}
-          {(byMessage.get(null) ?? []).length > 0 && (
-            <AssistantTurn
-              summary={d.item.summary}
-              proposals={byMessage.get(null) ?? []}
-              lookups={lookups}
-              answeringId={answering?.id ?? null}
-              created={created}
-              onChoose={reply.isPending ? undefined : choose}
-              bundles={d.bundles}
-            />
-          )}
-          {sending && (
-            <>
-              <UserBubble
-                pending
-                source={sending.source ?? null}
-                answer={!!sending.answers}
-                inline={!!sending.parts}
-                parts={
-                  sending.parts ?? [
-                    ...(sending.text ? [{ type: "pasted" as const, text: sending.text }] : []),
-                    ...(sending.instruction
-                      ? [{ type: "typed" as const, text: sending.instruction }]
-                      : []),
-                  ]
-                }
+      <RunLockProvider value={locked}>
+        <Conversation className="min-h-0 flex-1 rounded-lg border">
+          <ConversationContent className="gap-4 p-4">
+            {d.messages.map(turn)}
+            {/* Proposals made before threads existed have no turn of their own. */}
+            {(byMessage.get(null) ?? []).length > 0 && (
+              <AssistantTurn
+                summary={d.item.summary}
+                proposals={byMessage.get(null) ?? []}
+                lookups={lookups}
+                answeringId={answering?.id ?? null}
+                created={created}
+                onChoose={reply.isPending ? undefined : choose}
+                bundles={d.bundles}
               />
-              <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" />
-                {reply.progress ?? "Working..."}
-              </p>
-            </>
-          )}
-          {unanswered && (
-            <Alert variant="destructive">
-              <AlertCircle />
-              <AlertTitle>That message did not go through</AlertTitle>
-              <AlertDescription className="flex flex-col items-start gap-2">
-                <span>{d.item.error}</span>
-                {!origin && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={retriage.isPending}
-                    onClick={() => retriage.mutate(id)}
-                  >
-                    {retriage.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                    Try again
-                  </Button>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
+            )}
+            {/* A run that reads no one message (Re-triage of every item) ends the thread. */}
+            {unplaced.map(cardOf)}
+            {unanswered && (
+              <Alert variant="destructive">
+                <AlertCircle />
+                <AlertTitle>That message did not go through</AlertTitle>
+                <AlertDescription className="flex flex-col items-start gap-2">
+                  <span>{d.item.error}</span>
+                  {!origin && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={retriage.isPending}
+                      onClick={() => retriage.mutate(id)}
+                    >
+                      {retriage.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                      Try again
+                    </Button>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+          </ConversationContent>
+          <ConversationScrollButton />
+        </Conversation>
+      </RunLockProvider>
       {origin ? (
         <ReadOnlyNote origin={origin} />
       ) : (
         <Composer
-          busy={reply.isPending}
-          progress={reply.progress}
-          onCancel={reply.cancel}
+          busy={busy}
+          lane={id}
           onSend={send}
           defaultSource={d.item.source as Source}
           placeholder={`Ask for a change ("priority High", "make it a sub-task of PAY-3"), answer a question, or paste more.`}

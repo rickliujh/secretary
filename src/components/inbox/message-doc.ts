@@ -77,3 +77,9 @@ export function cleanPaste(text: string): string {
     .replace(/(?:\n[ \t]*)+$/, "");
   return t.trim() ? t : "";
 }
+
+/** A message's parts as the message box's document, pastes marked: Edit puts it back (D68). */
+export function partsToDoc(parts: readonly MessagePart[]): JSONContent {
+  const content = parts.flatMap((p) => pastedContent(p.text, p.type === "pasted"));
+  return { type: "doc", content: [{ type: "paragraph", ...(content.length ? { content } : {}) }] };
+}

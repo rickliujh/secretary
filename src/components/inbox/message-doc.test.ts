@@ -7,7 +7,7 @@ import Text from "@tiptap/extension-text";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { EditorState, TextSelection, type Transaction } from "@tiptap/pm/state";
 import { splitMessage } from "@/services/intake/thread";
-import { cleanPaste, docToParts, pastedContent } from "./message-doc";
+import { cleanPaste, docToParts, partsToDoc, pastedContent } from "./message-doc";
 import {
   composerPlugins,
   deletePreviousWord,
@@ -285,5 +285,17 @@ describe("composer plugins", () => {
     // Nothing to send: nothing happens.
     expect(sendMessage(view, (parts) => got.push(parts))).toBe(false);
     expect(got).toHaveLength(1);
+  });
+});
+
+describe("partsToDoc", () => {
+  test("a message Edit gives back reads as the parts it was sent as", () => {
+    const parts = [
+      { type: "typed" as const, text: "Sarah: " },
+      { type: "pasted" as const, text: "The cert is late.\nFriday now." },
+      { type: "typed" as const, text: "\nmake a wait for it" },
+    ];
+    expect(docToParts(partsToDoc(parts))).toEqual(parts);
+    expect(docToParts(partsToDoc([]))).toEqual([]);
   });
 });

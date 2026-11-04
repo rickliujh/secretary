@@ -1,4 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import { useActiveRuns } from "@/app/intake-runs";
 import { MAIN_NAV, type NavItem, SETTINGS_NAV } from "@/app/nav";
 import { macOverlay } from "@/app/platform";
 import { usePendingCount } from "@/app/queries";
@@ -16,6 +18,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { Spinner } from "@/components/ui/spinner";
 
 function NavList({
   items,
@@ -24,7 +27,7 @@ function NavList({
 }: {
   items: NavItem[];
   pathname: string;
-  badges?: Record<string, number>;
+  badges?: Record<string, number | ReactNode>;
 }) {
   return (
     <SidebarMenu>
@@ -36,7 +39,7 @@ function NavList({
               <span>{item.label}</span>
             </Link>
           </SidebarMenuButton>
-          {(badges[item.to] ?? 0) > 0 && <SidebarMenuBadge>{badges[item.to]}</SidebarMenuBadge>}
+          {!!badges[item.to] && <SidebarMenuBadge>{badges[item.to]}</SidebarMenuBadge>}
         </SidebarMenuItem>
       ))}
     </SidebarMenu>
@@ -48,6 +51,16 @@ export function AppSidebar() {
   const pending = usePendingCount({
     refetchInterval: 30_000,
   });
+  // Runs going or waiting show on the Inbox entry from any page (FR-21.1).
+  const running = useActiveRuns().length;
+  const inbox = running ? (
+    <span className="flex items-center gap-1">
+      <Spinner className="size-3" />
+      {running} running
+    </span>
+  ) : (
+    (pending.data ?? 0)
+  );
   return (
     <Sidebar collapsible="icon">
       {/* macOS draws its traffic lights here (D36); the strip also drags the window. */}
@@ -67,11 +80,7 @@ export function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
-            <NavList
-              items={MAIN_NAV}
-              pathname={pathname}
-              badges={{ "/inbox": pending.data ?? 0 }}
-            />
+            <NavList items={MAIN_NAV} pathname={pathname} badges={{ "/inbox": inbox }} />
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>

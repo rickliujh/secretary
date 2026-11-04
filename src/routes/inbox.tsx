@@ -1,12 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArchiveRestore, MessagesSquare, Plus } from "lucide-react";
+import { ArchiveRestore, MessagesSquare, Play, Plus } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { z } from "zod";
+import { runStore, useActiveRuns, useNow, useRunFor } from "@/app/intake-runs";
 import { queryKeys } from "@/app/query-client";
 import { run } from "@/app/runtime";
 import { Composer, toTriageInput } from "@/components/inbox/composer";
 import { AboutBadge, useParkActions, useParkInput } from "@/components/inbox/park";
+import { RunPill } from "@/components/inbox/run-card";
 import { SmallAsksHint } from "@/components/inbox/small-asks-hint";
 import { ThreadView } from "@/components/inbox/thread-view";
 import { useTriage } from "@/components/inbox/use-inbox";
@@ -17,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { type InboxListItem, listInbox } from "@/services/inbox/queries";
+import { isActive, viewOf } from "@/services/intake/runs";
 
 export const Route = createFileRoute("/inbox")({
   validateSearch: z.object({ item: z.string().optional() }),
@@ -66,8 +69,12 @@ function InboxPage() {
           )}
         </span>
       </span>
-      <span className="line-clamp-1 text-sm font-medium">{i.summary ?? i.preview}</span>
-      {i.summary && <span className="line-clamp-1 text-xs text-muted-foreground">{i.preview}</span>}
+      <RowText
+        id={i.id}
+        title={i.summary ?? i.preview}
+        preview={i.summary ? i.preview : null}
+        unread={i.unread}
+      />
       {(i.returned || (i.about && i.status !== "parked")) && (
         <span className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
           {i.returned && <span className="truncate">Back: {i.parkedReason}</span>}
@@ -94,7 +101,10 @@ function InboxPage() {
         />
         <ul className="min-h-0 flex-1 overflow-y-auto">
           {open.map((i) => (
-            <li key={i.id}>{row(i)}</li>
+            <li key={i.id} className="flex items-start gap-1">
+              <div className="min-w-0 flex-1">{row(i)}</div>
+              <UnreadResume id={i.id} unread={i.unread} />
+            </li>
           ))}
           {parked.length > 0 && (
             <li className="mt-3 border-t px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">
@@ -129,8 +139,69 @@ function InboxPage() {
   );
 }
 
+/**
+ * A thread's title and preview; while a run reads it, or after one stopped or
+ * failed (D68), its state pill and one line ("Deciding item 1 of 2 · 0:24").
+ */
+function RowText({
+  id,
+  title,
+  preview,
+  unread,
+}: {
+  id: string;
+  title: string;
+  preview: string | null;
+  /** Items stopped or failed turns left unread, whatever ran since. */
+  unread: number;
+}) {
+  const run = useRunFor(id);
+  const active = !!run && isActive(run);
+  const now = useNow(active);
+  const shown = !!run && run.state !== "done" && run.state !== "queued" && (active || !unread);
+  return (
+    <>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="line-clamp-1 min-w-0 flex-1 text-sm font-medium">{title}</span>
+        {shown && <RunPill run={run} className="h-4 px-1.5" />}
+        {!shown && unread > 0 && (
+          <Badge variant="secondary" className="h-4 px-1.5">
+            stopped
+          </Badge>
+        )}
+      </span>
+      {shown ? (
+        <span className="line-clamp-1 text-xs text-muted-foreground">{viewOf(run, now).line}</span>
+      ) : unread > 0 ? (
+        <span className="line-clamp-1 text-xs text-muted-foreground">
+          {unread === 1 ? "1 item" : `${unread} items`} not read
+        </span>
+      ) : (
+        preview && <span className="line-clamp-1 text-xs text-muted-foreground">{preview}</span>
+      )}
+    </>
+  );
+}
+
+/** Resume beside a thread's row while items of a stopped turn wait (D68). */
+function UnreadResume({ id, unread }: { id: string; unread: number }) {
+  const run = useRunFor(id);
+  if (!unread || (run && isActive(run))) return null;
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      className="mt-1 h-7 shrink-0 px-2 text-xs"
+      onClick={() => runStore.resume(id)}
+    >
+      <Play /> Resume
+    </Button>
+  );
+}
+
 function NewThread({ onStarted }: { onStarted: (id: string) => void }) {
   const triage = useTriage(onStarted);
+  const busy = useActiveRuns().length > 0;
   return (
     <div className="flex h-full flex-col justify-end gap-6">
       <SmallAsksHint />
@@ -140,13 +211,7 @@ function NewThread({ onStarted }: { onStarted: (id: string) => void }) {
         title="Start a thread"
         description="Paste a Teams message, an email or meeting notes and say what you want done. The secretary proposes Jira actions; ask for changes in the thread, then approve."
       />
-      <Composer
-        withSender
-        busy={triage.isPending}
-        progress={triage.progress}
-        onCancel={triage.cancel}
-        onSend={(m) => triage.mutate(toTriageInput(m))}
-      />
+      <Composer withSender lane="new" busy={busy} onSend={(m) => triage.mutate(toTriageInput(m))} />
     </div>
   );
 }

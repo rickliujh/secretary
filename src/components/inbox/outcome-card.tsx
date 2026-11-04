@@ -33,6 +33,7 @@ import { foundEdits, waitingFactsOf } from "@/services/work/playbooks/waiting";
 import { SITUATION_LABELS } from "@/services/work/rules";
 import { type Found, type SituationRecord, situationOf } from "@/services/work/schema";
 import { ProposalCard } from "./proposal-card";
+import { LockHint, useRunLocked } from "./run-lock";
 import { useDecisions } from "./use-inbox";
 
 const STATUS_TONE: Record<string, string> = {
@@ -296,7 +297,9 @@ function BundleSteps({
   const kept = decidable.filter((p) => !off.has(p.id) && !greyed(p) && !unpicked(p));
   const failed = steps.some((p) => p.status === "failed");
   const pendingLeft = steps.some((p) => p.status === "pending");
-  const busy = approveBundle.isPending;
+  // A run reading its item again locks the card until it is done (D68).
+  const locked = useRunLocked(...steps.map((p) => p.id));
+  const busy = approveBundle.isPending || locked;
   const toggle = (id: string, on: boolean) =>
     setOff((s) => {
       const next = new Set(s);
@@ -348,30 +351,32 @@ function BundleSteps({
       )}
       {open && (
         <footer className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            disabled={busy || (steps.length > 0 && kept.length === 0)}
-            onClick={() =>
-              approveBundle.mutate({
-                bundleId,
-                keep: kept.map((p) => p.id),
-                ...(found ? { found: choice } : {}),
-              })
-            }
-          >
-            {approveBundle.isPending ? (
-              <Loader2 className="animate-spin" />
-            ) : failed ? (
-              <RotateCcw />
-            ) : (
-              <Check />
-            )}
-            {steps.length === 0
-              ? "Got it"
-              : failed && !pendingLeft
-                ? "Retry"
-                : `Approve ${kept.length} step${kept.length === 1 ? "" : "s"}`}
-          </Button>
+          <LockHint locked={locked}>
+            <Button
+              size="sm"
+              disabled={busy || (steps.length > 0 && kept.length === 0)}
+              onClick={() =>
+                approveBundle.mutate({
+                  bundleId,
+                  keep: kept.map((p) => p.id),
+                  ...(found ? { found: choice } : {}),
+                })
+              }
+            >
+              {approveBundle.isPending ? (
+                <Loader2 className="animate-spin" />
+              ) : failed ? (
+                <RotateCcw />
+              ) : (
+                <Check />
+              )}
+              {steps.length === 0
+                ? "Got it"
+                : failed && !pendingLeft
+                  ? "Retry"
+                  : `Approve ${kept.length} step${kept.length === 1 ? "" : "s"}`}
+            </Button>
+          </LockHint>
           {actions?.({ busy, failed, pendingLeft })}
           {decidable.length > kept.length && kept.length > 0 && (
             <span className="text-xs text-muted-foreground">

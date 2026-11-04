@@ -49,6 +49,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { inboxDetail, type ProposalView } from "@/services/inbox/queries";
+import { runRecordOf, unreadOf } from "@/services/intake/record";
 import { DailyNote } from "@/services/note";
 import type { ThreadSummary } from "@/services/note/cards";
 import { threadRefs } from "@/services/proposals/thread-refs";
@@ -303,7 +304,7 @@ function ThreadRows({ id }: { id: string }) {
     queryFn: ({ signal }) => run(inboxDetail(id), signal),
   });
   const lookups = useLookups();
-  const { approveAll, retriage } = useDecisions();
+  const { approveAll, retriage } = useDecisions(id);
   const { reply, answering, send, choose } = useThreadReply(id, detail.data?.proposals);
   const [text, setText] = useState("");
   const d = detail.data;
@@ -317,7 +318,15 @@ function ThreadRows({ id }: { id: string }) {
     (p) => p.status === "pending" && p.kind !== "needs_clarification",
   ).length;
   // A turn that did not go through, whatever else the thread holds (as the Inbox shows it).
-  const error = reply.isPending ? null : failedTurn(d.item, d.messages);
+  // A turn that stopped or failed part way keeps its cards and says so too (D68).
+  const error = reply.isPending
+    ? null
+    : (failedTurn(d.item, d.messages) ??
+      (runRecordOf(d.item.triage)?.state === "failed"
+        ? d.item.error
+        : unreadOf(d.item.triage).length
+          ? "Some of it was not read."
+          : null));
   const submit = () => {
     const t = text.trim();
     if (!t || reply.isPending) return;

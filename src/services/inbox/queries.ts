@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { bundles, inboxItems, inboxMessages, intakeItems, people, proposals } from "@/db/schema";
 import { localDate } from "@/lib/dates";
 import { query } from "@/services/db";
+import { unreadOf } from "@/services/intake/record";
 import {
   AssistantContentSchema,
   type MessagePart,
@@ -32,6 +33,8 @@ export type InboxListItem = {
   pending: number;
   failed: number;
   error: string | null;
+  /** Items of stopped or failed turns not read yet (D68): Resume reads them. */
+  unread: number;
   /** Why the user parked it (D62); kept after it came back. */
   parkedReason: string | null;
   /** The day a parked thread returns at the latest. */
@@ -120,6 +123,7 @@ export const listInbox = (
         pending: Number(r.pending),
         failed: Number(r.failed),
         error: (r.triage as { error?: string } | null)?.error ?? null,
+        unread: unreadOf(r.triage).reduce((n, t) => n + t.undecided.length, 0),
         parkedReason: r.parkedReason,
         parkedUntil: r.parkedUntil,
         returned: isReturned(r) && Number(r.pending) > 0 && backOn.get(r.id) === today,
