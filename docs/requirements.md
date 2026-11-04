@@ -629,6 +629,15 @@ decides what is read and when. FR-20 is Phase 29.
   about any block that has no conversation from the same card. Showing the page
   sends nothing to a model. The text itself stays clean: nothing is inserted
   between the lines.
+- FR-20.8 (Must) Related is not the same. A line about related work (the same
+  product, tool, team or kind of thing) but a different ticket, incident, ask
+  or to-do is a new conversation, not a continuation of an earlier one; when it
+  is not clear, the line starts its own conversation, which still sees the
+  tickets the note made. Whatever conversation a line lands in, the actions
+  proposed for it follow what the line itself names (a ticket, a thing, an
+  incident number): an open wait is picked by what the line says, never because
+  the conversation made or acts on its ticket, and a comment or a wait's note
+  says what the line says, not that something the line asks to do was done.
 - AC (Phase 31, against the mock Jira, service level; the look against
   `docs/note-cards-mockup.html` by the user): after a reading, the block that
   made a card carries the count 1 and its card shows the proposal; approving it
