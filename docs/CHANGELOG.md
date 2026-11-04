@@ -2741,3 +2741,141 @@ Known limits
   opened from inside the card, the light and dark colours, fenced code in
   monospace, and a screen reader on the marks. These were checked by
   type, unit, jsdom and service tests only.
+
+## Phase 32: The intake run (2026-11-04)
+
+FR-21, D68, `docs/intake-run-mockup.html`. A sent message lands in its
+thread at once, its run shows under it, the composer never waits, a run can
+be stopped or its message taken back to edit, each item's cards are written
+as it is decided, and a model call that times out or fails with a server,
+rate-limit or network error is tried again on its own.
+
+Built
+- `Llm` retries (`services/llm/live.ts`): a call that times out (the task's
+  timeout, 120 s for classify, unchanged) or fails with a 5xx, 429 or
+  network error is tried up to three times on the same tier, 2 s and then
+  5 s apart; schema and validation failures keep repair and escalation; a
+  401/403, a refusal or a config error is not retried. Every attempt is
+  recorded in `llm_calls`. `CallHooks.onAttempt` reports each attempt;
+  `CallHooks.skip` lets the user cut an attempt or a pause short ("Try again
+  now"), on another tier for the rest of the call ("Use the fast tier");
+  `tier` on `ObjectRequest` and `TextRequest` is a one-off tier. An abort
+  ends a call and a pause. The SDK's own retry is off for these calls.
+- The run store (`services/intake/runs.ts`, `app/intake-runs.ts`): a module
+  store read with `useSyncExternalStore`, one lane, first in first out,
+  outliving pages. Runs are a first message, a reply, a resume or a
+  re-triage, with their events, state (queued, running, stopping, stopped,
+  failed, done), corrections and result. Pure `applyEvent` and `viewOf`
+  give the card, the list row's line and the nav.
+- Intake: `TurnControl` (`onEvent`, `onProgress` derived from it, `skip`,
+  `tier`) on `triage`, `reply`, `retriage` and the new `resume`; events
+  `stored`, `step`, `attempt`, `item_done`, `item_failed`. The lookups of
+  all items run first, then each item's call; each item's proposals,
+  question and work event are written when it is decided, under the turn's
+  one answer, with the `$new` numbering, duplicate collapse and reasons of
+  the end-of-turn merge. An unfinished turn's record sits on the thread's
+  `triage` (`services/intake/record.ts`), so a stop or a failure keeps what
+  was written and `resume` reads only the items left (on the fast tier from
+  the Fast tier buttons). An item whose calls fail after three attempts fails
+  alone; the rest are read. `withdraw(messageId)` takes a message back with
+  what its turn wrote, and the thread when it held nothing else;
+  `recoverRuns`, run at startup, records turns in flight at quit as stopped.
+- The run card (`components/inbox/run-card.tsx`, pure
+  `run-card-content.ts`): a spinner with the time for the first 5 s, then
+  the title, state pill, time, tier and model, Stop, the steps with their
+  times and each item's card count, the turn's cards as they are written
+  (the existing proposal, bundle, Track and question cards), a placeholder
+  for the next item, the slow notice after 30 s (Try again now, Use the
+  fast tier), the retry notice (attempt n of 3, Skip to fast tier), on
+  failure what is kept with Try again, Fast tier, Edit message and Models in
+  Settings, on stop Resume and Edit message, on done one line (time, cards,
+  questions, calls and repairs), and a box for a correction sent as a reply
+  when the run ends. Edit and Stop on the running message (hover); Esc in
+  the thread stops the run unless a dialog, menu or select is open.
+- The composer never disables: while a run goes Send reads Queue, a message
+  sent then shows as a "queued" chip with Remove, and Edit puts the message
+  back in the box (`partsToDoc`). The Inbox list row shows the run's pill
+  and line ("Deciding item 1 of 2 · 0:24"); the Inbox nav entry shows "N
+  running" with a spinner. `useIntakeTurn`, `useTriage`, `useReply`,
+  `useThreadReply`, `useTurnRunning` and Re-triage go through the store; the
+  note's cards and the day-end page use them unchanged.
+- Settings > Advanced, Task routing: the help text says a call is tried
+  three times. The shadcn `spinner` component is added.
+- Tests: `Llm` retries (two timeouts then an answer, three timeouts, 5xx and
+  429, 401 not retried, schema not retried, an abort during a pause, the
+  fast tier mid-call, the one-off tier, `text`); the store's reducers and
+  lane (FIFO, stop, Edit, corrections first, skip, resume); a two-item turn
+  written item by item against the end-of-turn merge of the same answers;
+  stop and resume, Edit of a new thread and of a reply, two timeouts then an
+  answer, a third timeout failing one item and the fast tier reading it,
+  recovery at start; the run card's content per state; `partsToDoc`; the
+  FR-21 AC with the store driving the real services against the mock Jira.
+
+Review fixes
+- Items a stopped or failed turn did not read were lost when any later turn
+  (a reply, a correction, a queued message) wrote the thread's record. They
+  now live in `triage.unread`, which no turn overwrites, until Resume reads
+  them or their message is taken back; each such turn keeps its card at its
+  message, the newest card offers their Resume, and the list row says how
+  many are not read, with Resume beside it.
+- Corrections typed during a run are sent only after a run that finished;
+  after a stop or a failure they go into the thread's box as a draft.
+- A revision superseded a card approved while its item was read again (so
+  Undo could not see it and a duplicate was proposed), and Edit put an
+  executed card back to pending. A revision now supersedes only pending
+  cards, Edit restores only superseded cards and the question its reply
+  answered, and while a run revises items their cards and Approve all are
+  disabled ("Wait for the run").
+- The intake item is written with its cards in one step: a stop during the
+  playbook search left an item with no cards that later turns counted.
+- A repeated chore drops only an earlier bundle step still pending, and a
+  bundle trimmed to one step becomes its proposal alone, as the
+  end-of-turn expansion made it.
+- The lookup step listed counts ("2, 0") instead of tickets; the split and
+  routing calls ignored the fast tier of Fast tier.
+- Drafts given back (Edit, corrections, a kept queue) re-render the box
+  through their own version in the store; a draft for a box that holds
+  text is added after it.
+- The fast tier picked mid-call gets its own three attempts; the fast-tier
+  buttons are hidden while no fast tier is bound.
+- `recoverRuns` ran again on every refetch of the startup query, which
+  could mark a running turn stopped; it now runs once per launch, before
+  the UI. Queued messages are kept in `sync_state` (`inbox.queue`) and come
+  back at launch as drafts in their boxes, not as runs.
+- Re-triage's pending state follows its own thread. Send stores the thread,
+  the message and its event in one step, so an Edit right after Send
+  always takes the message back. A resumed turn's items collapse into what
+  the turn wrote before the stop.
+- Tests: a reply after a stop and a resume of exactly the unread item; a
+  card approved during a revision and then Edit; a stop during the
+  playbook search; a chore approved meanwhile; the per-item turn against
+  the end-of-turn merge and expansion with a bundle trimmed to one step and
+  a question; Approve all across items on the mock Jira; the store's
+  drafts, kept queue, late `stored` and resume by message; the locked
+  cards; the fast tier's own attempts.
+
+Departures
+- See D68 "Built (Phase 32)": no `notice` event (the card derives slow and
+  retry notices); lookups first; only time, server, rate-limit and network
+  failures let the next item run; the user's skip uses no attempt; rows
+  numbered item by item (a question after its item's cards); the "find
+  their ticket" budget is per item; a resumed turn records no correction
+  example; `resume` and `retriage` are one; `withdraw` also takes back a
+  finished turn whose cards are all undecided; queued messages are stored
+  when they start; the cards sit as one group under the steps; finished
+  runs keep their card until a restart; the notices' wording follows his
+  answers (same tier for all three attempts).
+
+Known limits
+- Not verified in the running app: the card's look against the mockup in
+  light and dark (pill and notice colours, spacing, the spinner's switch to
+  the card at 5 s, the slow notice at 30 s on a real call), the hover Edit
+  and Stop, Esc with a dialog, menu or select open, the composer taking
+  Edit's text back with the pasted highlight and the cursor at the end,
+  leaving the thread for New thread after Edit of a first message, the
+  queued chip and Queue label, the locked cards' tooltip, a kept queue
+  coming back after a restart, the list row's Resume and the "N running" badge in
+  the sidebar's width (and collapsed to icons), toasts at a run's end, the
+  note card's reply box and the day-end page during a run, and an abort
+  through the Tauri HTTP plugin ending the request at the provider. These
+  were checked by type, unit and service tests only, with a scripted model.
