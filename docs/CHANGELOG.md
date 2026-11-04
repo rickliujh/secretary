@@ -1,5 +1,58 @@
 # Changelog
 
+## Unreleased
+
+### Phase 33: Related work is not the same conversation (2026-11-04)
+
+Built
+- `note_triage` version 3 (FR-20.8, D69): a block continues an earlier
+  conversation only when it is about the same ticket, incident, ask or
+  to-do; the same product, tool, team or kind of thing is not enough, and
+  in doubt the block starts its own conversation. Each listed work item
+  shows "Waits on:" with the open waits of its tickets (at most 3, newest
+  first, "label (reference)", each wrapped as untrusted), read by
+  `candidateItems`.
+- A daily note line continued into a thread (`Intake.reply` with
+  `asInput` from the note) is marked `noteLine` in the item's thread
+  context when the thread has other items; a revision and a retry keep
+  it. A line continued before version 18 is not marked on a re-read.
+- `classify_item` prompt version 18: for a note line, the "Earlier in this
+  conversation" block opens by saying the input is a later note line that
+  may be about other work, to be read by what it names, and the
+  references line says they include the conversation's; the Open waits
+  rule picks the wait the input names, never one because the
+  conversation made its ticket; an add_comment or an update_dependency
+  reply does not write an ask ("notify the owner") as done. Version 17
+  snapshots render as before.
+- Tests: note triage version 3 (rule, untrusted Waits on labels, an item
+  without waits), the reading's item waits (resolved left out, at most 3),
+  classify version 18 against 17, the `noteLine` flag for a note
+  continuation, its revision and its retry, and not for a typed reply or a
+  typed thread's input. Eval: a note reading where the WSL line shares
+  "podman" and "incident" with the Podman 6.0.2 thread; two classify cases
+  with two incident waits, typed and as a note continuation
+  (`EvalCase.followUpNote`, scored on what the later line made, after
+  `approveFirst` turns the first turn's Story into PAY-41 with its
+  INC6779508 wait in the same thread, as in the incident).
+
+Departures
+- Sentence (a) replaces the block's "use them to work out what 'it'
+  refers to" opening instead of following the list, and the references
+  line is relabelled for a note line: the thread's incident number was
+  shown as found by code and read as named by the line. Measured: 1 of 3,
+  3 of 4, 4 of 5 and 5 of 5 across the placements (D69).
+- `score.ts` is unchanged: `forbidden` expresses both cases.
+
+Known limits
+- Live evals on claude-haiku-5-5 (Anthropic API): note triage related-work
+  reading 10 of 10 on version 3 (5 of 8 on version 2), whole set 21/21
+  blocks; classify typed case 5 of 5 (4 of 4 on version 17); the
+  continuation with PAY-41 approved 5 of 5 (1 of 4 on version 17, which
+  once resolved PAY-41's wait, as in the incident); whole intake set 43/44
+  (40/44 on version 17). "Two corrections teach the third" fails on both
+  versions on this model.
+- Not verified in the running app.
+
 ## v0.2.0 (2026-11-03)
 
 Everything after v0.1.0 below: the ticket Edit dialog with points, sprint, epic
