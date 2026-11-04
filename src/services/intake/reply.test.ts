@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { inboxItems, intakeItems, memories, proposals } from "@/db/schema";
+import type { ItemSnapshot } from "@/prompts/classify";
 import { query } from "@/services/db";
 import { promptOf, readThread, TODAY } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
@@ -790,7 +791,12 @@ describe("a note block as new input in its thread (asInput, D66)", () => {
       ownInput: true,
       createdKeys: ["PAY-1"],
     });
+    // A later note line placed in the thread is marked as one (D69); the first is not.
+    expect(second?.snapshot).toMatchObject({ thread: { noteLine: true } });
+    const first = r.items.find((i) => i.idx === 0)?.snapshot as ItemSnapshot | undefined;
+    expect(first?.thread?.noteLine).toBeUndefined();
     const p = promptOf(models.calls, 1);
+    expect(p).toContain("The input is a later line of the user's daily note");
     expect(p).not.toContain("Instructions from the user in this conversation");
     expect(p).toContain("## Earlier in this conversation (context only)");
     expect(p).toContain("Create an epic for the Qoder migration");
@@ -819,12 +825,150 @@ describe("a note block as new input in its thread (asInput, D66)", () => {
             parts: [{ type: "typed", text: "make it Blocked instead" }],
             today: TODAY,
           });
-          return yield* readThread(first.inboxItemId);
+          const items = yield* query((d) =>
+            d
+              .select()
+              .from(intakeItems)
+              .where(eq(intakeItems.inboxItemId, first.inboxItemId))
+              .all(),
+          );
+          return { ...(yield* readThread(first.inboxItemId)), items };
         }),
         layer,
       ),
     );
     expect(r.messages[2]?.content).not.toHaveProperty("asInput");
     expect(promptOf(models.calls, 1)).toContain("1. make it Blocked instead");
+    // Not a note line (D69): every item's thread context is without the flag.
+    for (const i of r.items) expect((i.snapshot as ItemSnapshot).thread?.noteLine).toBeUndefined();
+    expect(promptOf(models.calls, 1)).not.toContain("a later line of the user's daily note");
+  });
+
+  test("a message given as input in a thread that is not the note's is not a note line (D69)", async () => {
+    const { layer, models } = intakeTestLayer({
+      "std-m": [out(answer([transition])), out(answer([transition]))],
+    });
+    const items = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const intake = yield* Intake;
+          const first = yield* intake.triage({
+            source: "typed",
+            parts: [{ type: "typed", text: "PAY-4 is blocked by finance" }],
+            senderPersonId: null,
+            today: TODAY,
+          });
+          yield* intake.reply({
+            inboxItemId: first.inboxItemId,
+            asInput: true,
+            parts: [{ type: "typed", text: "PAY-2 waits on the ledger fix" }],
+            today: TODAY,
+          });
+          return yield* query((d) =>
+            d
+              .select()
+              .from(intakeItems)
+              .where(eq(intakeItems.inboxItemId, first.inboxItemId))
+              .all(),
+          );
+        }),
+        layer,
+      ),
+    );
+    const second = items.find((i) => i.idx === 1)?.snapshot as ItemSnapshot | undefined;
+    expect(second?.source).toBe("typed");
+    expect(second?.thread?.others).toHaveLength(1);
+    expect(second?.thread?.noteLine).toBeUndefined();
+    expect(promptOf(models.calls, 1)).not.toContain("a later line of the user's daily note");
+  });
+
+  /** A note thread whose first line made a card, continued by a later note line (D66). */
+  const noteThread = (intake: Effect.Effect.Success<typeof Intake>) =>
+    Effect.gen(function* () {
+      const first = yield* intake.triage({
+        source: "note",
+        parts: noteParts("PAY-2 is blocked on INC0012345, move it back to To Do"),
+        senderPersonId: null,
+        noteDate: TODAY,
+        today: TODAY,
+      });
+      return first.inboxItemId;
+    });
+  const continueWith = (intake: Effect.Effect.Success<typeof Intake>, id: string) =>
+    intake.reply({
+      inboxItemId: id,
+      asInput: true,
+      parts: noteParts("the WSL incident can be closed"),
+      noteDate: TODAY,
+      today: TODAY,
+    });
+  const itemsOf = (id: string) =>
+    query((d) => d.select().from(intakeItems).where(eq(intakeItems.inboxItemId, id)).all());
+  const NOTE_LINE = "The input is a later line of the user's daily note";
+
+  test("a note line revised by a typed instruction stays a note line (D69)", async () => {
+    const { layer, models } = intakeTestLayer({
+      // Routing picks the second item for the instruction.
+      "fast-m": [out({ items: ["2"] })],
+      "std-m": [
+        out(answer([transition])),
+        out(answer([transition], "the WSL incident")),
+        out(answer([transition], "the WSL incident")),
+      ],
+    });
+    const items = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const intake = yield* Intake;
+          const id = yield* noteThread(intake);
+          yield* continueWith(intake, id);
+          yield* intake.reply({
+            inboxItemId: id,
+            parts: [{ type: "typed", text: "make it Blocked instead" }],
+            today: TODAY,
+          });
+          return yield* itemsOf(id);
+        }),
+        layer,
+      ),
+    );
+    const second = items.filter((i) => i.idx === 1);
+    // The continuation and its revision.
+    expect(second).toHaveLength(2);
+    for (const i of second) expect((i.snapshot as ItemSnapshot).thread?.noteLine).toBe(true);
+    const revision = models.calls.length - 1;
+    expect(promptOf(models.calls, revision)).toContain("1. make it Blocked instead");
+    expect(promptOf(models.calls, revision)).toContain(NOTE_LINE);
+  });
+
+  test("a failed note line turn read again is still a note line (D69)", async () => {
+    const { layer, models } = intakeTestLayer({
+      "std-m": [
+        out(answer([transition])),
+        { status: 401 },
+        out(answer([transition], "the WSL incident")),
+      ],
+    });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* syncOnce;
+          const intake = yield* Intake;
+          const id = yield* noteThread(intake);
+          const failed = yield* Effect.either(continueWith(intake, id));
+          const before = yield* itemsOf(id);
+          yield* intake.retriage(id);
+          return { failed, before, after: yield* itemsOf(id) };
+        }),
+        layer,
+      ),
+    );
+    expect(r.failed._tag).toBe("Left");
+    expect(r.before).toHaveLength(1);
+    const second = r.after.find((i) => i.idx === 1)?.snapshot as ItemSnapshot | undefined;
+    expect(second?.thread?.noteLine).toBe(true);
+    expect(promptOf(models.calls, models.calls.length - 1)).toContain(NOTE_LINE);
   });
 });

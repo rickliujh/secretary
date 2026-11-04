@@ -23,6 +23,18 @@ export type EvalCase = {
   followUpPaste?: string;
   /** A reply written in the message box, pastes in place (D56); `expect` scores the result. */
   followUpParts?: MessagePart[];
+  /**
+   * A later line of the daily note continued into this thread (D66, D69): sent
+   * as `asInput` with the note's parts after the first turn, whose `source`
+   * should be "note". `expect` scores only what this line made; the first
+   * turn's proposals stay pending and are not scored.
+   */
+  followUpNote?: string;
+  /**
+   * Before `followUpNote`, the user approves the first turn (D69): its create
+   * becomes this ticket and the wait it linked is made as `wait`.
+   */
+  approveFirst?: { key: string; wait?: EvalWait };
   /** Corrections the user made before (FR-7.2), present only while this case runs. */
   corrections?: {
     input: string;
@@ -38,9 +50,10 @@ export type EvalCase = {
   requester?: "ana" | "tom";
   /**
    * An open dependency that exists only while this case runs (D46), owned by a
-   * seeded contact. update_dependency expectations name its ticket as target.
+   * seeded contact or by no one (an incident, D69). update_dependency
+   * expectations name its ticket as target.
    */
-  wait?: { issueKey: string; label: string; owner: "ana" | "tom"; expectedAt?: string };
+  wait?: EvalWait & { owner?: "ana" | "tom" };
   /** Contacts that exist only while this case runs, by a handle the case uses. */
   contacts?: Record<string, { displayName: string; team?: "Payments" | "Platform" | "Network" }>;
   /** A work item that exists only while this case runs (D61 Reads, prompt version 15). */
@@ -75,7 +88,17 @@ export type EvalWorkItem = {
   currentStep: string;
   nextExpected?: { what: string; on: string | null };
   commitments?: { what: string; to: string; dueOn: string | null }[];
-  wait?: { issueKey: string; label: string; owner: string; expectedAt?: string };
+  /** `owner`: a handle from the case's contacts. */
+  wait?: EvalWait & { owner?: string };
+};
+
+/** An open wait a case seeds: a person by default, or an incident with its reference. */
+export type EvalWait = {
+  issueKey: string;
+  label: string;
+  expectedAt?: string;
+  kind?: "person" | "incident";
+  externalRef?: string;
 };
 
 /** A ticket an earlier thread created on the user's approval (D66). */
@@ -119,6 +142,48 @@ const CERT_WORK: EvalWorkItem = {
   },
 };
 
+/**
+ * The work item of D69: running Podman inside WSL, waiting on a ServiceNow
+ * incident for the WSL kernel update, an incident other than the one the
+ * Podman 6.0.2 story waits on.
+ */
+const WSL_WORK: EvalWorkItem = {
+  name: "Podman inside WSL",
+  issues: [
+    {
+      key: "PAY-37",
+      summary: "[POD] Find solution for users running Podman inside WSL",
+      status: "In Progress",
+      statusCategory: "indeterminate",
+      mine: true,
+    },
+  ],
+  goal: "Users can run Podman inside WSL",
+  currentStep: "Waiting on the ServiceNow incident INC6650012 for the WSL kernel update",
+  wait: {
+    issueKey: "PAY-37",
+    label: "ServiceNow incident INC6650012 (WSL kernel update)",
+    kind: "incident",
+    externalRef: "INC6650012",
+  },
+};
+
+/** The note's line about the WSL work, written above the Podman 6.0.2 one (D69). */
+const WSL_LINE =
+  "I'm testing new WSL version v3 for podman, it works, notify owner that incident can be closed";
+
+/** The Podman 6.0.2 story's wait, on the other incident (D69). */
+const PODMAN_WAIT: EvalWait = {
+  issueKey: "PAY-41",
+  label: "ServiceNow incident INC6779508 for the 6.0.2 install failure",
+  kind: "incident",
+  externalRef: "INC6779508",
+};
+
+/** What the note's Podman 6.0.2 line asked for, two days before (D69). */
+const PODMAN_LINE =
+  "Create a Story for the Podman 6.0.2 install failure linked to ServiceNow incident INC6779508";
+
 const CERT_CONTACTS: EvalCase["contacts"] = {
   sarah: { displayName: "Sarah Kim", team: "Platform" },
   dana: { displayName: "Dana Reyes", team: "Payments" },
@@ -128,6 +193,7 @@ const CERT_CONTACTS: EvalCase["contacts"] = {
 export const workItemKeys = (c: EvalCase) => [
   ...(c.workItem?.issues.map((i) => i.key) ?? []),
   ...(c.created ? [c.created.key] : []),
+  ...(c.approveFirst ? [c.approveFirst.key] : []),
 ];
 
 /**
@@ -777,5 +843,50 @@ export const EVAL_CASES: EvalCase[] = [
       forbiddenKinds: ["update_dependency", "create_issue"],
     },
     single: true,
+  },
+  // Related work is not the same conversation (FR-20.8, D69, prompt version 18).
+  {
+    // Two incident waits: the Podman 6.0.2 story made two days ago waits on one,
+    // the WSL work on another. The line is about WSL: its wait is the one meant.
+    name: "wait: a line names the WSL ticket's incident, not the thread's",
+    source: "typed",
+    text: WSL_LINE,
+    created: {
+      key: "PAY-41",
+      summary: "Fix the Podman 6.0.2 install failure",
+      issueType: "Story",
+      request: "a new incident to fix the podman 6.0.2 install failure INC6779508",
+    },
+    wait: PODMAN_WAIT,
+    workItem: WSL_WORK,
+    expect: {
+      required: [{ kind: "update_dependency", target: "PAY-37", fields: { action: "resolve" } }],
+      forbidden: [
+        { kind: "update_dependency", target: "PAY-41" },
+        { kind: "add_comment", target: "PAY-41" },
+      ],
+      forbiddenKinds: ["create_issue"],
+    },
+    single: true,
+  },
+  {
+    // The incident as it happened: the Podman line made a Story (approved as
+    // PAY-41) that waits on INC6779508, and the note's reading continued that
+    // conversation with the WSL line (D66). The thread's own wait must not take it.
+    name: "wait: a note line continued into the Podman thread resolves the WSL wait",
+    source: "note",
+    text: PODMAN_LINE,
+    approveFirst: { key: "PAY-41", wait: PODMAN_WAIT },
+    followUpNote: WSL_LINE,
+    workItem: WSL_WORK,
+    expect: {
+      required: [{ kind: "update_dependency", target: "PAY-37", fields: { action: "resolve" } }],
+      forbidden: [
+        { kind: "update_dependency", target: "PAY-41" },
+        { kind: "add_comment", target: "PAY-41" },
+      ],
+      forbiddenKinds: ["create_issue"],
+    },
+    single: false,
   },
 ];

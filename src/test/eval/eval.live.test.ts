@@ -44,6 +44,7 @@ import { scoreCase, signature } from "@/services/eval/score";
 import { makeFetcherTest } from "@/services/http";
 import { Intake } from "@/services/intake";
 import { IntakeLive } from "@/services/intake/live";
+import { noteParts } from "@/services/intake/thread";
 import { JiraClientLive } from "@/services/jira/live";
 import type { LlmErrorKind } from "@/services/llm/errors";
 import { LlmLive, ModelFactoryLive } from "@/services/llm/live";
@@ -85,7 +86,7 @@ import {
   stopReason,
 } from "./harness";
 import { classifyOwn, isChore } from "./own-proposals";
-import { seedCreated, seedWorkItem } from "./work-seed";
+import { approveFirstTurn, seedCreated, seedWorkItem } from "./work-seed";
 
 const env = process.env;
 const configured = !!(
@@ -421,15 +422,6 @@ const runCase = (c: EvalCase, label: string) =>
         })),
       },
     };
-    // An open wait the text may answer (D46).
-    if (c.wait)
-      yield* createDependency({
-        issueKey: c.wait.issueKey,
-        kind: "person",
-        label: c.wait.label,
-        ownerPersonId: senders[c.wait.owner],
-        expectedAt: c.wait.expectedAt ?? null,
-      });
     // Contacts and a work item that exist only while this case runs (D61 Reads).
     const teamIds = { Payments: payments, Platform: platform, Network: network };
     const extra: Record<string, string> = {};
@@ -440,6 +432,16 @@ const runCase = (c: EvalCase, label: string) =>
       });
     if (c.workItem) yield* seedWorkItem(c.workItem, extra);
     if (c.created) yield* seedCreated(c.created);
+    // An open wait the text may answer (D46), after the ticket it may be on (D69).
+    if (c.wait)
+      yield* createDependency({
+        issueKey: c.wait.issueKey,
+        kind: c.wait.kind ?? "person",
+        label: c.wait.label,
+        ownerPersonId: c.wait.owner ? senders[c.wait.owner] : null,
+        externalRef: c.wait.externalRef ?? null,
+        expectedAt: c.wait.expectedAt ?? null,
+      });
     // A provider error (timeout, rate limit) fails this case; the run decides whether to go on.
     const intake = yield* Intake;
     const attempt = yield* Effect.either(
@@ -471,7 +473,29 @@ const runCase = (c: EvalCase, label: string) =>
             parts: c.followUpParts,
             today: TODAY,
           });
-        return first;
+        // A later note line continued into the thread, as the note's reading sends it (D66).
+        const earlier = new Set<string>();
+        if (c.followUpNote) {
+          const made = yield* query((d) =>
+            d
+              .select({ id: intakeItems.id })
+              .from(intakeItems)
+              .where(eq(intakeItems.inboxItemId, first.inboxItemId))
+              .all(),
+          );
+          for (const m of made) earlier.add(m.id);
+          // The user approved the first turn, as in the incident (D69).
+          if (c.approveFirst)
+            yield* approveFirstTurn(first.inboxItemId, c.approveFirst.key, c.approveFirst.wait);
+          yield* intake.reply({
+            inboxItemId: first.inboxItemId,
+            parts: noteParts(c.followUpNote),
+            asInput: true,
+            noteDate: TODAY,
+            today: TODAY,
+          });
+        }
+        return { ...first, earlier };
       }),
     );
     let payloads: ProposalPayload[] = [];
@@ -485,12 +509,17 @@ const runCase = (c: EvalCase, label: string) =>
       // Scored on what the thread ends with: replaced proposals do not count, and
       // neither do a playbook's chores (Phase 26), which code adds, not the model.
       const id = attempt.right.inboxItemId;
-      const own = yield* classifyOwn(id);
+      // A note continuation's case scores only what the later line made (D69).
+      const earlier = attempt.right.earlier;
+      const own = yield* classifyOwn(id, earlier);
       const items = yield* query((d) =>
         d.select().from(intakeItems).where(eq(intakeItems.inboxItemId, id)).all(),
       );
       payloads = own;
-      errors = items.map((i) => i.error).filter((e): e is string => !!e);
+      errors = items
+        .filter((i) => !earlier.has(i.id))
+        .map((i) => i.error)
+        .filter((e): e is string => !!e);
     }
     const stats = yield* recordedCalls;
     const ms = Date.now() - started;

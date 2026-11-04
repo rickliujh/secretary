@@ -52,7 +52,10 @@ import {
 import { renderWorkBlock, type WorkItemSnapshot } from "./work-block";
 
 /**
- * Recorded with each classified item. 17 tells the model which tickets it made
+ * Recorded with each classified item. 18 reads a line by what it names (D69):
+ * a note line placed in a conversation is said to be one, a wait is picked by
+ * what the input names, and a comment does not report as done what the input
+ * asks to do. 17 tells the model which tickets it made
  * (the `created` candidate reason), makes "do not create what a candidate
  * already covers" a general rule, and sends back a create that nearly repeats
  * a candidate's summary (D66); 16 adds the ticket shape rules (one
@@ -61,7 +64,7 @@ import { renderWorkBlock, type WorkItemSnapshot } from "./work-block";
  * instructions as «...» (D56); 11 is the revoke thread context (FR-14.6) and
  * 12 story points (D55).
  */
-export const CLASSIFY_PROMPT_VERSION = 17;
+export const CLASSIFY_PROMPT_VERSION = 18;
 const NEW_REFS = ["$new:1", "$new:2", "$new:3", "$new:4", "$new:5"] as const;
 /** Placeholders for contacts and teams created in the same answer (prompt version 14, D60). */
 /** How many new contacts, and teams, one answer may create. */
@@ -108,6 +111,11 @@ const shapesTickets = (s: ItemSnapshot) => s.promptVersion >= 16;
  * against creating what a candidate covers, and the duplicate-summary check.
  */
 const knowsCreated = (s: ItemSnapshot) => s.promptVersion >= 17;
+/**
+ * A line is read by what it names (D69): the note line marked as such, the
+ * wait it names picked, and comments that do not report asks as done.
+ */
+const readsByName = (s: ItemSnapshot) => s.promptVersion >= 18;
 
 /** A create this alike to a candidate's summary repeats it (D66). */
 export const DUPLICATE_SUMMARY = 0.75;
@@ -206,6 +214,12 @@ export type ThreadContext = {
    * "that ticket" can be resolved (prompt version 6). Context only; untrusted.
    */
   others?: { summary: string | null; quote: string }[];
+  /**
+   * The input is a later line of the daily note that the note's reading put in
+   * this conversation (`Intake.reply` with `asInput`, D69): it may be about
+   * other work. Shown from prompt version 18.
+   */
+  noteLine?: true;
   /**
    * The questions the model asked about this item in the thread, oldest first,
    * answered or not (D55 answers). Data for the checks only: a question about
@@ -1754,7 +1768,11 @@ ${HARD_RULES}
 - When you move an issue to a closing status (cancelled, won't do, rejected, duplicate, obsolete, done or closed) for a reason in the input, also add an add_comment on the same issue that says why, in one or two sentences drawn from the input, so people reading the ticket know. When the closing status is a done status but the work was not done, the comment says the ticket was closed without being done. A cancellation always gets that comment.
 ${
   s.promptVersion >= 12
-    ? `- An add_comment is text for the people who read the ticket in Jira, about the work. It is never a reply to the user, a question to the user, an acknowledgement of their request, or a note about what you can or cannot do. When you cannot do what was asked, or need a value from the user (such as the points to set), ask in question. When nothing should change on the ticket, propose nothing for it.
+    ? `- An add_comment is text for the people who read the ticket in Jira, about the work. It is never a reply to the user, a question to the user, an acknowledgement of their request, or a note about what you can or cannot do. When you cannot do what was asked, or need a value from the user (such as the points to set), ask in question. When nothing should change on the ticket, propose nothing for it.${
+        readsByName(s)
+          ? ` An add_comment${s.waits?.length ? ", or an update_dependency reply," : ""} says what the input says: something the input asks to be done ("notify the owner", "close the incident") is not written as done.`
+          : ""
+      }
 `
     : ""
 }- Use link_dependency when an issue waits on someone or something outside the user's control (a person, a team, a ServiceNow incident).
@@ -1768,7 +1786,11 @@ ${
     : ""
 }${
   s.waits?.length
-    ? `- Open waits lists what the user already waits on. When the input answers or moves one of them, propose update_dependency with its dependencyId: resolve when what was waited for arrived or is no longer needed ("Bob sent the numbers"); log_reply when they answered but it is not done yet, with what they said in reply and expectedAt when they give a date; reschedule when only the date changes (expectedAt, or nextFollowupAt for when to ask again). Never propose link_dependency for a wait that list already has; update it instead.
+    ? `- Open waits lists what the user already waits on. When the input answers or moves one of them, propose update_dependency with its dependencyId: resolve when what was waited for arrived or is no longer needed ("Bob sent the numbers"); log_reply when they answered but it is not done yet, with what they said in reply and expectedAt when they give a date; reschedule when only the date changes (expectedAt, or nextFollowupAt for when to ask again). Never propose link_dependency for a wait that list already has; update it instead.${
+        readsByName(s)
+          ? " When more than one wait could be meant, pick the one whose ticket, label or reference the input names. Never pick a wait because this conversation made or acts on its ticket when the input names something else."
+          : ""
+      }
 `
     : ""
 }${
@@ -1985,7 +2007,13 @@ ${
     })}${
       // Typed input can hold a paste inside its lines too (D56).
       s.source === "typed" || s.source === "note" ? rule([s.quote]) : ""
-    }\nReferences found by code: issues ${s.references.issueKeys.join(", ") || "none"}; tickets ${s.references.tickets.join(", ") || "none"}.`,
+    }\nReferences found by code${
+      // A note line placed in a conversation (D69): the references are the thread's
+      // too, and must not read as named by the line.
+      readsByName(s) && s.thread?.noteLine
+        ? " in this input and the earlier items of this conversation"
+        : ""
+    }: issues ${s.references.issueKeys.join(", ") || "none"}; tickets ${s.references.tickets.join(", ") || "none"}.`,
   );
   if (s.thread?.instructions.length) {
     blocks.push(
@@ -1996,7 +2024,12 @@ ${
   }
   if (s.thread?.others?.length) {
     blocks.push(
-      `## Earlier in this conversation (context only)\nThe other items in this thread, oldest first. Use them to work out what "it", "that ticket" or "the issue" refers to. Do not act on them unless the newest instruction or this input asks for it.\n${s.thread.others
+      `## Earlier in this conversation (context only)\nThe other items in this thread, oldest first. ${
+        readsByName(s) && s.thread.noteLine
+          ? // A note line the reading placed here (D69): what it names decides, not the thread.
+            `The input is a later line of the user's daily note, put in this conversation; it may be about other work. Read it against every candidate issue and open wait by what it names, and act on this conversation's tickets only when the line is about them.`
+          : `Use them to work out what "it", "that ticket" or "the issue" refers to.`
+      } Do not act on them unless the newest instruction or this input asks for it.\n${s.thread.others
         .map((o, i) => `${i + 1}. ${o.summary ? `${o.summary}\n` : ""}${untrusted(o.quote)}`)
         .join("\n")}`,
     );
