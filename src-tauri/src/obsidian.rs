@@ -11,7 +11,8 @@
 //! writes the vault's daily note, found through the read-only `vault info=path`
 //! and `daily:path`, only inside the vault, only a `.md` file, and only when
 //! the file still holds the text the caller last read (compare-and-swap). No
-//! writing CLI subcommand is allowed.
+//! writing CLI subcommand is allowed. The other write, an image pasted into
+//! the note (D70), lives in `note_images.rs` and uses the same lookups.
 
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
@@ -442,20 +443,33 @@ fn cli_answer(
     Ok(text.to_string())
 }
 
-/// The vault's folder and the daily note's path in it, from the CLI.
+/// The daily note's path in the vault, from the CLI.
 pub fn resolve_daily_note(
     vault: &str,
     run: &dyn Fn(&[String]) -> Result<CliOutput, String>,
 ) -> Result<PathBuf, String> {
+    resolve_vault_note(vault, run).map(|(_, note)| note)
+}
+
+/// The vault's canonical folder and the daily note's path in it, from the two
+/// read-only CLI lookups. The images in the note (D70) need both.
+pub fn resolve_vault_note(
+    vault: &str,
+    run: &dyn Fn(&[String]) -> Result<CliOutput, String>,
+) -> Result<(PathBuf, PathBuf), String> {
     check_value("vault", vault)?;
     let at = format!("vault={vault}");
     let folder = cli_answer(run, vec![at.clone(), "vault".into(), "info=path".into()])?;
     let rel = cli_answer(run, vec![at, "daily:path".into()])?;
-    note_path(Path::new(&folder), &rel)
+    let note = note_path(Path::new(&folder), &rel)?;
+    let root = Path::new(&folder)
+        .canonicalize()
+        .map_err(|e| format!("the vault folder {folder} cannot be read: {e}"))?;
+    Ok((root, note))
 }
 
 /// The nearest folder of `path` that exists, `path` included.
-fn existing_ancestor(path: &Path) -> Option<&Path> {
+pub(crate) fn existing_ancestor(path: &Path) -> Option<&Path> {
     path.ancestors().find(|p| p.exists())
 }
 
@@ -566,7 +580,6 @@ pub fn write_note_cas(
     Ok(None)
 }
 
-/// Runs a CLI command for the daily note: finds the binary, starts Obsidian if needed.
 /// Whether a daily-note command may go on: with Obsidian closed it starts it
 /// only when the caller asked to `launch` (the page opening, Read now); the
 /// poll and the passes never start Obsidian.
@@ -578,7 +591,8 @@ pub fn may_run(launch: bool, running: bool) -> Result<(), String> {
     }
 }
 
-fn cli_runner(
+/// Runs CLI commands for the daily note: finds the binary, starts Obsidian if needed.
+pub(crate) fn cli_runner(
     cli_path: Option<String>,
     launch: bool,
 ) -> Result<impl Fn(&[String]) -> Result<CliOutput, String>, String> {
@@ -632,12 +646,12 @@ pub async fn daily_note_write(
 }
 
 #[cfg(test)]
-mod daily_note_tests {
+pub(crate) mod daily_note_tests {
     use super::*;
     use std::cell::RefCell;
 
     /// A fresh folder under the system temp folder.
-    fn temp_dir(name: &str) -> PathBuf {
+    pub(crate) fn temp_dir(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -648,7 +662,7 @@ mod daily_note_tests {
         dir
     }
 
-    fn fake_cli<'a>(
+    pub(crate) fn fake_cli<'a>(
         folder: String,
         daily: &'static str,
         seen: &'a RefCell<Vec<Vec<String>>>,

@@ -348,7 +348,9 @@ function DailyNoteCard() {
             One free-form note a day on the Note page. The secretary reads what is new at each work
             pass, a minute after you stop typing, and when you press Read now, and turns what needs
             doing into cards in the Inbox. With a vault chosen, your Obsidian daily note is the
-            note: the page shows and edits it, and edits on both sides are merged.
+            note: the page shows and edits it, and edits on both sides are merged. Images you paste
+            or drop into the note are saved in the vault's attachment folder, as Obsidian would save
+            them (without a vault, in the app's data folder), and are never sent to a model.
           </CardDescription>
         </CardHeader>
         <CardContent>

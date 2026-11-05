@@ -32,7 +32,8 @@ const Base = FetcherLive.pipe(
 // Chat's propose_actions tool runs intake, so Chat sits above it; the daily
 // note reads into intake and the chat writes the note, so it sits between them.
 const AppLayer = ChatLive.pipe(
-  Layer.provideMerge(DailyNoteLive.pipe(Layer.provide(NoteFileLive))),
+  // NoteFile is exposed too: the note editor saves and loads images with it (D70).
+  Layer.provideMerge(DailyNoteLive.pipe(Layer.provideMerge(NoteFileLive))),
   Layer.provideMerge(
     Layer.mergeAll(IntakeLive, ProposalsLive, CommsLive, LearningLive, PlanningLive, ReportsLive),
   ),

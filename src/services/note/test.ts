@@ -1,18 +1,25 @@
 /**
  * A fake vault daily note for tests (D65): one file per vault, read and
  * written with the same compare-and-swap as the Rust command. Tests change
- * `files` directly to stand for edits made in Obsidian.
+ * `files` directly to stand for edits made in Obsidian. Images (D70) live in
+ * `images`, keyed by `imageKey(vault, name)`.
  */
 import { Effect, Layer } from "effect";
-import { NoteError, NoteFile } from ".";
+import { bytesToBase64 } from "@/lib/base64";
+import { NoteError, NoteFile, type NoteImageLoaded } from ".";
 import { DailyNoteLive } from "./live";
 
 /** `DailyNote` over a fake vault file; it still needs Db, Settings, Intake and Llm. */
 export const dailyNoteTestLayer = (initial: Record<string, string | null> = {}) =>
   DailyNoteLive.pipe(Layer.provide(makeNoteFileTest(initial).layer));
 
+/** Where the fake keeps an image: the vault's name ("" without one) and the file name. */
+export const imageKey = (vault: string | null, name: string) => `${vault ?? ""}/${name}`;
+
 export function makeNoteFileTest(initial: Record<string, string | null> = {}) {
   const files = new Map<string, string | null>(Object.entries(initial));
+  const images = new Map<string, NoteImageLoaded>();
+  let imageCount = 0;
   const writes: { vault: string; text: string; expected: string | null }[] = [];
   /** Each call's `launch`, in order. */
   const launches: boolean[] = [];
@@ -57,6 +64,23 @@ export function makeNoteFileTest(initial: Record<string, string | null> = {}) {
         writes.push({ vault, text, expected });
         return { path: state.path, conflict: false, text: null };
       }),
+    // Images (D70): kept in memory per vault ("" without one), linked as
+    // Obsidian's default `![[name]]`.
+    saveImage: (vault, data, ext) => {
+      const saved = () => {
+        const name = `Pasted image ${++imageCount}.${ext === "jpeg" ? "jpg" : ext}`;
+        images.set(imageKey(vault, name), {
+          mime: ext === "png" ? "image/png" : `image/${ext}`,
+          data: bytesToBase64(data),
+        });
+        return { path: `${vault ?? "app"}/${name}`, link: `![[${name}]]` };
+      };
+      return vault === null ? Effect.sync(saved) : Effect.map(check(vault, true), saved);
+    },
+    loadImage: (vault, link) => {
+      const found = () => images.get(imageKey(vault, link)) ?? null;
+      return vault === null ? Effect.sync(found) : Effect.map(check(vault, false), found);
+    },
   });
-  return { layer, files, writes, state, launches };
+  return { layer, files, writes, state, launches, images };
 }

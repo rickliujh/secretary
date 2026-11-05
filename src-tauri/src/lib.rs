@@ -1,4 +1,5 @@
 mod capture;
+mod note_images;
 mod obsidian;
 mod secrets;
 
@@ -148,6 +149,8 @@ pub fn run() {
             obsidian::obsidian_cli,
             obsidian::daily_note_read,
             obsidian::daily_note_write,
+            note_images::note_image_save,
+            note_images::note_image_load,
             capture::capture_status,
             capture::set_close_to_tray,
             capture::set_capture_shortcut,

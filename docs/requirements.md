@@ -629,6 +629,28 @@ decides what is read and when. FR-20 is Phase 29.
   about any block that has no conversation from the same card. Showing the page
   sends nothing to a model. The text itself stays clean: nothing is inserted
   between the lines.
+- FR-20.9 (Must) Images in the note. An image pasted or dropped into the note
+  is saved as a file and shown under its line, and the line keeps a link to it
+  as text. With a vault, the file goes where Obsidian would put it (the vault's
+  attachment folder setting), is named as Obsidian names a pasted image and is
+  linked as Obsidian would link it, so Obsidian shows the same image in the
+  same note and an image pasted in Obsidian shows in Secretary. Without a
+  vault, the file goes in the app's data folder. Images are never sent to a
+  model: a line with an image and words is read by its words, a line with
+  only an image is left alone.
+- AC (Phase 34; Rust against temp folders, the editor in jsdom, the look and
+  the round trip with Obsidian by the user): with the vault's
+  `attachmentFolderPath` at its default the pasted image is saved at the vault
+  root as `Pasted image <YYYYMMDDHHmmss>.png` and linked `![[...]]`; with `./x`
+  it lands in `x` beside the note; with markdown links it is linked `![](...)`
+  by the shortest, relative or absolute form; a second paste in the same second
+  gets ` 1`; a setting with `..` or a folder linked out of the vault is refused
+  and nothing is written; without a vault the file is in the app's data folder.
+  A note with two image links shows two images; typing on their lines does not
+  reload them; deleting a link removes its image; a link to a missing file
+  shows "Image not found"; a text paste pastes text; an earlier day shows its
+  images and takes no paste. An image pasted in Obsidian shows in Secretary
+  after the next sync, and one pasted in Secretary shows in Obsidian.
 - AC (Phase 31, against the mock Jira, service level; the look against
   `docs/note-cards-mockup.html` by the user): after a reading, the block that
   made a card carries the count 1 and its card shows the proposal; approving it

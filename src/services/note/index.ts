@@ -33,6 +33,11 @@ export type NoteFileWrite = {
   text: string | null;
 };
 
+/** An image saved into the note's attachments (D70): its file and the link to insert. */
+export type NoteImageSaved = { path: string; link: string };
+/** An image's bytes as base64 and its type, e.g. "image/png" (D70). */
+export type NoteImageLoaded = { mime: string; data: string };
+
 /**
  * The vault's daily note file (D65). Live: the `daily_note_read` and
  * `daily_note_write` Tauri commands, which find the note through the
@@ -51,6 +56,26 @@ export interface NoteFileShape {
     expected: string | null,
     launch: boolean,
   ) => Effect.Effect<NoteFileWrite, NoteError>;
+  /**
+   * Saves a pasted or dropped image (D70): with a vault (its name) where
+   * Obsidian would put it, by the vault's settings, starting a closed
+   * Obsidian for the lookups; without one (null) in the app's data folder.
+   * Returns the file's path and the link text to insert.
+   */
+  readonly saveImage: (
+    vault: string | null,
+    data: Uint8Array,
+    ext: string,
+  ) => Effect.Effect<NoteImageSaved, NoteError>;
+  /**
+   * The image a link names (its target, decoded), as base64 with its type;
+   * null when it is not found. Never starts Obsidian: a closed one fails
+   * with `not_running`.
+   */
+  readonly loadImage: (
+    vault: string | null,
+    link: string,
+  ) => Effect.Effect<NoteImageLoaded | null, NoteError>;
 }
 export class NoteFile extends Context.Tag("NoteFile")<NoteFile, NoteFileShape>() {}
 
