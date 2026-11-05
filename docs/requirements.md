@@ -635,9 +635,17 @@ decides what is read and when. FR-20 is Phase 29.
   attachment folder setting), is named as Obsidian names a pasted image and is
   linked as Obsidian would link it, so Obsidian shows the same image in the
   same note and an image pasted in Obsidian shows in Secretary. Without a
-  vault, the file goes in the app's data folder. Images are never sent to a
-  model: a line with an image and words is read by its words, a line with
-  only an image is left alone.
+  vault, the file goes in the app's data folder.
+- FR-20.10 (Must) Images are read. A screenshot pasted into the note (a chat,
+  an email, a ticket, a document) is read like a pasted text: the secretary
+  transcribes what the image shows and the block is then read with that
+  transcript as its quoted, untrusted input and the user's own words on the
+  block as the instruction, so a pasted screenshot of a request leads to the
+  same cards a pasted text would. An image is transcribed once (the same file
+  is not sent twice), at most a few per reading; the transcript is shown in
+  the conversation as the quote. A block under the private heading is still
+  never sent. When the model cannot see images, the block waits and the page
+  says why.
 - AC (Phase 34; Rust against temp folders, the editor in jsdom, the look and
   the round trip with Obsidian by the user): with the vault's
   `attachmentFolderPath` at its default the pasted image is saved at the vault
