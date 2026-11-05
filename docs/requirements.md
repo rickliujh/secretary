@@ -629,6 +629,15 @@ decides what is read and when. FR-20 is Phase 29.
   about any block that has no conversation from the same card. Showing the page
   sends nothing to a model. The text itself stays clean: nothing is inserted
   between the lines.
+- FR-20.9 (Must) Images in the note. An image pasted or dropped into the note
+  is saved as a file and shown under its line, and the line keeps a link to it
+  as text. With a vault, the file goes where Obsidian would put it (the vault's
+  attachment folder setting), is named as Obsidian names a pasted image and is
+  linked as Obsidian would link it, so Obsidian shows the same image in the
+  same note and an image pasted in Obsidian shows in Secretary. Without a
+  vault, the file goes in the app's data folder. Images are never sent to a
+  model: a line with an image and words is read by its words, a line with
+  only an image is left alone.
 - AC (Phase 31, against the mock Jira, service level; the look against
   `docs/note-cards-mockup.html` by the user): after a reading, the block that
   made a card carries the count 1 and its card shows the proposal; approving it
