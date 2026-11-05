@@ -293,6 +293,9 @@ const ReadResultSchema = z.object({
   left: z.number(),
   /** Absent in results stored before Phase 30. */
   continued: z.number().default(0),
+  /** Absent in results stored before Phase 35. */
+  waiting: z.number().default(0),
+  waitReason: z.string().nullable().default(null),
   called: z.boolean(),
   error: z.string().nullable(),
 });

@@ -1,4 +1,11 @@
-import { generateText, NoObjectGeneratedError, Output, stepCountIs, streamText } from "ai";
+import {
+  generateText,
+  type ModelMessage,
+  NoObjectGeneratedError,
+  Output,
+  stepCountIs,
+  streamText,
+} from "ai";
 import { Duration, Effect, Exit, Layer, Option } from "effect";
 import { llmCalls } from "@/db/schema";
 import { newId, nowIso } from "@/lib/ids";
@@ -193,17 +200,33 @@ const makeLlm = Effect.gen(function* () {
           abortSignal: signal,
           ...callSettings(p.provider),
         };
+        // With images (D71) the prompt and the images are one user message.
+        const first: ModelMessage = req.images?.length
+          ? {
+              role: "user",
+              content: [
+                { type: "text", text: req.prompt },
+                ...req.images.map((i) => ({
+                  type: "file" as const,
+                  data: i.data,
+                  mediaType: i.mediaType,
+                })),
+              ],
+            }
+          : { role: "user", content: req.prompt };
         try {
           const result = messages
             ? await generateText({
                 ...common,
                 messages: [
-                  { role: "user", content: req.prompt },
+                  first,
                   { role: "assistant", content: messages.previous },
                   { role: "user", content: REPAIR_INSTRUCTION(messages.issues) },
                 ],
               })
-            : await generateText({ ...common, prompt: req.prompt });
+            : req.images?.length
+              ? await generateText({ ...common, messages: [first] })
+              : await generateText({ ...common, prompt: req.prompt });
           if (result.finishReason === "content-filter") return "refused";
           const value = result.output as T;
           const issues = [...(req.validate?.(value) ?? [])];

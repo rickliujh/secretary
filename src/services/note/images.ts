@@ -6,8 +6,9 @@
  * image extension count; a URL, a backslash or a drive is left alone
  * (nothing is fetched or asked for). Links in code spans and fenced code
  * count too: the scan is per line, not per markdown node. The
- * editor shows each one under its line; the reading never sees anything but
- * the text.
+ * editor shows each one under its line; the reading sends the model a block
+ * with each transcribed image in its link's place as quoted lines
+ * (`blockForModel`, D71), and records the text as it is.
  */
 
 /** One image link in a line: where it is in the line and the file it names. */
@@ -65,6 +66,69 @@ export function imageLinks(line: string): ImageLink[] {
     if (found) out.push(found);
   }
   return out.sort((a, b) => a.from - b.from);
+}
+
+/** What a transcribed image shows (D71), as the model will read it. */
+export type ImageTranscript = { description: string; text: string };
+
+/** The image links of a block's text in order, over all its lines. */
+export function blockImageLinks(text: string): ImageLink[] {
+  return text.split(/\r?\n/).flatMap((line) => imageLinks(line));
+}
+
+/**
+ * A block's text as the model reads it (D71): each image link with a
+ * transcript, keyed by the link's target, becomes quoted lines, `> [Image:
+ * <name>: <description>]` and then the transcript's lines, each `> `. A link
+ * alone on its line is replaced by the quote; a link among words is taken out
+ * of the line and its quote follows the line, so the user's words stay the
+ * instruction over the pasted input. Links without a transcript stay as they
+ * are. The note itself is never changed: this is for the model only.
+ */
+export function blockForModel(
+  text: string,
+  reads: ReadonlyMap<string, ImageTranscript>,
+  /** Most characters of each transcript; the rest becomes "[... clipped]" inside the quote. */
+  opts: { quoteChars?: number } = {},
+): string {
+  if (!reads.size) return text;
+  const out: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const links = imageLinks(line).filter((l) => reads.has(l.target));
+    if (!links.length) {
+      out.push(line);
+      continue;
+    }
+    let rest = "";
+    let at = 0;
+    for (const l of links) {
+      rest += line.slice(at, l.from);
+      at = l.to;
+    }
+    rest += line.slice(at);
+    // What is left of the line once its links are out: words, or nothing (a
+    // bare quote marker or list bullet is nothing).
+    const indent = /^[ \t]*/.exec(line)?.[0] ?? "";
+    const words = indent + rest.trim().replace(/[ \t]{2,}/g, " ");
+    if (words.replace(/^[\s>*+-]*(?:\[[ xX]\])?/, "").trim()) out.push(words);
+    for (const l of links) out.push(...quoteImage(l.name, reads.get(l.target), opts.quoteChars));
+  }
+  return out.join("\n");
+}
+
+const flat = (s: string) => s.replace(/\s+/g, " ").trim();
+
+function quoteImage(
+  name: string,
+  read: ImageTranscript | undefined,
+  max = Number.POSITIVE_INFINITY,
+): string[] {
+  if (!read) return [];
+  const head = `> [Image: ${flat(name)}: ${flat(read.description)}]`;
+  const full = read.text.trim();
+  const text = full.length > max ? `${full.slice(0, max).trimEnd()}\n[... clipped]` : full;
+  const body = text ? text.split(/\r?\n/).map((l) => (l.trim() ? `> ${l.trimEnd()}` : ">")) : [];
+  return [head, ...body];
 }
 
 /**

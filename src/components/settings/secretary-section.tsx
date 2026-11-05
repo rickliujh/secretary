@@ -309,7 +309,8 @@ type NoteValues = z.infer<typeof NoteForm>;
 /**
  * The daily note (FR-20, D65): whether the secretary reads it, the Obsidian
  * vault whose daily note is the file of record, and the heading whose blocks
- * are never sent to a model.
+ * are never sent to a model. Every other image the note links to is
+ * transcribed and read like a pasted text (D71).
  */
 function DailyNoteCard() {
   const { data: settings } = useSettings();
@@ -350,7 +351,11 @@ function DailyNoteCard() {
             doing into cards in the Inbox. With a vault chosen, your Obsidian daily note is the
             note: the page shows and edits it, and edits on both sides are merged. Images you paste
             or drop into the note are saved in the vault's attachment folder, as Obsidian would save
-            them (without a vault, in the app's data folder), and are never sent to a model.
+            them (without a vault, in the app's data folder). Every image the note links to (a
+            screenshot, a photo, a link inside code too) is sent once to the model for Read an image
+            (Settings &gt; Models), transcribed, and read like a pasted text, with your words on the
+            line as the instruction. Lines under the private heading, and their images, are never
+            sent to a model.
           </CardDescription>
         </CardHeader>
         <CardContent>

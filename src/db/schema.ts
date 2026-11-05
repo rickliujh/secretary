@@ -652,6 +652,32 @@ export const dailyNoteBlocks = sqliteTable(
   (t) => [uniqueIndex("daily_note_blocks_date_hash_idx").on(t.date, t.hash)],
 );
 
+/**
+ * What an image in the note shows, as the `read_image` call transcribed it
+ * (D71), keyed by the file's content so the same file is sent once. A row from
+ * an older prompt version is kept, not read again.
+ */
+export const imageReads = sqliteTable("image_reads", {
+  /** sha-256 of the file's bytes, hex. */
+  hash: text("hash").primaryKey(),
+  /** The file name when it was first read. */
+  name: text("name").notNull(),
+  kind: text("kind").notNull(),
+  text: text("text").notNull(),
+  description: text("description").notNull(),
+  promptVersion: integer("prompt_version").notNull(),
+  model: text("model").notNull(),
+  createdAt: text("created_at").notNull(),
+  /**
+   * A failed transcription (D71): the reason the page shows; kind, text and
+   * description are empty. Retried only on Read now, Ask, or after six hours.
+   */
+  error: text("error"),
+  /** Failed transcriptions so far. */
+  attempts: integer("attempts").notNull().default(0),
+  lastTriedAt: text("last_tried_at"),
+});
+
 // ---------------------------------------------------------------------------
 // Learning
 // ---------------------------------------------------------------------------

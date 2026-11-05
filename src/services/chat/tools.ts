@@ -31,6 +31,7 @@ import { searchNoteIds } from "@/services/directory/notes";
 import { Intake } from "@/services/intake";
 import { AttachmentSchema, JiraClient } from "@/services/jira";
 import { effectiveFieldIds, storyPointFields } from "@/services/jira/fields";
+import { prepareImage } from "@/services/llm/images";
 import { DailyNote } from "@/services/note";
 import { withoutPrivate } from "@/services/note/blocks";
 import { pickSprint, sprintPoints } from "@/services/planning/points";
@@ -55,7 +56,7 @@ import {
 } from "@/services/work/reads";
 import { bundleRecordOf } from "@/services/work/schema";
 import { blockedFacts, pendingDecisions, smallAskFacts, weekAhead } from "./agenda";
-import { type AttachmentRef, type ImageForModel, pickImages, prepareImage } from "./images";
+import { type AttachmentRef, type ImageForModel, pickImages } from "./images";
 
 export type ToolDeps = Db | Settings | Intake | ConfluenceClient | JiraClient | Sources | DailyNote;
 type Exec = <A, E>(effect: Effect.Effect<A, E, ToolDeps>) => Promise<A | { error: string }>;
@@ -247,8 +248,11 @@ export function chatTools(
                   data: file.right.bytes,
                 }),
               );
-              if (ready) shown.push(ready);
-              else skipped.push(`${a.filename} (too large)`);
+              if ("image" in ready) shown.push(ready.image);
+              else
+                skipped.push(
+                  `${a.filename} (${ready.reason === "too_large" ? "too large" : "unsupported image type"})`,
+                );
             }
             if (shown.length) showImages(toolCallId, d.issue.key, shown);
             return {

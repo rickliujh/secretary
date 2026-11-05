@@ -22,6 +22,7 @@ export const TASK_TYPES = [
   "attach_event",
   "update_work_state",
   "note_triage",
+  "read_image",
 ] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 
@@ -158,6 +159,14 @@ export const TASK_DEFAULTS: Record<TaskType, TaskDefaults> = {
     timeoutMs: 60_000,
     label: "Note triage",
     description: "Which blocks of the daily note lead to anything",
+  },
+  read_image: {
+    tier: "standard",
+    escalate: false,
+    confidenceThreshold: 0,
+    timeoutMs: 60_000,
+    label: "Read an image",
+    description: "Transcribe a screenshot pasted into the note",
   },
 };
 
