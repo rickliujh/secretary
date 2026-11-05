@@ -5,6 +5,18 @@
 - Note page: no box around the note. The editor's textarea-style border and
   focus ring are gone; the note is text on the page as the mock-up shows it,
   the marks hang in the left margin and the text aligns with the heading (D67).
+- Phase 34, images in the note (FR-20.9, D70): an image pasted or dropped into
+  today's note is saved as a file and its link inserted on its own line; every
+  linked image shows under its line, earlier days included. With a vault the
+  file goes where Obsidian would put it, by the vault's own attachment folder,
+  pasted-image name and link format settings; without one, in the app's data
+  folder. New Rust commands `note_image_save` (the image file is the only new
+  write: created new, only inside the vault or the app's folder) and
+  `note_image_load` (never starts Obsidian; capped at 20 MB). Images are never
+  sent to a model. Link targets are checked on their text before any file is
+  touched. The main window turns Tauri's own file drop off
+  (`dragDropEnabled: false`) so files dropped from the OS reach the editor.
+  No migration, no setting.
 
 ## v0.2.0 (2026-11-03)
 
