@@ -11,7 +11,8 @@
  * text on the page, as the mockup shows it, with the marks hanging in the
  * left margin. The marks and the hover come from `cards-extension`; `overlay`
  * (the card and its anchor) is placed in the editor's element, where the
- * anchor's coordinates are measured.
+ * anchor's coordinates are measured. Images pasted or dropped are saved and
+ * linked, and each linked image shows under its line (`images-extension`, D70).
  */
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
@@ -32,6 +33,8 @@ import type { NoteCardsData } from "./block-marks";
 import type { NoteCardStore } from "./card-store";
 import { noteCards, setNoteCards } from "./cards-extension";
 import { externalChange, noteTyping } from "./editor-setup";
+import { noteImages } from "./images-extension";
+import { noteImagesIO } from "./images-io";
 
 const highlight = HighlightStyle.define([
   { tag: tags.heading1, fontWeight: "600", fontSize: "1.25em" },
@@ -159,6 +162,21 @@ const themeFor = (dark: boolean) =>
       ".cm-note-mark-ghost, .cm-note-mark-private": { opacity: "0" },
       ".cm-note-mark-ghost.cm-note-mark-lit, .cm-note-mark-private.cm-note-mark-lit, .cm-note-mark-ghost:focus-visible, .cm-note-mark-private:focus-visible":
         { opacity: "0.7" },
+      // Images under their lines (D70): the column's width, at most 320 px tall.
+      ".cm-note-image": { padding: "0 10px 0 4px" },
+      ".cm-note-image img": {
+        display: "block",
+        maxWidth: "100%",
+        maxHeight: "320px",
+        margin: "6px 0",
+        borderRadius: "6px",
+      },
+      ".cm-note-image-missing": {
+        display: "block",
+        margin: "6px 0",
+        color: "var(--muted-foreground)",
+        fontSize: "13px",
+      },
       ".cm-panels": { backgroundColor: "var(--popover)", color: "var(--popover-foreground)" },
     },
     { dark },
@@ -229,6 +247,7 @@ export function NoteEditor({
       fences,
       noteTyping,
       noteCards(store),
+      noteImages(noteImagesIO),
     ],
     [label, store],
   );

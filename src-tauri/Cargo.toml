@@ -32,9 +32,11 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
-
-[dev-dependencies]
+# Images in the note (D70): the vault's app.json, the bytes across the bridge,
+# the local time in a pasted image's name.
 serde_json = "1"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # Quick capture (D48): a global shortcut, and one running instance that a second
 # launch (`secretary --capture`) forwards to. Pinned to the releases for tauri 2.11

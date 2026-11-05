@@ -20,6 +20,7 @@ import { requestWorkPass } from "@/app/work";
 import { localDate } from "@/lib/dates";
 import { DailyNote, type SyncStatus } from "@/services/note";
 import { mergeNote } from "@/services/note/merge";
+import { invalidateNoteImages } from "./images-extension";
 
 const SAVE_AFTER_MS = 500;
 const READ_AFTER_MS = 60_000;
@@ -185,7 +186,9 @@ export function useNoteEditor(
     readTimer.current = null;
     await flush();
     const r = await readNoteNow("button", requestWorkPass);
-    // Read now synced the file of record (starting Obsidian if needed): show it.
+    // Read now synced the file of record (starting Obsidian if needed): show it,
+    // and its images afresh (D70).
+    invalidateNoteImages();
     void refresh(false);
     return r;
   }, [flush, refresh]);
