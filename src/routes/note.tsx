@@ -202,7 +202,7 @@ function NotePage() {
         <NoteEditor
           key={date}
           label={`Note for ${date}`}
-          className="w-full max-w-[44rem] flex-1"
+          className="w-full max-w-[calc(44rem+1.5rem)] flex-1"
           value={editor.text}
           readOnly={!editable}
           placeholder={

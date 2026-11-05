@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Note page: no box around the note. The editor's textarea-style border and
+  focus ring are gone; the note is text on the page as the mock-up shows it,
+  the marks hang in the left margin and the text aligns with the heading (D67).
+
 ## v0.2.0 (2026-11-03)
 
 Everything after v0.1.0 below: the ticket Edit dialog with points, sprint, epic
