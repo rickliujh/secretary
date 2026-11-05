@@ -7,9 +7,11 @@
  * common prefix and suffix, outside the undo history, so the cursor and the
  * scroll stay. Line wrapping, proportional type (monospace inside fenced code
  * only, headings a little larger), the app's light or dark theme
- * (next-themes), read-only for earlier days. The marks and the hover come
- * from `cards-extension`; `overlay` (the card and its anchor) is placed in the
- * editor's box, where the anchor's coordinates are measured.
+ * (next-themes), read-only for earlier days. No box around the note: it is
+ * text on the page, as the mockup shows it, with the marks hanging in the
+ * left margin. The marks and the hover come from `cards-extension`; `overlay`
+ * (the card and its anchor) is placed in the editor's element, where the
+ * anchor's coordinates are measured.
  */
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
@@ -110,11 +112,14 @@ const themeFor = (dark: boolean) =>
         { backgroundColor: "color-mix(in oklch, var(--primary) 22%, transparent)" },
       ".cm-placeholder": { color: "var(--muted-foreground)" },
       ".cm-gutters": { backgroundColor: "transparent", border: "none" },
+      // The marks hang in the page's left margin, as in the mockup: the text's
+      // left edge is the heading's, and the mark sits a little before it.
       ".cm-note-marks .cm-gutterElement": {
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "center",
-        padding: "0 2px 0 8px",
+        width: "20px",
+        padding: "0",
       },
       // The mark: small, in the margin, quiet until its line is hovered (D67).
       ".cm-note-mark": {
@@ -241,7 +246,10 @@ export function NoteEditor({
   return (
     <div
       className={cn(
-        "relative rounded-lg border border-input transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30",
+        // No box around the note (the mockup): text on the page, the marks'
+        // gutter hanging 24 px into the page's padding so the text aligns with
+        // the heading above it.
+        "relative -ml-6",
         className,
       )}
     >
