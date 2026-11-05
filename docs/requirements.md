@@ -646,6 +646,18 @@ decides what is read and when. FR-20 is Phase 29.
   the conversation as the quote. A block under the private heading is still
   never sent. When the model cannot see images, the block waits and the page
   says why.
+- AC (Phase 35; against the mock Jira with a scripted transcript, the
+  transcription itself by a live smoke test): "do this one" above a pasted
+  screenshot of a chat asking for the Q3 revenue numbers gives one card whose
+  evidence quotes the transcript, and approving it creates the ticket; the
+  thread shows the user's words as the message and the transcript, headed
+  `[Image: <name>: <description>]`, as the pasted input; the note's text keeps
+  the link. The same file in another block or on a later day is not sent
+  again. A model that refuses images, Obsidian closed or a missing file leaves
+  the block unread and the page says "1 waits: <reason>"; a work pass does
+  not send a failed image again, Read now does. At most 4 images of a block and 8 new ones per reading are read.
+  A block under the private heading loads no image. Live, claude-haiku-5-5
+  transcribes the fixture of a chat message with its sender and request.
 - AC (Phase 34; Rust against temp folders, the editor in jsdom, the look and
   the round trip with Obsidian by the user): with the vault's
   `attachmentFolderPath` at its default the pasted image is saved at the vault
