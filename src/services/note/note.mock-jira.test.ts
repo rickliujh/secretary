@@ -23,7 +23,10 @@
  * block naming the Story's key, and one the triage assigns to the thread, are
  * new messages there; a to-do copied into the next day's note gives no card.
  *
- * FR-20.7 acceptance (Phase 31, D67), at the service level: see the last suite.
+ * FR-20.7 acceptance (Phase 31, D67), at the service level: see its suite.
+ *
+ * FR-20.10 acceptance (Phase 35, D71): a screenshot of a request in the note,
+ * transcribed (scripted), leads to a card whose evidence quotes it.
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
@@ -37,7 +40,7 @@ import { ExecutorLive } from "@/services/executor/live";
 import { Intake } from "@/services/intake";
 import { IntakeLive } from "@/services/intake/live";
 import { LlmLive } from "@/services/llm/live";
-import { makeScriptedModels, type Scripted } from "@/services/llm/test";
+import { imagesOf, makeScriptedModels, type Scripted } from "@/services/llm/test";
 import { Proposals } from "@/services/proposals";
 import { ProposalsLive } from "@/services/proposals/live";
 import { RetrievalLive } from "@/services/retrieval/live";
@@ -49,7 +52,7 @@ import { readThread, testProvider } from "@/test/helpers";
 import { out } from "@/test/intake-layer";
 import { jiraSettings, jiraTestLayer } from "@/test/layers";
 import { createHandler, generate } from "../../../scripts/mock-jira";
-import { DailyNote } from ".";
+import { DailyNote, NoteFile } from ".";
 import { splitBlocks } from "./blocks";
 import { blocksOf, markLabel, threadMark, threadSummaries } from "./cards";
 import { DailyNoteLive } from "./live";
@@ -162,9 +165,9 @@ function setup(scripts: Record<string, Scripted[]> = phase29()) {
     Layer.merge(Layer.provideMerge(SyncLive, base), models.layer),
   );
   const layer = Layer.provideMerge(
-    DailyNoteLive.pipe(Layer.provide(file.layer)),
+    DailyNoteLive,
     Layer.provideMerge(
-      Layer.merge(IntakeLive, ProposalsLive),
+      Layer.mergeAll(IntakeLive, ProposalsLive, file.layer),
       Layer.provideMerge(Layer.merge(RetrievalLive, ExecutorLive), llm),
     ),
   );
@@ -705,5 +708,103 @@ describe("cards on the note's blocks against the mock Jira (FR-20.7 AC, Phase 31
     expect(r.threads.map((t) => t.id).sort()).toEqual([r.todo, r.asked.inboxItemId].sort());
     expect(Either.isLeft(r.priv) && r.priv.left).toMatchObject({ kind: "private" });
     for (const c of models.calls) expect(JSON.stringify(c.prompt)).not.toContain("salary");
+  });
+});
+
+/**
+ * FR-20.10 acceptance (Phase 35, D71): a screenshot of a request pasted into
+ * the note, with the user's line above it, is transcribed once (scripted) and
+ * leads to the card a pasted text would; the proposal's evidence quotes the
+ * transcript, approving it creates the ticket, and the image is not sent again.
+ */
+describe("images in the note are read against the mock Jira (FR-20.10 AC, Phase 35)", () => {
+  test("a screenshot of a request leads to a card whose evidence quotes it", async () => {
+    const REQUEST = "Dana Lee (09:41): Could you send me the Q3 revenue numbers by Friday?";
+    const request = {
+      ...smallAsk("Send Dana the Q3 revenue numbers"),
+      proposals: [
+        {
+          ...smallAsk("Send Dana the Q3 revenue numbers").proposals[0],
+          rationale: "Dana asked in the pasted chat",
+          evidence: "Could you send me the Q3 revenue numbers by Friday?",
+        },
+      ],
+    };
+    const { layer, models } = setup({
+      "fast-m": [triage("act")],
+      "std-m": [
+        out({
+          kind: "chat",
+          text: REQUEST,
+          description: "A Teams chat where Dana asks for numbers.",
+        }),
+        out(request),
+      ],
+    });
+    const r = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (yield* Sync).run();
+          const note = yield* DailyNote;
+          // Pasted in the editor: saved into the vault and linked as Obsidian links it.
+          const saved = yield* (yield* NoteFile).saveImage(
+            "Work",
+            new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]),
+            "png",
+          );
+          const body = `do this one\n${saved.link}\n`;
+          yield* note.save(TODAY, body);
+          const first = yield* note.read("button");
+          const again = yield* note.read("pass");
+          const threads = yield* noteThreads;
+          const thread = yield* readThread(threads[0]?.id ?? "");
+          const card = thread.props[0];
+          yield* (yield* Proposals).approve(card?.id ?? "");
+          const done = yield* query((d) =>
+            d
+              .select()
+              .from(proposals)
+              .where(eq(proposals.id, card?.id ?? ""))
+              .get(),
+          );
+          return { first, again, thread, done, body, page: (yield* note.load(TODAY)).body };
+        }),
+        layer,
+      ),
+    );
+    expect(r.first).toMatchObject({ cards: 1, waiting: 0, called: true });
+    expect(r.again).toMatchObject({ cards: 0, called: false });
+    // One image went to a model; the classify call read the transcript as pasted input.
+    expect(models.calls.filter((c) => imagesOf(c).length)).toHaveLength(1);
+    const classify = models.calls.filter((c) => c.model === "std-m")[1];
+    const classifyText = ((classify?.prompt ?? []) as { role: string; content: unknown }[])
+      .flatMap((m) =>
+        typeof m.content === "string"
+          ? [m.content]
+          : (m.content as { text?: string }[]).map((p) => p.text ?? ""),
+      )
+      .join("\n");
+    // The transcript is inside the Input section's untrusted wrapper, not a trusted line.
+    const input = /## Input\n<untrusted_input[^>]*>\n([\s\S]*?)\n<\/untrusted_input>/.exec(
+      classifyText,
+    );
+    expect(input?.[1]).toContain(REQUEST);
+    expect(input?.[1]).toContain("[Image: Pasted image 1.png:");
+    expect(classifyText.split(REQUEST)).toHaveLength(2);
+    expect(r.thread.messages[0]?.content).toMatchObject({
+      source: "note",
+      parts: [
+        { type: "typed", text: "do this one\n" },
+        {
+          type: "pasted",
+          text: `[Image: Pasted image 1.png: A Teams chat where Dana asks for numbers.]\n${REQUEST}`,
+        },
+      ],
+    });
+    expect(r.thread.props.map((p) => p.kind)).toEqual(["create_issue"]);
+    expect(REQUEST).toContain(r.thread.props[0]?.evidence ?? "(none)");
+    expect(r.done?.status).toBe("executed");
+    // The note itself is unchanged: the link stays as written.
+    expect(r.page).toBe(r.body);
   });
 });

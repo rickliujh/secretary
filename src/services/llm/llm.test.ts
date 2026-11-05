@@ -11,7 +11,7 @@ import { makeSettingsTest } from "@/services/settings/test";
 import { promptOf, testProvider } from "@/test/helpers";
 import { Llm, type LlmError } from ".";
 import { LlmLive } from "./live";
-import { makeScriptedModels, type Scripted } from "./test";
+import { imagesOf, makeScriptedModels, type Scripted } from "./test";
 
 const allTiers: TierBindings = {
   fast: { providerId: "p1", model: "fast-m" },
@@ -95,6 +95,38 @@ describe("Llm.object", () => {
     ]);
     // The repair prompt carries the previous answer and the errors.
     expect(promptOf(models.calls, 1)).toContain("failed validation");
+  });
+
+  test("images go with the prompt in one user message, and again in the repair turn (D71)", async () => {
+    const { run, models } = setup({
+      "std-m": [{ text: "not json" }, { text: '{"target":"ABC-1","confidence":0.9}' }],
+    });
+    const png = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+    const result = await run(
+      Effect.flatMap(Llm, (llm) =>
+        llm.object("read_image", { ...request, images: [{ mediaType: "image/png", data: png }] }),
+      ),
+    );
+    expect(result.value.target).toBe("ABC-1");
+    expect(result.tier).toBe("standard");
+    expect(models.calls).toHaveLength(2);
+    for (const call of models.calls) {
+      const images = imagesOf(call);
+      expect(images).toHaveLength(1);
+      expect(images[0]?.mediaType).toBe("image/png");
+      expect([...(images[0]?.data ?? [])]).toEqual([...png]);
+    }
+    // The prompt is the text of that same first message.
+    const prompt = models.calls[0]?.prompt as { role: string; content: { type: string }[] }[];
+    const first = prompt[0];
+    expect(first?.content.map((p) => p.type)).toEqual(["text", "file"]);
+    expect(promptOf(models.calls, 1)).toContain("failed validation");
+  });
+
+  test("without images the call sends no file part", async () => {
+    const { run, models } = setup({ "std-m": [{ text: '{"target":"ABC-1","confidence":0.9}' }] });
+    await run(Effect.flatMap(Llm, (llm) => llm.object("classify_item", request)));
+    expect(imagesOf(models.calls[0])).toEqual([]);
   });
 
   test("out-of-candidate targets fail validation, then escalate to the stronger tier", async () => {

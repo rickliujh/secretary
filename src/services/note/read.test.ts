@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import {
   dailyNoteBlocks,
+  imageReads,
   inboxItems,
   intakeItems,
   jiraIssues,
@@ -15,17 +16,20 @@ import {
   workItemIssues,
   workItems,
 } from "@/db/schema";
+import { bytesToBase64 } from "@/lib/base64";
 import { localDate } from "@/lib/dates";
 import { nowIso } from "@/lib/ids";
-import type { Scripted } from "@/services/llm/test";
+import { imagesOf, type ModelCall, type Scripted } from "@/services/llm/test";
 import { setState } from "@/services/sync/state";
 import { promptOf, readThread } from "@/test/helpers";
 import { intakeTestLayer, out } from "@/test/intake-layer";
 import { syncOnce } from "@/test/seed";
 import { query } from "../db";
 import { DailyNote, type DailyNoteShape } from ".";
+import { NO_VISION } from "./image-reads";
 import { dayBefore, loadLastRead, saveBody } from "./queries";
 import { describeRead, readNote } from "./read";
+import { imageKey } from "./test";
 
 const home = {
   smallAsks: {
@@ -73,8 +77,12 @@ type Ctx = { note: DailyNoteShape; today: string };
 async function withNote<A>(
   scripts: Record<string, Scripted[]>,
   body: (c: Ctx) => Effect.Effect<A, unknown, unknown>,
+  /** Image files without a vault (the app's folder), by name (D71). */
+  images: Record<string, Uint8Array> = {},
 ) {
-  const { layer, models } = intakeTestLayer(scripts, [], { settings: home });
+  const { layer, models, noteFile } = intakeTestLayer(scripts, [], { settings: home });
+  for (const [name, data] of Object.entries(images))
+    noteFile.images.set(imageKey(null, name), { mime: "image/png", data: bytesToBase64(data) });
   const r = await Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
@@ -85,7 +93,7 @@ async function withNote<A>(
       layer,
     ),
   );
-  return { r, models };
+  return { r, models, noteFile };
 }
 
 const blocks = query((d) => d.select().from(dailyNoteBlocks).all());
@@ -790,6 +798,233 @@ describe("one conversation per topic (FR-20.6, D66)", () => {
         return yield* loadLastRead;
       }),
     );
-    expect(r).toMatchObject({ cards: 1, continued: 0 });
+    expect(r).toMatchObject({ cards: 1, continued: 0, waiting: 0, waitReason: null });
+  });
+});
+
+const png = (n: number) => new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, n]);
+const CHAT = "Dana (10:02): can you send me the Q3 numbers by Friday?";
+const transcript = (
+  text = CHAT,
+  description = "A Teams chat where Dana asks for the Q3 numbers.",
+) => out({ kind: "chat", text, description });
+const withImages = (calls: readonly ModelCall[]) => calls.filter((c) => imagesOf(c).length > 0);
+const reads = query((d) => d.select().from(imageReads).all());
+
+describe("images in the note are read (FR-20.10, D71)", () => {
+  test("a block with an image is transcribed once and read with the quote", async () => {
+    const { r, models } = await withNote(
+      {
+        "fast-m": [triage("act")],
+        "std-m": [
+          transcript(),
+          out(ask("Send Dana the Q3 numbers")),
+          out(ask("Send Dana the Q3 numbers today")),
+        ],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* note.save(today, "ask Dana about this\n![[chat.png]]\n");
+          const first = yield* note.read("button");
+          const again = yield* note.read("pass");
+          // An edit revises with the quote again; the file is not sent again.
+          yield* note.save(today, "ask Dana about this today\n![[chat.png]]\n");
+          const edited = yield* note.read("button");
+          const threads = yield* noteThreads;
+          return {
+            first,
+            again,
+            edited,
+            threads,
+            thread: yield* readThread(threads[0]?.id ?? ""),
+            rows: yield* blocks,
+            reads: yield* reads,
+          };
+        }),
+      { "chat.png": png(1) },
+    );
+    expect(r.first).toMatchObject({ cards: 1, waiting: 0, waitReason: null });
+    expect(r.again).toMatchObject({ cards: 0, called: false });
+    expect(r.edited).toMatchObject({ revised: 1 });
+    // One image call, with the file's bytes; nothing else carried an image.
+    const sent = withImages(models.calls);
+    expect(sent).toHaveLength(1);
+    expect([...(imagesOf(sent[0])[0]?.data ?? [])]).toEqual([...png(1)]);
+    expect(r.reads).toHaveLength(1);
+    expect(r.reads[0]).toMatchObject({
+      name: "chat.png",
+      kind: "chat",
+      text: CHAT,
+      model: "std-m",
+    });
+    // The triage reads the transcript as quoted, untrusted input under the user's words.
+    const triagePrompt = JSON.stringify(models.calls.find((c) => c.model === "fast-m")?.prompt);
+    expect(triagePrompt).toContain(
+      'ask Dana about this\\n<untrusted_input source=\\"quoted in the note\\">\\n[Image: chat.png: A Teams chat where Dana asks for the Q3 numbers.]\\nDana (10:02)',
+    );
+    expect(triagePrompt).not.toContain("![[chat.png]]");
+    // The thread: the user's words are the instruction, the transcript the pasted input.
+    expect(r.thread.messages[0]?.content).toMatchObject({
+      source: "note",
+      parts: [
+        { type: "typed", text: "ask Dana about this\n" },
+        {
+          type: "pasted",
+          text: `[Image: chat.png: A Teams chat where Dana asks for the Q3 numbers.]\n${CHAT}`,
+        },
+      ],
+    });
+    expect(r.thread.item?.rawText).toContain(CHAT);
+    const revision = userMessages(r.thread)[1] as { parts: { text: string }[] };
+    expect(revision.parts[1]?.text).toContain("[Image: chat.png:");
+    expect(revision.parts[1]?.text).toContain(CHAT);
+    // The note's text is recorded as written, link and all.
+    expect(r.rows.map((b) => [b.text, b.status]).sort()).toEqual([
+      ["ask Dana about this\n![[chat.png]]", "revised"],
+      ["ask Dana about this today\n![[chat.png]]", "acted"],
+    ]);
+  });
+
+  test("the same file in another block on a later day reuses the transcript", async () => {
+    const { r, models } = await withNote(
+      {
+        "fast-m": [triage("act"), triage("act")],
+        "std-m": [
+          transcript(),
+          out(ask("Send Dana the Q3 numbers")),
+          out(ask("Send Sam the Q3 numbers")),
+        ],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          const earlier = daysAgo(3);
+          yield* saveBody(localDate(earlier), "ask Dana about this\n![[chat.png]]\n");
+          yield* readNote("button", { now: earlier });
+          yield* note.save(today, "Sam wants this too\n![[copy.png]]\n");
+          const res = yield* note.read("button");
+          return { res, reads: yield* reads, threads: yield* noteThreads };
+        }),
+      { "chat.png": png(1), "copy.png": png(1) },
+    );
+    expect(r.res).toMatchObject({ cards: 1, waiting: 0 });
+    expect(r.threads).toHaveLength(2);
+    expect(withImages(models.calls)).toHaveLength(1);
+    expect(r.reads).toHaveLength(1);
+    const triages = models.calls.filter((c) => c.model === "fast-m");
+    expect(JSON.stringify(triages[1]?.prompt)).toContain(
+      "[Image: copy.png: A Teams chat where Dana asks for the Q3 numbers.]",
+    );
+  });
+
+  test("a model that refuses images: the block waits and says why; a pass does not send it again, Read now does", async () => {
+    const { r, models } = await withNote(
+      {
+        "fast-m": [triage("skip"), triage("act")],
+        "std-m": [
+          { status: 400, body: "This model does not support image input." },
+          transcript(),
+          out(ask("Send Dana the Q3 numbers")),
+        ],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* note.save(today, "ask Dana about this\n![[chat.png]]\n\nLunch with Mia\n");
+          const first = yield* note.read("button");
+          const rowsAfterFirst = yield* blocks;
+          // A work pass or a typing pause: the failure is not paid for again.
+          const pass = yield* note.read("pass");
+          const second = yield* note.read("button");
+          return { first, rowsAfterFirst, pass, second, last: yield* loadLastRead };
+        }),
+      { "chat.png": png(1) },
+    );
+    expect(r.first).toMatchObject({
+      cards: 0,
+      skippedBlocks: 1,
+      waiting: 1,
+      waitReason: NO_VISION,
+      error: null,
+    });
+    expect(describeRead(r.first, () => "9:00")).toBe(
+      "Read at 9:00: 1 left alone, 1 waits: the model for Read an image (Settings > Models) cannot read images; choose one that can.",
+    );
+    expect(r.pass).toMatchObject({ waiting: 1, waitReason: NO_VISION, called: false });
+    // Two image calls: the first reading and Read now; the pass sent nothing.
+    expect(withImages(models.calls)).toHaveLength(2);
+    // Only Lunch was sent to the triage and recorded; the image block waits.
+    expect(r.rowsAfterFirst.map((b) => b.text)).toEqual(["Lunch with Mia"]);
+    expect(JSON.stringify(models.calls[1]?.prompt)).not.toContain("ask Dana");
+    expect(r.second).toMatchObject({ cards: 1, waiting: 0 });
+    expect(r.last).toMatchObject({ cards: 1, waiting: 0, waitReason: null });
+  });
+
+  test("a missing image: the block waits with the file's name", async () => {
+    const { r, models } = await withNote({}, ({ note, today }) =>
+      Effect.gen(function* () {
+        yield* note.save(today, "look at ![[gone.png]]\n");
+        return { res: yield* note.read("button"), rows: yield* blocks };
+      }),
+    );
+    expect(r.res).toMatchObject({
+      waiting: 1,
+      waitReason: "image not found: gone.png",
+      called: false,
+    });
+    expect(describeRead(r.res, () => "9:00")).toBe(
+      "Read at 9:00: 1 waits: image not found: gone.png.",
+    );
+    expect(r.rows).toHaveLength(0);
+    expect(models.calls).toHaveLength(0);
+  });
+
+  test("caps: four images per block, eight new ones per reading, the rest wait", async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 11 }, (_, i) => [`i${i + 1}.png`, png(i + 1)]),
+    );
+    const links = (from: number, to: number) =>
+      Array.from({ length: to - from + 1 }, (_, i) => `![[i${from + i}.png]]`).join("\n");
+    const { r, models } = await withNote(
+      {
+        "fast-m": [triage("act", "act")],
+        "std-m": [
+          ...Array.from({ length: 8 }, (_, i) => transcript(`text ${i + 1}`, `Image ${i + 1}.`)),
+          out(ask("First")),
+          out(ask("Second")),
+        ],
+      },
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* note.save(
+            today,
+            `first\n${links(1, 5)}\n\nsecond\n${links(6, 10)}\n\nthird\n${links(11, 11)}\n`,
+          );
+          return { res: yield* note.read("button"), rows: yield* blocks };
+        }),
+      files,
+    );
+    expect(withImages(models.calls)).toHaveLength(8);
+    expect(r.res).toMatchObject({ cards: 2, left: 1, waiting: 0 });
+    expect(r.rows.map((b) => b.text.split("\n")[0]).sort()).toEqual(["first", "second"]);
+    const triagePrompt = JSON.stringify(models.calls.find((c) => c.model === "fast-m")?.prompt);
+    // The fifth image of a block stays a link.
+    expect(triagePrompt).toContain("[Image: i4.png: Image 4.]");
+    expect(triagePrompt).toContain("![[i5.png]]");
+    expect(triagePrompt).toContain("![[i10.png]]");
+    expect(describeRead(r.res, () => "9:00")).toBe("Read at 9:00: 2 cards, 1 for the next read.");
+  });
+
+  test("a private block loads no image and reaches no model", async () => {
+    const { r, models, noteFile } = await withNote(
+      {},
+      ({ note, today }) =>
+        Effect.gen(function* () {
+          yield* note.save(today, "## Private\nsalary letter\n![[secret.png]]\n");
+          return yield* note.read("button");
+        }),
+      { "secret.png": png(9) },
+    );
+    expect(r).toMatchObject({ privateBlocks: 1, waiting: 0, called: false });
+    expect(noteFile.loads).toEqual([]);
+    expect(models.calls).toHaveLength(0);
   });
 });

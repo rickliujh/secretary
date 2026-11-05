@@ -28,6 +28,12 @@
  *    it; act: `Intake.triage` with source "note". Context: a `note` event on
  *    the item, as the user's words. Skip: recorded.
  *
+ * A block that goes to a model (5 and 6) has its images read first (D71,
+ * `image-reads.ts`): each image link becomes quoted lines holding the
+ * transcript, for the model only; the recorded text keeps the link. A block
+ * whose images cannot be loaded or read now is not sent and not recorded, so
+ * the next reading tries again; `waiting` counts it and the page says why.
+ *
  * Continuing a thread is `Intake.reply` with `asInput`: the block is a new
  * item of the thread, which sees its earlier items, decisions and created
  * tickets. No new blocks, no model call. Nothing here calls `JiraClient`; the
@@ -68,6 +74,7 @@ import { addNote } from "@/services/work/queries";
 import { parseState } from "@/services/work/schema";
 import type { ReadResult, ReadTrigger } from ".";
 import { type NoteBlock, similarity, splitBlocks } from "./blocks";
+import { imageVault, prepareBlock, readingBudget } from "./image-reads";
 import {
   type BlockRow,
   blockRows,
@@ -99,6 +106,8 @@ const emptyResult = (trigger: ReadTrigger, at: string): ReadResult => ({
   skippedBlocks: 0,
   privateBlocks: 0,
   left: 0,
+  waiting: 0,
+  waitReason: null,
   called: false,
   error: null,
 });
@@ -317,7 +326,16 @@ const threadOf = (rawSince: string) =>
   );
 
 type NoteIntake = Intake["Type"];
-type Placed = { date: string; block: NoteBlock; today: string };
+type Placed = {
+  date: string;
+  block: NoteBlock;
+  today: string;
+  /** The block as the model reads it, its images quoted (D71); else its text. */
+  modelText?: string;
+};
+
+/** What the model is sent for a placed block: its images as quotes (D71). */
+const modelTextOf = (p: Placed) => p.modelText ?? p.block.text;
 
 /**
  * A block that continues an earlier thread (D66): a new item of it
@@ -330,7 +348,7 @@ export const continueThread = (intake: NoteIntake, inboxItemId: string, p: Place
       intake.reply({
         inboxItemId,
         asInput: true,
-        parts: noteParts(p.block.text),
+        parts: noteParts(modelTextOf(p)),
         noteDate: p.date,
         today: p.today,
       }),
@@ -355,7 +373,7 @@ export const reviseThread = (
         inboxItemId: old.inboxItemId,
         parts: [
           { type: "typed", text: "The note now says: " },
-          { type: "pasted", text: oneLine(p.block.text) },
+          { type: "pasted", text: oneLine(modelTextOf(p)) },
         ],
         today: p.today,
       }),
@@ -378,7 +396,7 @@ export const startThread = (intake: NoteIntake, p: Placed, opts: { orphan?: bool
     const r = yield* Effect.either(
       intake.triage({
         source: "note",
-        parts: noteParts(p.block.text),
+        parts: noteParts(modelTextOf(p)),
         senderPersonId: null,
         noteDate: p.date,
         today: p.today,
@@ -440,6 +458,21 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
     if (!cfg.enabled) return { ...result, skipped: "disabled" } satisfies ReadResult;
     const intake = yield* Intake;
     const llm = yield* Llm;
+    // The note's images are read for the blocks that go to a model (D71).
+    const vault = yield* imageVault;
+    // A failed transcription is sent again only by Read now (or six hours on).
+    const budget = readingBudget(trigger === "button");
+    /** The block's texts for the models, or null when its images wait (counted). */
+    const forModel = (block: NoteBlock) =>
+      Effect.map(prepareBlock(vault, block.text, budget), (p) => {
+        if (p.status === "ready") return { text: p.text, triageText: p.triageText };
+        if (p.reason === "cap") result.left++;
+        else {
+          result.waiting++;
+          result.waitReason ??= p.message;
+        }
+        return null;
+      });
 
     // Yesterday too, so lines written just before midnight are not lost.
     const dates = [dayBefore(today), today];
@@ -512,10 +545,14 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
         const old = changedFrom(block, gone, used, pendingIn);
         if (old?.inboxItemId) {
           used.add(old.id);
+          // Its images wait: nothing is recorded, the next reading revises (D71).
+          const prepared = yield* forModel(block);
+          if (prepared === null) continue;
+          const modelText = prepared.text;
           const r = yield* reviseThread(
             intake,
             { id: old.id, inboxItemId: old.inboxItemId },
-            { date, block, today },
+            { date, block, today, modelText },
           );
           // A failed turn records nothing: the next reading tries the revision again.
           if (Either.isLeft(r)) logger.warn("Revising a note thread failed", r.left);
@@ -529,8 +566,15 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
       }
     }
 
-    const batch = fresh.slice(0, NOTE_TRIAGE_MAX_BLOCKS);
-    result.left = fresh.length - batch.length;
+    const taken = fresh.slice(0, NOTE_TRIAGE_MAX_BLOCKS);
+    result.left += fresh.length - taken.length;
+    // Blocks whose images wait are not sent, and nothing is recorded (D71).
+    const batch: (Fresh & { modelText: string; triageText: string })[] = [];
+    for (const f of taken) {
+      const prepared = yield* forModel(f.block);
+      if (prepared !== null)
+        batch.push({ ...f, modelText: prepared.text, triageText: prepared.triageText });
+    }
     /** The copies of blocks read in this reading take what their first was recorded as. */
     const followTwins = Effect.gen(function* () {
       if (!twins.length) return;
@@ -560,7 +604,8 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
         schema: buildNoteTriageSchema(batch.length, ids, threadIds) as never,
         ...buildNoteTriagePrompt({
           blocks: batch.map((f) => ({
-            text: f.block.text,
+            // Each image's transcript clipped, so the user's words fit (D71).
+            text: f.triageText,
             section: f.block.section,
             date: f.date,
           })),
@@ -588,7 +633,7 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
       if (!f) continue;
       // A named ticket's thread wins; else the model's, from the listed ones.
       const thread = decision.kind === "act" ? (f.named ?? decision.threadId) : null;
-      const placed = { date: f.date, block: f.block, today };
+      const placed = { date: f.date, block: f.block, today, modelText: f.modelText };
       if (thread) {
         // A failed turn records nothing, so the next reading tries again.
         const r = yield* continueThread(intake, thread, placed);
@@ -600,6 +645,7 @@ export const readNote = (trigger: ReadTrigger, opts: { now?: Date } = {}) =>
         if (error) logger.warn("Reading a note block failed", error);
         result.cards++;
       } else if (decision.kind === "context") {
+        // The user's words as written: a transcript is someone else's (D71).
         yield* addNote(decision.itemId, f.block.text);
         yield* recordBlock(f.date, f.block, "context", { workItemId: decision.itemId });
         result.notes.push(names.get(decision.itemId) ?? decision.itemId);
@@ -633,6 +679,7 @@ export function describeRead(r: ReadResult, time: (iso: string) => string): stri
   if (r.skippedBlocks) parts.push(`${r.skippedBlocks} left alone`);
   if (r.privateBlocks) parts.push(`${r.privateBlocks} private`);
   if (r.left) parts.push(`${r.left} for the next read`);
+  if (r.waiting) parts.push(`${r.waiting} ${r.waiting === 1 ? "waits" : "wait"}: ${r.waitReason}`);
   const head = `Read at ${time(r.at)}`;
   if (r.error) return `${head}: could not read the new blocks (${r.error}).`;
   return parts.length ? `${head}: ${parts.join(", ")}.` : `${head}: nothing new.`;

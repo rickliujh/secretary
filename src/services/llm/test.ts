@@ -112,3 +112,25 @@ export function makeScriptedModels(scripts: Record<string, Scripted[]>) {
     });
   return { layer: Layer.succeed(ModelFactory, { make }), calls, remaining: () => queues };
 }
+
+/**
+ * The images a recorded call sent (D71): each file part of its user messages,
+ * with its type and bytes, so tests can assert what a model was shown.
+ */
+export function imagesOf(
+  call: ModelCall | undefined,
+): { mediaType: string; data: Uint8Array | null }[] {
+  const prompt = (call?.prompt ?? []) as { role: string; content: unknown }[];
+  // The provider prompt holds a file part's bytes as `{ type: "data", data }`.
+  const bytes = (d: unknown) => {
+    const inner = d && typeof d === "object" && "data" in d ? (d as { data: unknown }).data : d;
+    return inner instanceof Uint8Array ? inner : null;
+  };
+  return prompt.flatMap((m) =>
+    m.role === "user" && Array.isArray(m.content)
+      ? (m.content as { type: string; mediaType?: string; data?: unknown }[])
+          .filter((p) => p.type === "file")
+          .map((p) => ({ mediaType: p.mediaType ?? "", data: bytes(p.data) }))
+      : [],
+  );
+}

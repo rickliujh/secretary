@@ -50,7 +50,8 @@ export function intakeTestLayer(
   const layer = Layer.provideMerge(
     Layer.mergeAll(CommsLive, LearningLive, ChatLive, PlanningLive, ReportsLive),
     Layer.provideMerge(
-      Layer.provideMerge(DailyNoteLive.pipe(Layer.provide(noteFile.layer)), IntakeLive),
+      // NoteFile is in the output too: the reading loads the note's images (D71).
+      Layer.provideMerge(DailyNoteLive, Layer.merge(IntakeLive, noteFile.layer)),
       Layer.provideMerge(
         Layer.merge(
           RetrievalLive,

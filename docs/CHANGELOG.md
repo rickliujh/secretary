@@ -12,11 +12,29 @@
   pasted-image name and link format settings; without one, in the app's data
   folder. New Rust commands `note_image_save` (the image file is the only new
   write: created new, only inside the vault or the app's folder) and
-  `note_image_load` (never starts Obsidian; capped at 20 MB). Images are never
-  sent to a model. Link targets are checked on their text before any file is
+  `note_image_load` (never starts Obsidian; capped at 20 MB). Images are not
+  sent to a model (Phase 35 reads them). Link targets are checked on their text before any file is
   touched. The main window turns Tauri's own file drop off
   (`dragDropEnabled: false`) so files dropped from the OS reach the editor.
   No migration, no setting.
+- Phase 35, images in the note are read (FR-20.10, D71): every image the
+  note links to outside the private heading (a screenshot, a photo, a link
+  inside code too) is sent to a model when its block is read: loaded (never
+  starting Obsidian) and transcribed once by a new `read_image` task (standard
+  tier by default, no escalation; a narrow schema of kind, text and
+  description; the image is someone else's content). The transcript is kept
+  by the file's sha-256 in `image_reads` (migrations 0022 and 0023), so the
+  same file is never sent twice; a failed transcription is sent again only by
+  Read now, Ask or after six hours. Images go with the type their bytes say
+  (a bmp is re-encoded to JPEG). For the model only, each image
+  link becomes quoted lines (`> [Image: name: description]` and the
+  transcript), so the block reads as the user's words over a pasted,
+  untrusted input; the note and the recorded block keep the link. At most 4
+  images per block and 8 new ones per reading. A block whose image cannot be
+  loaded or read now waits for the next reading, and the page says why ("1
+  waits: Obsidian is not running"). Private blocks load nothing. `Llm.object`
+  takes images; `prepareImage` moved from the chat to `services/llm/images.ts`.
+  A live smoke test transcribes a chat screenshot fixture.
 
 ## v0.2.0 (2026-11-03)
 

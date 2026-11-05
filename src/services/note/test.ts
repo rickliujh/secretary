@@ -23,6 +23,8 @@ export function makeNoteFileTest(initial: Record<string, string | null> = {}) {
   const writes: { vault: string; text: string; expected: string | null }[] = [];
   /** Each call's `launch`, in order. */
   const launches: boolean[] = [];
+  /** Each `loadImage` call's link, in order (D71: a private block loads none). */
+  const loads: string[] = [];
   const state: {
     /** Every call fails, as an Obsidian that does not answer. */
     down: boolean;
@@ -78,9 +80,10 @@ export function makeNoteFileTest(initial: Record<string, string | null> = {}) {
       return vault === null ? Effect.sync(saved) : Effect.map(check(vault, true), saved);
     },
     loadImage: (vault, link) => {
+      loads.push(link);
       const found = () => images.get(imageKey(vault, link)) ?? null;
       return vault === null ? Effect.sync(found) : Effect.map(check(vault, false), found);
     },
   });
-  return { layer, files, writes, state, launches, images };
+  return { layer, files, writes, state, launches, images, loads };
 }

@@ -2,6 +2,7 @@ import type { LanguageModel, ModelMessage, PrepareStepFunction, ToolSet, UIMessa
 import { Context, type Effect } from "effect";
 import type { z } from "zod";
 import type { LlmError } from "./errors";
+import type { ModelImage } from "./images";
 import type { ModelRequest } from "./providers";
 import type { TaskRoute } from "./routing";
 import type { TaskType, Tier } from "./tasks";
@@ -24,6 +25,11 @@ export type ObjectRequest<T> = {
   schema: z.ZodType<T>;
   system?: string;
   prompt: string;
+  /**
+   * Images sent after the prompt in the same user message (D71); the repair
+   * turn keeps that first message. Shrink them first (`prepareImage`).
+   */
+  images?: readonly ModelImage[];
   /** Business-rule checks in code (candidate membership etc). Return error strings. */
   validate?: (value: T) => readonly string[];
   /** Confidence reported by the output, 0..1, compared with the task threshold. */

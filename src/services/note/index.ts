@@ -129,6 +129,12 @@ export type ReadResult = {
   privateBlocks: number;
   /** New blocks over the cap, for the next read. */
   left: number;
+  /**
+   * New blocks whose images could not be loaded or read now (D71): not
+   * recorded, read at the next reading; `waitReason` is the first one's why.
+   */
+  waiting: number;
+  waitReason: string | null;
   /** Whether the model was asked. */
   called: boolean;
   /** Why the reading stopped short, when it did. */
