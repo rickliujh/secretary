@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { imageLinks, insertImageLink } from "./images";
+import { blockForModel, blockImageLinks, imageLinks, insertImageLink } from "./images";
 
 const targets = (line: string) => imageLinks(line).map((l) => l.target);
 
@@ -89,5 +89,64 @@ describe("insertImageLink (D70)", () => {
     const first = apply("note: ", 6, "![[a.png]]");
     const second = apply(first.text, first.cursor, "![[b.png]]");
     expect(second.text).toBe("note: \n![[a.png]]\n![[b.png]]\n");
+  });
+});
+
+describe("a block as the model reads it (D71)", () => {
+  const reads = new Map([
+    [
+      "chat.png",
+      {
+        description: "A Teams chat where Dana asks for the Q3 numbers.",
+        text: "Dana (10:02): can you send me the Q3 numbers?\n\nSam (10:05): by Friday",
+      },
+    ],
+    ["board.png", { description: "A photo of a whiteboard with no text.", text: "" }],
+  ]);
+
+  test("a link alone on its line becomes the quote, the user's words stay as they are", () => {
+    expect(blockForModel("ask Dana about this\n![[chat.png]]", reads)).toBe(
+      [
+        "ask Dana about this",
+        "> [Image: chat.png: A Teams chat where Dana asks for the Q3 numbers.]",
+        "> Dana (10:02): can you send me the Q3 numbers?",
+        ">",
+        "> Sam (10:05): by Friday",
+      ].join("\n"),
+    );
+  });
+
+  test("a link inside a line with words: the words stay, the quote follows", () => {
+    expect(blockForModel("- [ ] answer ![](chat.png) today", reads)).toBe(
+      [
+        "- [ ] answer today",
+        "> [Image: chat.png: A Teams chat where Dana asks for the Q3 numbers.]",
+        "> Dana (10:02): can you send me the Q3 numbers?",
+        ">",
+        "> Sam (10:05): by Friday",
+      ].join("\n"),
+    );
+  });
+
+  test("two links: two quotes in order; a link without a transcript stays a link", () => {
+    expect(blockForModel("![[board.png]] ![[chat.png|300]] ![[other.png]]", reads)).toBe(
+      [
+        "![[other.png]]",
+        "> [Image: board.png: A photo of a whiteboard with no text.]",
+        "> [Image: chat.png: A Teams chat where Dana asks for the Q3 numbers.]",
+        "> Dana (10:02): can you send me the Q3 numbers?",
+        ">",
+        "> Sam (10:05): by Friday",
+      ].join("\n"),
+    );
+    expect(blockForModel("- ![[board.png]]", reads)).toBe(
+      "> [Image: board.png: A photo of a whiteboard with no text.]",
+    );
+  });
+
+  test("without transcripts the text is unchanged; the links of a block in order", () => {
+    const text = "see ![[b.png]]\n![a](a%20b.jpg) and ![[c.gif]]";
+    expect(blockForModel(text, new Map())).toBe(text);
+    expect(blockImageLinks(text).map((l) => l.target)).toEqual(["b.png", "a b.jpg", "c.gif"]);
   });
 });

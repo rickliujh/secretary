@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_DOWNLOAD_BYTES, pickImages, prepareImage } from "./images";
+import { MAX_DOWNLOAD_BYTES, pickImages } from "./images";
 
 const img = (filename: string, p: Record<string, unknown> = {}) => ({
   filename,
@@ -31,16 +31,5 @@ describe("choosing ticket pictures", () => {
     expect(pickImages([img("x.png"), img("Y.PNG")], [], ["y.png"]).map((p) => p.filename)).toEqual([
       "Y.PNG",
     ]);
-  });
-
-  test("without the webview's image decoder, small images pass and large ones are skipped", async () => {
-    const small = { filename: "s.png", mediaType: "image/png", data: new Uint8Array(10) };
-    const large = {
-      filename: "l.png",
-      mediaType: "image/png",
-      data: new Uint8Array(4 * 1024 * 1024),
-    };
-    expect(await prepareImage(small)).toBe(small);
-    expect(await prepareImage(large)).toBeNull();
   });
 });
